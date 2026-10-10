@@ -489,6 +489,18 @@ redoBtn.onclick = () => ink.redo();
 // Apple Pencil's own double-tap (on its barrel) is only given to native apps, never to web pages.
 const toggleEraser = () => choose('tool', tool === 'eraser' ? beforeEraser : 'eraser');
 
+// The iPad app (ios/) passes on what a web page is never told: a double-tap or a squeeze on the
+// Apple Pencil itself. It arrives as a 'pencil' event on the window; in a browser it never fires.
+addEventListener('pencil', e => {
+  if (!current) return;
+  if (e.detail === 'tap') toggleEraser();
+  else if (e.detail === 'squeeze') ink.undo();
+  else return;
+  // ponytail: a note on screen for each gesture, so the first builds show whether the Pencil's
+  // signal arrives at all. Remove once that is confirmed on the device.
+  notify(e.detail === 'tap' ? `Pencil double-tap: ${tool}` : 'Pencil squeeze: undo');
+});
+
 // A toolbar button that switches an option on and off and remembers it on this device.
 // Returns a function that reads the current state.
 function option(btn, key, apply = () => {}) {

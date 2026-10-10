@@ -1,0 +1,77 @@
+# Builds the iPad app on a cloud Mac and publishes it as a release, so it can be downloaded on the
+# iPad and installed with AltStore. Nothing here needs a Mac of our own.
+#
+# The app is built UNSIGNED: AltStore signs it with the owner's Apple account when it installs it.
+name: iPad app
+
+on:
+  workflow_dispatch: # run by hand, to ship the web app as it now stands
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+
+permissions:
+  contents: write # to publish the release
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools on this machine
+        run: |
+          sw_vers -productVersion
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen --version
+
+      # The app carries the web app inside it: exactly the files the website serves.
+      - name: Put the web app inside the iOS project
+        run: |
+          mkdir -p ios/web
+          cp index.html style.css app.js ink.js icon.svg apple-touch-icon.png ios/web/
+          ls -l ios/web
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project EngiNote.xcodeproj -scheme EngiNote -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            -quiet build
+
+      - name: Package the .ipa
+        working-directory: ios
+        run: |
+          app=build/Build/Products/Release-iphoneos/EngiNote.app
+          echo "--- in the app:"; ls "$app" "$app/web"
+          echo "--- identity:"; /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleVersion' -c 'Print :MinimumOSVersion' "$app/Info.plist"
+          mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry EngiNote.ipa Payload
+          ls -l EngiNote.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EngiNote-ipa
+          path: ios/EngiNote.ipa
+
+      # A release gives a plain download link that works in Safari on the iPad:
+      # https://github.com/<owner>/<repo>/releases/latest/download/EngiNote.ipa
+      - name: Publish as the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" ios/EngiNote.ipa \
+            --title "EngiNote for iPad, build ${{ github.run_number }}" \
+            --notes "Unsigned build of commit ${{ github.sha }}. Install with AltStore: open this .ipa from AltStore's My Apps tab (the + button)." \
+            --latest

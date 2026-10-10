@@ -1,0 +1,53 @@
+# The iPad app: a native shell around the web app in the repository root.
+# XcodeGen turns this file into EngiNote.xcodeproj on the build machine (.github/workflows/ios.yml);
+# the Xcode project itself is never committed.
+
+name: EngiNote
+
+options:
+  deploymentTarget:
+    iOS: "17.5" # the first version that reports Apple Pencil squeeze
+
+targets:
+  EngiNote:
+    type: application
+    platform: iOS
+    scheme: {} # a shared scheme, so xcodebuild can be told to build "EngiNote" from the command line
+    sources:
+      - path: App
+      # The web app, copied here by the workflow, bundled as a folder named "web".
+      - path: web
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        # The app's identity. iPadOS keeps an app's saved notes through an update only while this
+        # stays the same, so NEVER change it. (The same goes for the address in WebFiles.swift.)
+        PRODUCT_BUNDLE_IDENTIFIER: com.engikode.enginote
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: App/Info.plist # written by XcodeGen from the properties below
+      properties:
+        CFBundleDisplayName: EngiNote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {} # a plain launch screen; without one iPadOS runs the app letterboxed
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: true
+        ITSAppUsesNonExemptEncryption: false
