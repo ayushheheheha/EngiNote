@@ -971,8 +971,12 @@ if (shellRecorder) {
 
   // The bar changes shape: put away it is a dot in the corner, and its buttons come and go with the
   // recording. morph() makes any such change one movement. The change itself is made at once; the
-  // bar is then shown growing (or shrinking) from the shape and place it had to the ones it now
-  // has, its left end travelling straight from where it was to where it belongs.
+  // bar is then shown going from the place and width it had to the ones it now has.
+  //
+  // Only `left` and `width` move, as plain lengths, and the bar is placed without any transform
+  // (style.css). An earlier version centred the bar with a transform and moved it with another
+  // property on top: on the iPad the centring was dropped for as long as the movement ran, so the
+  // bar opened half its width too far right and then jumped back.
   let moving = null;
   const still = matchMedia('(prefers-reduced-motion: reduce)');
   function morph(change) {
@@ -982,21 +986,16 @@ if (shellRecorder) {
     change();
     const to = recBar.getBoundingClientRect();
     if (!from.width || !to.width || still.matches || (from.width === to.width && from.left === to.left)) return;
-    // Put away, the bar hangs from its left edge; otherwise it is centred, by a transform that
-    // follows its width. Either way the extra shift below is what brings the left edge from its old
-    // place to its new one in a straight run, while the width goes from old to new.
-    const centred = !recBar.classList.contains('min');
-    const shift = centred ? from.left - (to.left + to.width / 2 - from.width / 2) : from.left - to.left;
-    recBar.classList.add('moving'); // style.css: nothing spills, and on the way to the corner the buttons stay until it is there
-    moving = recBar.animate(
-      [{ width: `${from.width}px`, translate: `${shift}px ${from.top - to.top}px` }, { width: `${to.width}px`, translate: '0px 0px' }],
-      { duration: 480, easing: 'cubic-bezier(.3, 1.12, .36, 1)' }, // quick off the mark, a touch past, and settle
+    recBar.classList.add('moving'); // style.css: it is where and as wide as the movement says; nothing spills; on the way to the corner the buttons stay until it is there
+    const mine = moving = recBar.animate(
+      [{ left: `${from.left}px`, width: `${from.width}px` }, { left: `${to.left}px`, width: `${to.width}px` }],
+      { duration: 480, easing: 'cubic-bezier(.3, 1.12, .36, 1)', fill: 'forwards' }, // quick off the mark, a touch past, and settle
     );
-    const mine = moving;
-    mine.onfinish = mine.oncancel = () => {
-      if (moving !== mine) return;
-      moving = null;
+    // It ends on the very place the stylesheet then gives it, so letting go of it shows nothing.
+    mine.onfinish = () => {
       recBar.classList.remove('moving');
+      mine.cancel();
+      if (moving === mine) moving = null;
     };
   }
 

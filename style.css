@@ -98,17 +98,19 @@ body {
 }
 /* Panes that come and go (menus, the pen's settings, messages) grow out of where they hang and
    fade, rather than blinking. Where a browser cannot ease something on its way to `display: none`,
-   they simply blink as before. */
-.flyout, #pen-panel, #message { transition: opacity .16s ease, scale .26s cubic-bezier(.3, 1.35, .5, 1), translate .26s cubic-bezier(.3, 1.35, .5, 1); }
+   they simply blink as before.
+   They are placed with `transform` (--at, set where each is placed) and grow with the same
+   `transform`: on the iPad, a second property moving an element drops its `transform` meanwhile. */
+.flyout, #pen-panel, #message { transform: var(--at, translate(0)) scale(1); transition: opacity .16s ease, transform .26s cubic-bezier(.3, 1.35, .5, 1); }
 @supports (transition-behavior: allow-discrete) {
-  .flyout, #pen-panel, #message { transition: opacity .16s ease, scale .26s cubic-bezier(.3, 1.35, .5, 1), translate .26s cubic-bezier(.3, 1.35, .5, 1), display .2s allow-discrete; }
+  .flyout, #pen-panel, #message { transition: opacity .16s ease, transform .26s cubic-bezier(.3, 1.35, .5, 1), display .2s allow-discrete; }
 }
 .flyout, #pen-panel { transform-origin: 50% 0; }
-.tool-wrap:not(.open) .flyout, #pen-panel[hidden] { opacity: 0; scale: .92; }
-#message[hidden] { opacity: 0; translate: 0 10px; }
+.tool-wrap:not(.open) .flyout, #pen-panel[hidden] { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
+#message[hidden] { opacity: 0; transform: var(--at, translate(0)) translateY(10px); }
 @starting-style {
-  .tool-wrap.open .flyout, #pen-panel:not([hidden]) { opacity: 0; scale: .92; }
-  #message:not([hidden]) { opacity: 0; translate: 0 10px; }
+  .tool-wrap.open .flyout, #pen-panel:not([hidden]) { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
+  #message:not([hidden]) { opacity: 0; transform: var(--at, translate(0)) translateY(10px); }
 }
 
 /* Panes with something to read on them are thicker. */
@@ -341,7 +343,7 @@ body.in-videos #import-btn { display: none; }
   position: absolute;
   top: calc(100% + 10px);
   left: 50%;
-  transform: translateX(-50%);
+  --at: translateX(-50%);
   z-index: 5;
   align-items: center;
   gap: 8px;
@@ -626,7 +628,7 @@ body.full #toolbar .pen.new { animation-name: pen-in-rail; }
    is one row; the button grows along a column to fill it (WebKit does not stretch a button across a flex row). */
 body.full #toolbar .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
 body.full #toolbar .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
-body.full #toolbar .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: translateY(-50%); transform-origin: 100% 50%; }
+body.full #toolbar .flyout { top: 50%; left: auto; right: calc(100% + 12px); --at: translateY(-50%); transform-origin: 100% 50%; }
 
 /* Buttons that only belong in the rail. */
 body:not(.full) .rail-only { display: none; }
@@ -639,10 +641,15 @@ body:not(.full) .rail-only { display: none; }
 #rec-bar {
   display: none;
   position: fixed;
-  left: 50%;
+  /* In the middle, by its margins, and as wide as what is in it: no transform has a hand in where
+     it is (see morph in app.js for why). */
+  left: 0;
+  right: 0;
   bottom: 14px;
+  margin: 0 auto;
+  width: -webkit-fit-content;
+  width: fit-content;
   z-index: 8;
-  transform: translateX(-50%);
   flex-wrap: nowrap;
   gap: 6px;
   padding: 4px 5px;
@@ -658,8 +665,8 @@ body.recording #rec-bar { display: flex; }
 /* Under the 16:9 window, in the middle of the black band there: the video is that window and nothing
    else, so the bar is never in it. (The band is half of what the window leaves of the page's height.) */
 body.wide.editing #rec-bar {
-  bottom: calc((100cqh - min(100cqh, 100cqw * 9 / 16)) / 4);
-  transform: translate(-50%, 50%);
+  /* the middle of the band, less half the bar's own height (a button and the padding round it) */
+  bottom: calc((100cqh - min(100cqh, 100cqw * 9 / 16)) / 4 - (var(--hit) + 8px) / 2);
 }
 
 /* Not there: Pause and the clock when nothing is recording; the settings while something is (they
@@ -669,12 +676,11 @@ body.recording #rec-mic, body.recording #rec-enhance, body.recording #rec-qualit
 /* Put away: in the corner, hanging from its left edge; in the 16:9 view that corner is still in the
    black band. Only its left end is there. (While it is still on its way, .moving, the rest stays to
    be closed over.) */
-#rec-bar.min { left: 14px; transform: none; }
-body.wide.editing #rec-bar.min { transform: translateY(50%); }
+#rec-bar.min { left: 14px; right: auto; margin: 0; }
 #rec-bar.min:not(.moving) > :not(#rec-min, #rec-time) { display: none; }
-/* On the move: the bar is as wide as app.js says, and what does not fit yet is out of sight. What
-   is coming into view fades in; what is being closed over fades out. */
-#rec-bar.moving { overflow: hidden; }
+/* On the move: the bar is where, and as wide as, app.js says, and what does not fit yet is out of
+   sight. What is coming into view fades in; what is being closed over fades out. */
+#rec-bar.moving { right: auto; margin: 0; overflow: hidden; }
 #rec-bar.moving > :not(#rec-min, #rec-time) { animation: rec-part .34s ease both; }
 #rec-bar.moving.min > :not(#rec-min, #rec-time) { animation: rec-part .22s ease reverse both; pointer-events: none; }
 @keyframes rec-part {
@@ -726,7 +732,7 @@ body.recording:not(.paused) #rec-bar.min #rec-min .rec-dot { animation: rec-beat
   left: 50%;
   bottom: 24px;
   z-index: 10;
-  transform: translateX(-50%);
+  --at: translateX(-50%);
   max-width: calc(100% - 32px);
   margin: 0;
   padding: 11px 18px;
