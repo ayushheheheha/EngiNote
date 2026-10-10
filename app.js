@@ -1,4 +1,4 @@
-import { createInk } from './ink.js';
+import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -70,6 +70,7 @@ const plural = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : 'Empty');
 
 async function showLibrary() {
   document.body.classList.remove('editing');
+  previews.disconnect(); // the cards are about to be made afresh
   document.body.classList.toggle('in-videos', inVideos);
   folderName.readOnly = inVideos;
   if (inVideos) return showVideos();
@@ -179,11 +180,76 @@ function makeVideoCard(video) {
   return card;
 }
 
+/* A card shows the top of its note, ink and all, rather than a blank sheet. The picture is the
+   note itself, in a frame of its own with scripts off, as wide as the editor lays it out
+   (PAGE_WIDTH) and shrunk to the card (--thumb-scale, style.css), with the strokes drawn over it.
+   A note is only loaded into its card when the card comes near the screen.
+   ponytail: each picture is a live document. If a library of hundreds ever drags, keep a small
+   drawn picture with each note instead, made when the note is closed. */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const PREVIEW_STROKES = 400; // more than can be told apart at this size
+const previewOf = new WeakMap(); // the card's picture frame -> its note
+const previews = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    previews.unobserve(entry.target);
+    fillPreview(entry.target, previewOf.get(entry.target));
+  }
+}, { rootMargin: '300px' });
+
+function fillPreview(box, doc) {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('sandbox', ''); // an imported file is not trusted: no scripts, no access to anything
+  frame.setAttribute('scrolling', 'no');
+  frame.tabIndex = -1;
+  frame.title = '';
+  frame.onload = () => box.classList.add('ready');
+  frame.srcdoc = doc.html;
+
+  // The ink: only strokes that begin in the part of the note the card shows, drawn plainly
+  // (a glow stroke without its halo). The viewBox is a square as wide as the page, cut to the card
+  // from its top left corner, so it lines up with the frame at any card size.
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${PAGE_WIDTH} ${PAGE_WIDTH}`);
+  svg.setAttribute('preserveAspectRatio', 'xMinYMin slice');
+  const seen = (Array.isArray(doc.strokes) ? doc.strokes : []).filter(s => s?.points?.[0]?.[1] < PAGE_WIDTH).slice(0, PREVIEW_STROKES);
+  for (const s of seen) {
+    try { // a stroke that cannot be drawn (a note from a damaged backup) is left out, not fatal
+      const path = document.createElementNS(SVG_NS, 'path');
+      const outline = s.tool === 'flow' || s.points[0].length > 2;
+      path.setAttribute('d', strokeData(s));
+      path.setAttribute('fill', outline ? s.color : 'none');
+      if (!outline) {
+        path.setAttribute('stroke', s.color);
+        path.setAttribute('stroke-width', strokeWidth(s));
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+      }
+      path.setAttribute('opacity', opacityOf(s));
+      svg.appendChild(path);
+    } catch { /* skip it */ }
+  }
+  box.replaceChildren(frame, svg);
+}
+
+// Every card is the same width: one number scales all the pictures. The grid's cards change width with the window.
+new ResizeObserver(() => {
+  const box = grid.querySelector('.card-preview');
+  if (box?.clientWidth) grid.style.setProperty('--thumb-scale', box.clientWidth / PAGE_WIDTH);
+}).observe(grid);
+
 function makeCard(doc, folders) {
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
   const open = card.querySelector('.card-open');
   open.title = doc.name;
   open.onclick = () => openDoc(doc.id);
+  const picture = document.createElement('div');
+  picture.className = 'card-preview';
+  previewOf.set(picture, doc);
+  previews.observe(picture);
+  card.querySelector('.card-thumb').append(picture); // over the blank sheet; a tap on it goes through to the card
+  card.classList.add('pictured');
   card.querySelector('.card-name').textContent = doc.name;
   card.querySelector('.card-date').textContent =
     new Date(doc.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
