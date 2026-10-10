@@ -181,7 +181,8 @@ addEventListener('resize', refit);
 $('zoom-out').onclick = () => setZoom(zoom / 1.25);
 $('zoom-in').onclick = () => setZoom(zoom * 1.25);
 $('zoom-label').onclick = () => setZoom(1);
-$('zoom-fit').onclick = () => setZoom(fitZoom());
+// Two fit buttons: one in the zoom strip, one in the full-screen rail.
+for (const btn of document.querySelectorAll('.fit-btn')) btn.onclick = () => setZoom(fitZoom());
 
 // Inside the iframe 1vh is 1% of the iframe's own height, and we stretch the iframe to the full
 // content height, so a `min-height: 100vh` cover would swallow the whole sheet. Rewrite height-based
@@ -364,7 +365,7 @@ document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) setFull(false);
 });
 
-// 16:9: show the note in the largest 16:9 window that fits (see body.wide in style.css).
+// 16:9: show the whole editor, tools included, in the largest 16:9 window that fits (body.wide in style.css).
 const wideBtn = $('wide-btn');
 wideBtn.onclick = () => {
   wideBtn.setAttribute('aria-pressed', document.body.classList.toggle('wide'));

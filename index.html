@@ -96,11 +96,16 @@
           </button>
         </div>
         <span class="sep"></span>
-        <button id="full-btn" class="icon-btn" type="button" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
-        </button>
-        <button id="wide-btn" class="icon-btn chip" type="button" aria-pressed="false"
-          title="Show the note in a 16:9 window" aria-label="16 by 9 note window">16:9</button>
+        <div class="group" role="group" aria-label="View">
+          <button id="full-btn" class="icon-btn" type="button" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          </button>
+          <button id="wide-btn" class="icon-btn chip" type="button" aria-pressed="false"
+            title="Show the app in a 16:9 window" aria-label="16 by 9 window">16:9</button>
+          <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
+          </button>
+        </div>
       </div>
 
       <div class="strip" role="group" aria-label="Zoom">
@@ -111,7 +116,7 @@
         <button id="zoom-in" class="icon-btn" type="button" title="Zoom in" aria-label="Zoom in">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg>
         </button>
-        <button id="zoom-fit" class="icon-btn" type="button" title="Fit width" aria-label="Fit width">
+        <button id="zoom-fit" class="icon-btn fit-btn" type="button" title="Fit width" aria-label="Fit width">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
         </button>
         <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
@@ -120,16 +125,13 @@
       </div>
     </div>
 
-    <!-- #stage is the room left for the note; #scroller is the note window (all of it, or a 16:9 box inside it). -->
-    <div id="stage">
-      <div id="scroller">
-        <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
-        <div id="page-sizer">
-          <div id="page">
-            <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
-            <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
-            <svg id="ink"></svg>
-          </div>
+    <div id="scroller">
+      <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
+      <div id="page-sizer">
+        <div id="page">
+          <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
+          <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
+          <svg id="ink"></svg>
         </div>
       </div>
     </div>

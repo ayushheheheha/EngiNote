@@ -261,30 +261,27 @@ body.editing #library { display: none; }
   color: var(--muted);
 }
 
-#stage {
+#scroller {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  place-items: center;
-  container-type: size; /* lets the 16:9 window size itself from the room available (cqw / cqh) */
-  overflow: hidden;     /* trims the 16:9 marker lines to the letterbox bars */
-}
-
-#scroller {
-  width: 100%;
-  height: 100%;
   overflow: auto;
   padding: 24px; /* horizontal padding x2 = GUTTER in app.js */
 }
 
-/* 16:9 window: the largest 16:9 box that fits the stage, letterboxed in black (for recording or presenting). */
-body.wide #stage { background: #000; }
-body.wide #scroller {
-  width: min(100cqw, calc(100cqh * 16 / 9));
+/* 16:9: the whole editor, note and tools together, becomes the largest 16:9 window that fits the
+   screen, letterboxed in black (for recording or presenting). */
+body.wide.editing {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  height: 100dvh;
+  background: #000;
+}
+body.wide #editor {
+  width: min(100vw, calc(100dvh * 16 / 9));
   height: auto;
   aspect-ratio: 16 / 9;
-  background: var(--canvas);
   /* Dashed red lines where the window starts and ends. An outline sits just outside the box, so the
      window stays exactly 16:9 and the lines show only on the sides that have a black bar. */
   outline: 2px dashed #ff3b30;
@@ -318,7 +315,7 @@ body.wide #scroller {
   height: 100%;
 }
 
-/* ---------- Full screen: the sheet gets the whole window, the tools become a thin rail on the right ---------- */
+/* ---------- Full screen: the sheet gets the whole window, the tools become a narrow rail on the right ---------- */
 
 body.full #editor { flex-direction: row-reverse; }
 body.full #toolbar {
@@ -332,11 +329,16 @@ body.full #toolbar {
 body.full #toolbar .strip { display: none; }
 /* Auto margins centre the rail vertically, and unlike justify-content they collapse when it overflows. */
 body.full #toolbar .strip:nth-child(2) { display: flex; order: 0; margin: auto 0; }
-body.full .strip, body.full .group { flex-direction: column; flex-wrap: nowrap; }
-/* Tightened so the whole rail fits an 11-inch tablet in landscape with the browser's own bars showing. */
-body.full .sep { width: 22px; height: 1px; margin: 3px 0; }
-body.full .swatch { height: 26px; }
-body.full .size { height: 30px; }
+body.full .strip { flex-direction: column; flex-wrap: nowrap; }
+/* Two buttons per row: one per row is too tall for a 16:9 window on an 11-inch tablet (about 650px). */
+body.full .group { display: grid; grid-template-columns: repeat(2, 30px); gap: 2px; }
+body.full .icon-btn { width: 30px; height: 34px; }
+body.full .swatch, body.full .size { height: 28px; }
+body.full .chip { min-width: 0; padding: 0; font-size: 11px; }
+body.full .sep { width: 40px; height: 1px; margin: 3px 0; }
+
+/* Buttons that only belong in the rail (the top toolbar has its own copy in the zoom strip). */
+body:not(.full) .rail-only { display: none; }
 
 /* ---------- Toast ---------- */
 
