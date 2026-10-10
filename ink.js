@@ -6,7 +6,11 @@ const NS = 'http://www.w3.org/2000/svg';
 const HIGHLIGHTER_SCALE = 5;      // highlighter width = size * this
 const HIGHLIGHTER_OPACITY = 0.35;
 const ERASER_RADIUS = 8;          // page px, on top of half the stroke's width; the default, see setEraserSize()
-const MIN_STEP = 0.5;             // page px; closer points are dropped
+// A pointer's positions are never a clean line: the hand shakes, and a device may report whole
+// pixels only, which turns a slow diagonal into stairs. Zoomed in, a line drawn straight through
+// them looks lumpy. So the ink follows a point that trails the tip, pulled along behind it:
+const SMOOTH = 3;                 // screen px the ink trails the tip by, about; bumps shorter than a few times this are ironed out
+const MIN_STEP = 2;               // screen px between the points that are kept
 const MAX_HISTORY = 100;
 // A glow stroke is its line drawn several times over: wide and faint underneath, then narrower and
 // stronger, then the line itself with a pale core. [width factor, opacity] per halo layer, widest first.
@@ -19,7 +23,7 @@ const CURSORS = { pen: 'crosshair', flow: 'crosshair', glow: 'crosshair', highli
 // How perfect-freehand shapes a flow stroke. thinning: how much pressure changes the width (at
 // pressure 0.5 the line is exactly `size` wide). streamline: how far the line lags the hand to
 // take the shake out. Chosen by eye in a browser: tune on the real device.
-const FLOW = { thinning: 0.6, smoothing: 0.5, streamline: 0.4 };
+const FLOW = { thinning: 0.6, smoothing: 0.6, streamline: 0.6 };
 
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
 const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothing raw pressure
@@ -29,7 +33,6 @@ const TAP_MS = 250;               // longest a finger may stay down and still co
 const DOUBLE_TAP_MS = 400;        // longest gap between the two taps of a double tap
 const DOUBLE_TAP_DIST = 40;       // screen px the two taps may be apart
 
-const round1 = n => Math.round(n * 10) / 10;
 const round2 = n => Math.round(n * 100) / 100;
 
 // ---------- pure geometry (no DOM) ----------
@@ -150,8 +153,10 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   let strokes = [];
   let els = [];       // one element per stroke, same order
   const undoStack = [], redoStack = [];   // snapshots of `strokes`
-  // Gesture in progress: draw {id, touch, at, stroke, path} or erase {id, touch, at, before, last}.
+  // Gesture in progress: draw {id, touch, at, stroke, path, tip, soft, kept} or erase {id, touch, at, before, last}.
   // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm).
+  // While drawing, in screen px: `tip` is the last position reported, `soft` the smoothed point trailing
+  // it (see SMOOTH), `kept` the last one that became a point of the stroke.
   let act = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
   let grab = null;          // the page point a two-finger gesture took hold of; it stays under the fingers' centre
@@ -280,13 +285,24 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     changed();
   }
 
+  // Add the tip's own position to the stroke being drawn, as its last point, unless it is there already.
+  function toTip(a) {
+    const pts = a.stroke.points, last = pts[pts.length - 1];
+    const pt = toPoint({ clientX: a.tip[0], clientY: a.tip[1] });
+    if (!pt || (pt[0] === last[0] && pt[1] === last[1])) return false;
+    if (last.length > 2) pt.push(last[2]);
+    pts.push(pt);
+    return true;
+  }
+
   // Commit whatever pen/mouse gesture is in progress. Safe to call any time.
   function finish() {
     const a = act;
     if (!a) return;
     act = null;
     if (a.path) {
-      setData(a.path, strokeData(a.stroke));   // its finished shape: a flow stroke's end catches up with the pointer
+      toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
+      setData(a.path, strokeData(a.stroke));   // its finished shape
       els.push(a.path);   // the live path becomes the stroke's element
       elOf.set(a.stroke, a.path);
       commit([...strokes, a.stroke]);
@@ -303,8 +319,8 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const box = svg.getBoundingClientRect(), view = svg.viewBox.baseVal;
     if (!box.width || !box.height || !view.width) return null;
     return [
-      round1(view.x + (e.clientX - box.left) / box.width * view.width),
-      round1(view.y + (e.clientY - box.top) / box.height * view.height),
+      round2(view.x + (e.clientX - box.left) / box.width * view.width),
+      round2(view.y + (e.clientY - box.top) / box.height * view.height),
     ];
   }
 
@@ -427,7 +443,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
         if (opacity < 1 || tool === 'highlighter') stroke.opacity = opacity;
         const path = makeEl(stroke, false);
         layer.appendChild(path);
-        act = { ...base, stroke, path };
+        act = { ...base, stroke, path, tip: base.at, soft: base.at, kept: base.at };
       }
     }
     showNib(e);   // the eraser's ring appears where it lands; a drawing tool's preview goes
@@ -470,19 +486,38 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const a = act;
     a.at = [e.clientX, e.clientY];
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    const pts = a.path && a.stroke.points;
     for (const ev of coalesced.length ? coalesced : [e]) {
-      const pt = toPoint(ev);
+      if (!a.path) {
+        const pt = toPoint(ev);
+        if (pt) eraseAlong(a, pt);
+        continue;
+      }
+      // The smoothed point moves towards the tip by a share of the gap that depends on how far the
+      // tip just travelled, not on time: so a slow line is smoothed as much as a fast one, and a
+      // tip at rest pulls nothing after it.
+      const moved = Math.hypot(ev.clientX - a.tip[0], ev.clientY - a.tip[1]);
+      if (!moved) continue;
+      const share = 1 - Math.exp(-moved / SMOOTH);
+      a.tip = [ev.clientX, ev.clientY];
+      a.soft = [a.soft[0] + (a.tip[0] - a.soft[0]) * share, a.soft[1] + (a.tip[1] - a.soft[1]) * share];
+      if (Math.hypot(a.soft[0] - a.kept[0], a.soft[1] - a.kept[1]) < MIN_STEP) continue;
+      const pt = toPoint({ clientX: a.soft[0], clientY: a.soft[1] });
       if (!pt) continue;
-      if (!a.path) { eraseAlong(a, pt); continue; }
-      const pts = a.stroke.points;
+      a.kept = a.soft;
       const last = pts[pts.length - 1];
-      if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < MIN_STEP) continue;
       if (last.length > 2) pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
       pts.push(pt);
     }
-    // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
-    // build it incrementally if strokes of several thousand points ever lag.
-    if (a.path) setData(a.path, strokeData(a.stroke, false));
+    if (a.path) {
+      // Drawn right up to the tip, so no gap shows between it and the trailing ink. That last
+      // stretch is only for show until the smoothed point has passed over it.
+      const reached = toTip(a);
+      // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
+      // build it incrementally if strokes of several thousand points ever lag.
+      setData(a.path, strokeData(a.stroke, false));
+      if (reached) pts.pop();
+    }
   }
 
   // pointerup, pointercancel and lostpointercapture all end the gesture. A cancelled stylus or mouse

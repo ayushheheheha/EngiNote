@@ -190,6 +190,20 @@ try {
   check('a glow stroke survives save and load', ink.getStrokes()[1].tool === 'glow' && strokeEls()[1].tagName === 'g');
   ink.load(ink.getStrokes().slice(0, 1));
 
+  // --- smoothing: a slow diagonal reported in whole screen pixels arrives as stairs, half a pixel either side of the line ---
+  ink.setTool('pen');
+  const slope = x => 180 + Math.round((x - 50) * 2 * 0.3) / 2;   // 1 viewBox unit is 2 screen px here, so y lands on whole screen pixels
+  fire('pointerdown', 50, 180, 'pen', 2, { t: 9100, pressure: 0.5 });
+  for (let x = 50.5; x <= 150; x += 0.5) fire('pointermove', x, slope(x), 'pen', 2, { t: 9100 + x, pressure: 0.5 });
+  fire('pointerup', 150, slope(150), 'pen', 2, { t: 9300, buttons: 0 });
+  const stairs = ink.getStrokes()[1].points;
+  // How far each stored point lies from the true line, in screen px (the last point is the tip itself, stairs and all).
+  const off = Math.max(...stairs.slice(0, -1).map(([x, y]) => Math.abs(y - (180 + (x - 50) * 0.3)) * 2 * Math.cos(Math.atan(0.3))));
+  check('stair-stepped input is smoothed: the stored points keep well inside the half pixel the stairs stray by', off < 0.3 && stairs.length > 20);
+  check('...they are a couple of screen pixels apart, not one per report', stairs.length < 110);
+  check('...and the line still ends exactly where the tip left the page', stairs.at(-1)[0] === 150 && stairs.at(-1)[1] === slope(150));
+  ink.load(ink.getStrokes().slice(0, 1));
+
   // --- opacity: a pen's own, on the stroke and on its element ---
   ink.setOpacity(0.5);
   penStroke(180, 9400);
@@ -220,7 +234,7 @@ try {
   // How far the ink reaches above and below the line at x, in viewBox units.
   const thick = x => { let n = 0; for (let y = 195; y <= 205; y += 0.1) if (inked(x, y)) n++; return n / 10; };
   check('the flow pen stores a flow stroke with the stylus pressure on every point',
-    heavy.tool === 'flow' && heavy.points.length === 51 && heavy.points.every(p => p.length === 3) && heavy.points[50][2] > heavy.points[0][2]);
+    heavy.tool === 'flow' && heavy.points.length > 40 && heavy.points.every(p => p.length === 3) && heavy.points.at(-1)[2] > heavy.points[0][2]);
   check('it is drawn as one filled, closed outline',
     heavyPath.tagName === 'path' && heavyPath.getAttribute('fill') === heavy.color && !heavyPath.getAttribute('stroke') &&
     (heavyPath.getAttribute('d').match(/M/g) || []).length === 1 && heavyPath.getAttribute('d').endsWith('Z'));
