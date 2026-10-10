@@ -96,6 +96,21 @@ body {
   backdrop-filter: var(--blur);
   box-shadow: var(--rim), var(--float);
 }
+/* Panes that come and go (menus, the pen's settings, messages) grow out of where they hang and
+   fade, rather than blinking. Where a browser cannot ease something on its way to `display: none`,
+   they simply blink as before. */
+.flyout, #pen-panel, #message { transition: opacity .16s ease, scale .26s cubic-bezier(.3, 1.35, .5, 1), translate .26s cubic-bezier(.3, 1.35, .5, 1); }
+@supports (transition-behavior: allow-discrete) {
+  .flyout, #pen-panel, #message { transition: opacity .16s ease, scale .26s cubic-bezier(.3, 1.35, .5, 1), translate .26s cubic-bezier(.3, 1.35, .5, 1), display .2s allow-discrete; }
+}
+.flyout, #pen-panel { transform-origin: 50% 0; }
+.tool-wrap:not(.open) .flyout, #pen-panel[hidden] { opacity: 0; scale: .92; }
+#message[hidden] { opacity: 0; translate: 0 10px; }
+@starting-style {
+  .tool-wrap.open .flyout, #pen-panel:not([hidden]) { opacity: 0; scale: .92; }
+  #message:not([hidden]) { opacity: 0; translate: 0 10px; }
+}
+
 /* Panes with something to read on them are thicker. */
 .flyout, #pen-panel, #message { background: linear-gradient(180deg, var(--sheen), transparent 40%), var(--glass-thick); }
 /* A pane that hangs from a pane: not every browser lets it blur what is behind both, so it is
@@ -382,38 +397,66 @@ body.in-videos #import-btn { display: none; }
   width: 20px;
   height: 20px;
   border-radius: 50%;
+  transition: box-shadow .2s, scale .2s cubic-bezier(.3, 1.5, .45, 1);
   background: var(--c);
   box-shadow: inset 0 0 0 1px rgb(128 128 128 / .5); /* keeps black and white visible on any surface */
 }
 .swatch[aria-pressed="true"] { background: none; box-shadow: none; }
-.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); scale: 1.08; }
 
 /* ---------- Pens ---------- */
 
 /* A pen in the tray stands tip up with its lower end out of sight, as if in a pot; the one in use
-   stands taller. The picture is made in app.js (penPicture); --c is the pen's colour. */
+   stands taller, in a wash of its own colour. The picture is made in app.js (penPicture); --c is
+   the pen's colour. */
 .pen {
   flex: none;
   position: relative;
-  width: 30px;
+  width: 34px;
   height: var(--hit);
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 10px;
   background: none;
   overflow: hidden;
 }
-.pen svg { position: absolute; left: 6px; top: 10px; width: 18px; height: 49.5px; transition: transform .12s; }
-.pen[aria-pressed="true"] svg { transform: translateY(-9px); }
-.pen .tip, .pen .band { fill: var(--c); }
-.pen .tip, .pen .nib { stroke: rgb(128 128 128 / .75); stroke-width: .7; stroke-linejoin: round; } /* keeps a black or white tip visible */
-.pen .nib { fill: #c9ccd3; }
-.pen .slit { fill: none; stroke: #5b6170; stroke-width: .8; }
-.pen .spark { fill: none; stroke: var(--c); stroke-width: 1.3; stroke-linecap: round; }
-.pen .barrel { fill: #3f4450; }
-:root[data-theme="dark"] .pen .barrel { fill: #596072; }
+.pen:active:not(:disabled) { transform: none; } /* a pen does not shrink when pressed: it rises */
+.pen svg {
+  position: absolute;
+  left: 6px;
+  top: 11px;
+  width: 22px;
+  height: 58.67px;
+  overflow: visible; /* the glow pen's light reaches past its picture */
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / .28));
+  transition: transform .34s cubic-bezier(.3, 1.5, .45, 1); /* up past its place, and back: a little spring */
+}
+.pen[aria-pressed="true"] svg { transform: translateY(-10px); }
+/* the wash of colour behind the pen in use */
+.pen::before {
+  content: "";
+  position: absolute;
+  inset: 22% 3px 0;
+  border-radius: 10px 10px 3px 3px;
+  background: linear-gradient(0deg, color-mix(in srgb, var(--c) 42%, transparent), transparent);
+  opacity: 0;
+  transition: opacity .3s;
+}
+.pen[aria-pressed="true"]::before { opacity: 1; }
+.pen .tip, .pen .band { fill: var(--c); transition: fill .25s; }
+.pen .tip { stroke: rgb(128 128 128 / .7); stroke-width: .6; stroke-linejoin: round; } /* keeps a black or white tip visible */
+.pen .nib { stroke: rgb(60 64 75 / .55); stroke-width: .5; stroke-linejoin: round; }
+.pen .slit { fill: #3b3f4a; stroke: #3b3f4a; stroke-width: .7; stroke-linecap: round; }
+.pen .spark { fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; transition: stroke .25s; }
+.pen .lit { filter: drop-shadow(0 0 2.5px var(--c)); }
+.pen .barrel { stroke: rgb(255 255 255 / .16); stroke-width: .5; }
 @media (hover: hover) {
-  .pen:not([aria-pressed="true"]):hover svg { transform: translateY(-3px); }
+  .pen:not([aria-pressed="true"]):hover svg { transform: translateY(-4px); }
+}
+/* a pen just added comes up into the tray */
+.pen.new { animation: pen-in .5s cubic-bezier(.3, 1.4, .45, 1) backwards; }
+@keyframes pen-in {
+  from { transform: translateY(26px) scale(.7); opacity: 0; }
 }
 
 /* The settings of the pen in use. app.js places it (showPanel) inside #editor. */
@@ -561,28 +604,38 @@ body.full #toolbar .strip:nth-child(2) {
   min-height: 0;
   max-height: 100%;
 }
-body.full .group { display: contents; } /* every button is a row of the rail itself */
+/* Every rule here names #toolbar: the rail's sizes are for the rail, not for the other buttons on the
+   screen (the pen's settings, the recording bar). */
+body.full #toolbar .group { display: contents; } /* every button is a row of the rail itself */
 body.full #toolbar .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
-body.full .chip { width: var(--hit); padding: 0; font-size: 11px; }
-body.full .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
+body.full #toolbar .chip { width: var(--hit); padding: 0; font-size: 11px; }
+body.full #toolbar .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
 
 /* Pens in the rail lie on their side, tip towards the note; the one in use reaches further out. */
-body.full .pen { flex: 0 1 28px; width: var(--hit); height: auto; min-height: 16px; }
-body.full .pen svg { left: 50%; top: 50%; margin: -24.75px 0 0 -9px; transform: translateX(15px) rotate(-90deg); }
-body.full .pen[aria-pressed="true"] svg { transform: translateX(7px) rotate(-90deg); }
-body.full .pen:not([aria-pressed="true"]):hover svg { transform: translateX(12px) rotate(-90deg); }
+body.full #toolbar .pen { flex: 0 1 30px; width: var(--hit); height: auto; min-height: 17px; }
+body.full #toolbar .pen svg { left: 50%; top: 50%; margin: -29.33px 0 0 -11px; transform: translateX(21px) rotate(-90deg); }
+body.full #toolbar .pen[aria-pressed="true"] svg { transform: translateX(12px) rotate(-90deg); }
+body.full #toolbar .pen:not([aria-pressed="true"]):hover svg { transform: translateX(17px) rotate(-90deg); }
+body.full #toolbar .pen::before { inset: 3px 0 3px 30%; border-radius: 8px 3px 3px 8px; background: linear-gradient(270deg, color-mix(in srgb, var(--c) 42%, transparent), transparent); }
+body.full #toolbar .pen.new { animation-name: pen-in-rail; }
+@keyframes pen-in-rail {
+  from { transform: translateX(26px) scale(.7); opacity: 0; }
+}
 
 /* A tool with a flyout of its own (the eraser and its size, "+" and its menu). In the rail the pair
    is one row; the button grows along a column to fill it (WebKit does not stretch a button across a flex row). */
-body.full .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
+body.full #toolbar .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
 body.full #toolbar .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
-body.full .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: translateY(-50%); }
+body.full #toolbar .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: translateY(-50%); transform-origin: 100% 50%; }
 
 /* Buttons that only belong in the rail. */
 body:not(.full) .rail-only { display: none; }
 
 /* ---------- Screen recording (the iPad app) ---------- */
 
+/* The bar's parts come and go with what is happening (Pause only while recording, the settings only
+   before), and the whole bar can be put away into the corner. All of it by the parts closing up
+   sideways and fading, so the bar changes shape smoothly and slides to where it goes. */
 #rec-bar {
   display: none;
   position: fixed;
@@ -591,34 +644,60 @@ body:not(.full) .rail-only { display: none; }
   z-index: 8;
   transform: translateX(-50%);
   flex-wrap: nowrap;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 0;
+  padding: 4px 5px;
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  transition: left .46s cubic-bezier(.32, .72, .24, 1), transform .46s cubic-bezier(.32, .72, .24, 1);
+}
+#rec-bar > * {
+  flex: none;
+  max-width: 9em; /* not a limit in practice: a width to close up from */
+  margin: 0 3px;
+  overflow: hidden;
+  transition: max-width .4s cubic-bezier(.32, .72, .24, 1), min-width .4s, margin .4s, padding .4s, opacity .22s, transform .16s, background-color .16s;
 }
 /* Offered whenever a note is open; and always there while recording, wherever the user goes, so it can be stopped.
    Without the 16:9 window there is no black band to keep it in: it floats over the foot of the note, and is in the video. */
 body.can-record.editing #rec-bar,
 body.recording #rec-bar { display: flex; }
-/* While recording nothing about the recording can be changed, so the bar is only what is needed: stop, pause, the clock. */
-body.recording #rec-mic, body.recording #rec-enhance, body.recording #rec-quality { display: none; }
 /* Under the 16:9 window, in the middle of the black band there: the video is that window and nothing
    else, so the bar is never in it. (The band is half of what the window leaves of the page's height.) */
 body.wide.editing #rec-bar {
   bottom: calc((100cqh - min(100cqh, 100cqw * 9 / 16)) / 4);
   transform: translate(-50%, 50%);
 }
+
+/* Closed up: Pause when nothing is recording; the settings while something is (they cannot change
+   then); and everything but the dot (and the running clock) when the bar is put away. */
+body:not(.recording) #rec-pause,
+body.recording #rec-mic, body.recording #rec-enhance, body.recording #rec-quality,
+#rec-bar.min > :not(#rec-min, #rec-time),
+body:not(.recording) #rec-bar.min #rec-time {
+  max-width: 0;
+  min-width: 0;
+  margin: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Put away: in the corner, the dot first. In the 16:9 view that corner is still in the black band. */
+#rec-bar.min { left: 14px; transform: translateX(0); }
+body.wide.editing #rec-bar.min { transform: translate(0, 50%); }
+#rec-bar.min #rec-min { order: -1; }
+
 #rec-btn { display: flex; align-items: center; gap: 7px; color: var(--text); }
-.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff3b30; }
-body.recording .rec-dot { border-radius: 2px; } /* a square: stop */
+.rec-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: #ff3b30; transition: border-radius .25s; }
+body.recording #rec-btn .rec-dot { border-radius: 3px; } /* a square: stop */
 #rec-time { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
 body.recording #rec-time { color: #ff3b30; }
 body.paused #rec-time { color: var(--muted); }
 #rec-pause { color: var(--text); }
 #rec-quality {
   height: var(--hit);
-  max-width: 44vw;
+  max-width: 21em;
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
@@ -630,6 +709,19 @@ body.paused #rec-time { color: var(--muted); }
   font-size: 16px; /* under 16px iOS zooms the page on focus */
 }
 #rec-bar :disabled { opacity: .45; }
+/* The button that puts the bar away is an arrow; away, it is the red dot that brings it back
+   (beating slowly while a recording runs, so it is not forgotten). */
+#rec-min[aria-pressed="true"] { background: none; box-shadow: none; color: inherit; }
+#rec-min .rec-dot, #rec-bar.min #rec-min .icon { display: none; }
+#rec-bar.min #rec-min .rec-dot { display: block; }
+body.recording:not(.paused) #rec-bar.min #rec-min .rec-dot { animation: rec-beat 1.6s ease-in-out infinite; }
+@keyframes rec-beat {
+  50% { opacity: .35; scale: .8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #rec-bar, #rec-bar > *, .flyout, #pen-panel, #message { transition: none; }
+  .pen.new, #rec-min .rec-dot { animation: none !important; }
+}
 
 /* ---------- Toast ---------- */
 

@@ -198,7 +198,7 @@
        Without it the video is the whole screen, bar included. -->
   <div id="rec-bar" class="strip" role="group" aria-label="Screen recording">
     <button id="rec-btn" class="icon-btn chip" type="button" aria-pressed="false" title="Record a video: the 16:9 window if it is on, else the whole screen"><span class="rec-dot"></span><span id="rec-label">Record</span></button>
-    <button id="rec-pause" class="icon-btn chip" type="button" aria-pressed="false" title="Pause: nothing is recorded until you resume" hidden>Pause</button>
+    <button id="rec-pause" class="icon-btn chip" type="button" aria-pressed="false" title="Pause: nothing is recorded until you resume">Pause</button>
     <output id="rec-time" aria-label="Recorded so far">0:00:00</output>
     <button id="rec-mic" class="icon-btn chip" type="button" aria-pressed="true" title="Record your voice with the screen" aria-label="Record the microphone">Mic</button>
     <button id="rec-enhance" class="icon-btn chip" type="button" aria-pressed="false" title="Enhance voice: take the background noise out of your voice" aria-label="Enhance voice">Enhance</button>
@@ -208,9 +208,23 @@
       <option value="standard" selected>Standard: 1080p, up to 1.8 GB an hour</option>
       <option value="small">Small: 720p, up to 0.9 GB an hour</option>
     </select>
+    <!-- Puts the bar away in the corner, and brings it back: there it shows as a red dot. -->
+    <button id="rec-min" class="icon-btn" type="button" aria-pressed="false" aria-label="Put the recording bar away">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg><span class="rec-dot"></span>
+    </button>
   </div>
 
   <p id="message" role="status" hidden></p>
+
+  <!-- What the pens in the tray are painted with (app.js, penPicture): a dark barrel, bright metal,
+       and a shade laid over coloured parts to make them round. Each runs across the pen. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="pen-barrel"><stop offset="0" stop-color="#1b1d23"/><stop offset=".28" stop-color="#565c6b"/><stop offset=".42" stop-color="#7d8496"/><stop offset=".62" stop-color="#454a57"/><stop offset="1" stop-color="#15171c"/></linearGradient>
+      <linearGradient id="pen-metal"><stop offset="0" stop-color="#7f8594"/><stop offset=".3" stop-color="#f4f6fa"/><stop offset=".5" stop-color="#cfd3dc"/><stop offset=".78" stop-color="#9299a8"/><stop offset="1" stop-color="#666c7a"/></linearGradient>
+      <linearGradient id="pen-shade"><stop offset="0" stop-color="#000" stop-opacity=".22"/><stop offset=".3" stop-color="#fff" stop-opacity=".42"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".34"/></linearGradient>
+    </defs>
+  </svg>
 
   <template id="card-template">
     <div class="card">

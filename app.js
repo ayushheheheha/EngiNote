@@ -651,29 +651,47 @@ function savePens() {
   } catch { /* lasts for this visit only */ }
 }
 
-// A pen as a picture, standing tip up: the tip and a band take the pen's colour (--c on the button).
+// A pen as a picture, standing tip up, 24 wide and 64 tall. Its tip and band take the pen's colour
+// (--c on the button, through style.css). The shading that makes it round, and the metal, are
+// gradients kept once in index.html (#pen-barrel, #pen-metal, #pen-shade): a part is drawn in its
+// colour and then once more in the shade, which is light down one side and dark down the other.
+const shaded = (shape, cls) => `<${shape} class="${cls}"/><${shape} fill="url(#pen-shade)"/>`;
 const PEN_TIPS = {
-  pen: '<path class="tip" d="M8 1l3.5 12h-7z"/>',
-  flow: '<path class="nib" d="M8 0c3 4 4 8 3 13H5C4 8 5 4 8 0z"/><path class="slit" d="M8 5v8"/>',
-  glow: '<path class="tip" d="M8 1l3.5 12h-7z"/><path class="spark" d="M2.5 2v4M.5 4h4M13.5 5v3M12 6.5h3"/>',
-  highlighter: '<path class="tip" d="M4.5 13V6l7-4v11z"/>',
+  // a fine cone with a metal point
+  pen: shaded('path d="M12 2.6 17 18H7z"', 'tip') + '<path d="M12 .8 13.3 5.4h-2.6z" fill="url(#pen-metal)"/>',
+  // a fountain pen's nib, slit and breather hole, on a collar of the pen's colour
+  flow: '<path class="nib" d="M12 .6c2.9 4.5 5 9.9 4.6 17.4H7.4C7 10.5 9.1 5.1 12 .6z" fill="url(#pen-metal)"/>' +
+    '<path class="slit" d="M12 4.4V13"/><circle class="slit" cx="12" cy="13.8" r=".9"/>',
+  // the cone again, alight
+  glow: '<g class="lit">' + shaded('path d="M12 2.6 17 18H7z"', 'tip') + '</g><path class="spark" d="M4.2 3.4v4M2.2 5.4h4M20.4 8.6v3M18.9 10.1h3"/>',
+  // a chisel
+  highlighter: shaded('path d="M7 18V8.4l10-5V18z"', 'tip'),
 };
-const penPicture = type => `<svg viewBox="0 0 16 44" aria-hidden="true">${PEN_TIPS[type]}` +
-  `<rect class="barrel" x="3.5" y="13" width="9" height="31" rx="1.5"/><rect class="band" x="3.5" y="${type === 'flow' ? 13 : 24}" width="9" height="3.5"/></svg>`;
+function penPicture(type) {
+  const wide = type === 'highlighter'; // a highlighter is a stouter pen
+  const x = wide ? 4.5 : 6, w = wide ? 15 : 12;
+  const part = (y, h, rest) => `rect x="${x}" y="${y}" width="${w}" height="${h}" ${rest}`;
+  return `<svg viewBox="0 0 24 64" aria-hidden="true">${PEN_TIPS[type]}` +
+    (type === 'flow' ? shaded(part(18, 4.4, 'rx=".5"'), 'band') : `<${part(18, 3.6, 'rx=".6" fill="url(#pen-metal)"')}/>`) +
+    `<${part(21.6, 44, 'rx="2" fill="url(#pen-barrel)" class="barrel"')}/>` +
+    (type === 'flow' ? `<${part(24.6, 1.4, 'fill="url(#pen-metal)"')}/>` : shaded(part(25.4, 3.4, ''), 'band')) +
+    '</svg>';
+}
 
 const penBox = $('pens'), addWrap = $('add-wrap');
-function renderPens() {
+// `fresh`: the id of a pen just added, which rises into its place.
+function renderPens(fresh) {
   penBox.replaceChildren(...pens.map((pen, i) => {
     const btn = document.createElement('button');
     const name = PEN_TYPES[pen.type].name;
     btn.type = 'button';
-    btn.className = 'pen';
+    btn.className = pen.id === fresh ? 'pen new' : 'pen';
     btn.dataset.tool = pen.id;
     btn.title = `${name}${i < 9 ? ` (${i + 1})` : ''}. Tap again for its settings`;
     btn.setAttribute('aria-label', `${name} ${i + 1}`);
     btn.setAttribute('aria-pressed', pen.id === tool);
     btn.style.setProperty('--c', pen.color);
-    btn.innerHTML = penPicture(pen.type); // fixed markup from PEN_TIPS; the colour goes in through --c
+    btn.innerHTML = penPicture(pen.type); // fixed markup from penPicture; the colour goes in through --c
     return btn;
   }));
   addWrap.hidden = pens.length >= MAX_PENS;
@@ -797,7 +815,7 @@ addWrap.addEventListener('click', e => {
   addFly.set(false);
   const pen = newPen(type, type === 'highlighter' ? '#ffea00' : penOf(tool)?.color ?? '#111111');
   pens.push(pen);
-  renderPens();
+  renderPens(pen.id);
   choose(pen.id);
   showPanel(true);
 });
@@ -949,7 +967,12 @@ wideBtn.onclick = () => {
 const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
   const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');
-  const recEnhance = $('rec-enhance');
+  const recEnhance = $('rec-enhance'), recBar = $('rec-bar');
+  // Put away, the bar is a dot in the corner (with the clock, while recording): style.css, #rec-bar.min.
+  option($('rec-min'), 'recMin', away => {
+    recBar.classList.toggle('min', away);
+    $('rec-min').title = away ? 'Show the recording bar' : 'Put the recording bar away in the corner';
+  });
   // Enhance: the voice with the background noise taken out. It needs the microphone, so it is out of reach without it.
   const micOn = option($('rec-mic'), 'recMic', on => { recEnhance.disabled = !on || document.body.classList.contains('recording'); }, true);
   const enhanceOn = option(recEnhance, 'recEnhance');
@@ -978,7 +1001,6 @@ if (shellRecorder) {
     document.body.classList.toggle('paused', state === 'paused');
     recBtn.setAttribute('aria-pressed', on);
     $('rec-label').textContent = on ? 'Stop' : 'Record';
-    recPause.hidden = !on;
     recPause.textContent = state === 'paused' ? 'Resume' : 'Pause';
     recPause.setAttribute('aria-pressed', state === 'paused');
     // Fixed for the length of a recording: its settings, and the 16:9 window it is a picture of.
