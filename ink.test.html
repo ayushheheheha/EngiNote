@@ -55,11 +55,12 @@ try {
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
-  let changes = 0, zoomed = 1, doubleTaps = 0, erases = 0;
+  let changes = 0, zoomed = 1, doubleTaps = 0, erases = 0, held = null;
+  const strokeEls = () => [...svg.querySelector('g').children];   // one element per stroke, in the strokes' group
   const ink = createInk(svg, {
     scroller: document.scrollingElement,
     onChange: () => changes++,
-    onZoom: factor => { zoomed *= factor; },
+    onZoom: (factor, x, y, hold) => { zoomed *= factor; held = hold; },
     onDoubleTap: () => doubleTaps++,
     onErase: () => erases++,
   });
@@ -136,6 +137,8 @@ try {
   fire('pointerup', 290, 100, 'touch', 2);
   fire('pointerup', 110, 100, 'touch', 1);
   check('two fingers pinch-zoom and leave no stroke', ink.getStrokes().length === 1 && Math.abs(zoomed - 2) < 0.01);
+  // The fingers were at x = 110 and 200 when the second landed, so the page point they hold is midway.
+  check('a pinch names the page point it took hold of, for the app to keep under the fingers', String(held) === '155,100');
 
   fire('pointerdown', 50, 120, 'touch', 1);    // palm lands first and starts a stroke
   fire('pointermove', 90, 120, 'touch', 1);
@@ -150,6 +153,37 @@ try {
   drag(50, 160, 150, 160, 'touch');
   check('with finger drawing switched off again, a finger no longer draws', ink.getStrokes().length === 2);
   ink.undo();
+
+  // --- the pens: pen (even line), glow (even line with a halo), crayon (follows pressure) ---
+  const penStroke = (y, t) => {
+    fire('pointerdown', 50, y, 'pen', 2, { t, pressure: 0.2 });
+    fire('pointermove', 150, y, 'pen', 2, { t: t + 16, pressure: 0.9 });
+    fire('pointerup', 150, y, 'pen', 2, { t: t + 32, buttons: 0 });
+  };
+  penStroke(180, 9000);
+  const even = ink.getStrokes()[1], evenEl = strokeEls()[1];
+  check('the pen draws an even line, whatever pressure the stylus reports',
+    even.tool === 'pen' && even.points.every(p => p.length === 2) &&
+    evenEl.tagName === 'path' && evenEl.getAttribute('fill') === 'none' && evenEl.getAttribute('stroke-width') === '3');
+  ink.undo();
+
+  ink.setTool('glow');
+  penStroke(180, 9200);
+  const glow = ink.getStrokes()[1], glowEl = strokeEls()[1];
+  const widths = [...glowEl.children].map(p => +p.getAttribute('stroke-width'));
+  check('the glow pen stores a glow stroke with plain points', glow.tool === 'glow' && glow.points.every(p => p.length === 2));
+  check('a glow stroke is drawn as a halo under the line: wider and fainter layers sharing one path',
+    glowEl.tagName === 'g' && widths.length === 5 && widths[0] > widths[1] && widths[1] > widths[2] && widths[2] > widths[3] &&
+    widths[3] === 3 && widths[4] < 3 && +glowEl.children[0].getAttribute('stroke-opacity') < +glowEl.children[2].getAttribute('stroke-opacity') &&
+    new Set([...glowEl.children].map(p => p.getAttribute('d'))).size === 1 && glowEl.children[0].getAttribute('d') === 'M50 180L150 180');
+  ink.undo();
+  check('undoing a glow stroke takes its whole group away', strokeEls().length === 1 && svg.querySelectorAll('path').length === 1);
+  ink.redo();
+  check('redo puts the same group back', strokeEls()[1] === glowEl);
+  ink.load(ink.getStrokes());
+  check('a glow stroke survives save and load', ink.getStrokes()[1].tool === 'glow' && strokeEls()[1].tagName === 'g');
+  ink.load(ink.getStrokes().slice(0, 1));
+  ink.setTool('crayon');
 
   // --- pressure, hover, palm rejection (faked event times, all later than the real ones above) ---
   check('widthAt: pressure 0.5 gives the nominal size, more pressure is wider',

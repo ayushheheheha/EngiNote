@@ -147,21 +147,24 @@ function setPageHeight(height) {
   layout();
 }
 
-// Zoom keeping the page point under screen position (cx, cy) in place: the fingers for a pinch,
-// the middle of the view for the buttons.
+// Zoom, then scroll so that page point `hold` (in page px) sits at screen position (cx, cy).
+// The buttons give neither: the point in the middle of the view stays there. A pinch gives both:
+// the point the fingers took hold of stays under them, which also carries any panning.
+// The sheet is measured after the new layout, so centring and the ends of the scroll range are
+// accounted for, and each call aims at the same page point, so nothing drifts over a long pinch.
 // ponytail: a pinch re-lays-out on every pointer move; batch into requestAnimationFrame if it stutters.
-function setZoom(value, cx, cy) {
+function setZoom(value, cx, cy, hold) {
   const view = scroller.getBoundingClientRect();
-  const sheet = sizer.getBoundingClientRect();
-  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-  const grow = next / zoom - 1;
-  zoom = next;
+  cx ??= view.left + view.width / 2;
+  cy ??= view.top + view.height / 2;
+  if (!hold) {
+    const sheet = sizer.getBoundingClientRect();
+    hold = [(cx - sheet.left) / zoom, (cy - sheet.top) / zoom];
+  }
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
   layout();
-  scroller.scrollBy({
-    left: ((cx ?? view.left + view.width / 2) - sheet.left) * grow,
-    top: ((cy ?? view.top + view.height / 2) - sheet.top) * grow,
-    behavior: 'instant',
-  });
+  const sheet = sizer.getBoundingClientRect();
+  scroller.scrollBy({ left: sheet.left + hold[0] * zoom - cx, top: sheet.top + hold[1] * zoom - cy, behavior: 'instant' });
   $('zoom-label').textContent = Math.round(zoom * 100) + '%';
 }
 
@@ -226,7 +229,7 @@ const ink = createInk(svg, {
     touch();
     refreshHistory();
   },
-  onZoom: (factor, x, y) => setZoom(zoom * factor, x, y), // two-finger pinch
+  onZoom: (factor, x, y, hold) => setZoom(zoom * factor, x, y, hold), // two-finger pinch and pan
   onDoubleTap: () => toggleEraser(),
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
     if (autoDeselect() && tool === 'eraser') choose('tool', beforeEraser);
@@ -401,7 +404,7 @@ wideBtn.onclick = () => {
 
 /* ---------- Keyboard ---------- */
 
-const TOOL_KEYS = { p: 'pen', h: 'highlighter', e: 'eraser', v: 'hand' };
+const TOOL_KEYS = { p: 'pen', c: 'crayon', g: 'glow', h: 'highlighter', e: 'eraser', v: 'hand' };
 
 document.addEventListener('keydown', e => {
   if (!current || e.target === nameInput) return;

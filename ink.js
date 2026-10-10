@@ -6,7 +6,14 @@ const HIGHLIGHTER_OPACITY = 0.35;
 const ERASER_RADIUS = 8;          // page px, on top of half the stroke's width
 const MIN_STEP = 0.5;             // page px; closer points are dropped
 const MAX_HISTORY = 100;
-const CURSORS = { pen: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab' };
+// A glow stroke is its line drawn several times over: wide and faint underneath, then narrower and
+// stronger, then the line itself with a pale core. [width factor, opacity] per halo layer, widest first.
+// (A blur filter would look softer, but one per stroke is what makes a full page slow to repaint.)
+const GLOW_HALO = [[5, 0.1], [3.2, 0.16], [2, 0.26]];
+const GLOW_CORE = [0.35, 0.6];    // the pale line down the middle: width factor, opacity
+// The tools, each with its cursor. 'pen' draws an even line; 'crayon' is the pen that follows stylus
+// pressure; 'glow' is an even line with a halo.
+const CURSORS = { pen: 'crosshair', crayon: 'crosshair', glow: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab' };
 
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
 const PRESSURE_FLOOR = 0.35;      // width factor at zero pressure; pressure 0.5 gives exactly `size`
@@ -157,7 +164,7 @@ function normalise(list) {
   return (Array.isArray(list) ? list : [])
     .filter(s => s && Array.isArray(s.points) && s.points.length)
     .map(s => ({
-      tool: s.tool === 'highlighter' ? 'highlighter' : 'pen',
+      tool: s.tool === 'highlighter' || s.tool === 'glow' ? s.tool : 'pen',
       color: String(s.color || '#000'),
       size: +s.size > 0 ? +s.size : 3,
       points: s.points,
@@ -166,16 +173,21 @@ function normalise(list) {
 
 // ---------- engine ----------
 
+// onZoom(factor, x, y, hold) is called as two fingers move: zoom by `factor` and keep page point
+// `hold` (viewBox units) at screen position (x, y).
 // onErase() is called after an erasing gesture that removed at least one stroke.
 export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onErase } = {}) {
   let tool = 'pen', color = '#000', size = 3;
-  let strokes = [];   // committed strokes; the array is replaced, never mutated
-  let els = [];       // one <path> per stroke, same order
+  // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
+  // 'pen', 'highlighter' or 'glow'. A crayon stroke is a 'pen' stroke whose points carry pressure.
+  let strokes = [];
+  let els = [];       // one element per stroke, same order
   const undoStack = [], redoStack = [];   // snapshots of `strokes`
   // Gesture in progress: draw {id, touch, at, stroke, path} or erase {id, touch, at, before, last}.
   // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm).
   let act = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
+  let grab = null;          // the page point a two-finger gesture took hold of; it stays under the fingers' centre
   // Fingers scroll and zoom; only a stylus or mouse draws. That is the palm rejection that matters:
   // a hand on the screen can never leave a mark. setFingerDraw(true) lets one finger draw instead
   // (two still pan and zoom), for people without a stylus.
@@ -223,32 +235,54 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
   const getStrokes = () => strokes.slice();
   const changed = () => { if (onChange) onChange(getStrokes()); };
 
-  function makePath(s) {
+  // A round-ended line along path data `d`. One path with stroke-opacity: where it crosses itself it does not darken.
+  function line(d, colour, width, opacity = 1) {
     const p = document.createElementNS(NS, 'path');
-    p.setAttribute('d', strokeData(s));
-    if (s.points[0].length > 2) {   // pressure-sensitive: a filled outline, not a stroked line
-      p.setAttribute('fill', s.color);
-      return p;
-    }
+    p.setAttribute('d', d);
     p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', s.color);
-    p.setAttribute('stroke-width', strokeWidth(s));
+    p.setAttribute('stroke', colour);
+    p.setAttribute('stroke-width', width);
     p.setAttribute('stroke-linecap', 'round');
     p.setAttribute('stroke-linejoin', 'round');
-    if (s.tool === 'highlighter') {
-      // One path + stroke-opacity: self-overlaps do not darken.
-      p.setAttribute('stroke-opacity', HIGHLIGHTER_OPACITY);
-      p.style.mixBlendMode = 'multiply';
-    }
+    if (opacity < 1) p.setAttribute('stroke-opacity', opacity);
     return p;
   }
 
-  // stroke -> its <path>. Building and painting a path is the costly part, so each stroke gets one
-  // element for life, and it is re-attached, not rebuilt, when the stroke comes back (undo, redo).
+  // The element that draws a stroke: a <path>, or for a glow stroke a <g> of them sharing one path data.
+  function makeEl(s) {
+    const d = strokeData(s);
+    if (s.points[0].length > 2) {   // pressure-sensitive: a filled outline, not a stroked line
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('fill', s.color);
+      return p;
+    }
+    if (s.tool === 'glow') {
+      const g = document.createElementNS(NS, 'g');
+      for (const [factor, opacity] of GLOW_HALO) g.appendChild(line(d, s.color, s.size * factor, opacity));
+      g.appendChild(line(d, s.color, s.size));
+      g.appendChild(line(d, '#fff', s.size * GLOW_CORE[0], GLOW_CORE[1]));
+      return g;
+    }
+    if (s.tool === 'highlighter') {
+      const p = line(d, s.color, strokeWidth(s), HIGHLIGHTER_OPACITY);
+      p.style.mixBlendMode = 'multiply';
+      return p;
+    }
+    return line(d, s.color, s.size);
+  }
+
+  // New path data for a stroke's element, while the stroke is being drawn.
+  function setData(el, d) {
+    for (const p of el.tagName === 'g' ? el.children : [el]) p.setAttribute('d', d);
+  }
+
+  // stroke -> its element. Building and painting one is the costly part, so each stroke gets one
+  // for life, and it is re-attached, not rebuilt, when the stroke comes back (undo, redo).
   const elOf = new WeakMap();
   function pathOf(s) {
     let p = elOf.get(s);
-    if (!p) elOf.set(s, p = makePath(s));
+    if (!p) elOf.set(s, p = makeEl(s));
     return p;
   }
 
@@ -389,6 +423,10 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     if (tool === 'hand' || (isTouch && (!fingerDraw || pans.size))) {
       // `live`: has travelled PAN_SLOP from where it landed (ox, oy). A resting touch must not nudge the page.
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
+      if (pans.size === 2) {   // a second finger: from here on the gesture holds on to the page point under their centre
+        const centre = grip();
+        grab = toPoint({ clientX: centre.x, clientY: centre.y });
+      }
       if (tool === 'hand') svg.style.cursor = 'grabbing';
     } else {
       finish();   // a previous gesture whose pointerup got lost must not block this one
@@ -399,10 +437,11 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
         act = { ...base, before: strokes, last: pt };
         eraseAlong(act, pt);
       } else {
-        // A stylus that really reports pressure (0.5 is the "no sensor" value) gets a variable-width pen line.
-        if (tool === 'pen' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
-        const stroke = { tool, color, size, points: [pt] };
-        const path = makePath(stroke);
+        // The crayon follows pressure, when the stylus really reports it (0.5 is the "no sensor" value):
+        // its points then carry it and it is drawn as a line of varying width. Otherwise it draws like the pen.
+        if (tool === 'crayon' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
+        const stroke = { tool: tool === 'crayon' ? 'pen' : tool, color, size, points: [pt] };
+        const path = makeEl(stroke);
         layer.appendChild(path);
         act = { ...base, stroke, path };
       }
@@ -425,15 +464,18 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       // Nothing scrolls under a stroke in progress, or for a touch that has not really moved yet.
       if (!p.live || act || !scroller) return;
       const to = grip();
-      if (from.spread && onZoom) onZoom(to.spread / from.spread, to.x, to.y);
+      if (pans.size > 1) {
+        // Two fingers pan and zoom in one step: the app zooms by the change in their spread and puts
+        // the grabbed page point back under their centre. Naming that point once per gesture, not
+        // re-reading it every move, is what keeps the page from creeping as rounding errors add up.
+        if (onZoom && from.spread) onZoom(to.spread / from.spread, to.x, to.y, grab);
+        vel = null;
+        return;
+      }
       const dx = from.x - to.x, dy = from.y - to.y;
       scroller.scrollBy({ left: dx, top: dy, behavior: 'instant' });
-      if (pans.size > 1) {
-        vel = null;
-      } else {
-        const dt = vel ? e.timeStamp - vel.t : 0;
-        if (!vel || dt > 0) vel = { x: dt ? (dx / dt + vel.x) / 2 : 0, y: dt ? (dy / dt + vel.y) / 2 : 0, t: e.timeStamp };
-      }
+      const dt = vel ? e.timeStamp - vel.t : 0;
+      if (!vel || dt > 0) vel = { x: dt ? (dx / dt + vel.x) / 2 : 0, y: dt ? (dy / dt + vel.y) / 2 : 0, t: e.timeStamp };
       return;
     }
     if (!act || act.id !== e.pointerId) return;
@@ -452,7 +494,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     }
     // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
     // build it incrementally if strokes of several thousand points ever lag.
-    if (a.path) a.path.setAttribute('d', strokeData(a.stroke));
+    if (a.path) setData(a.path, strokeData(a.stroke));
   }
 
   // pointerup, pointercancel and lostpointercapture all end the gesture. A cancelled stylus or mouse
@@ -478,9 +520,14 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
         lastTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
       }
     }
-    if (pans.delete(e.pointerId)) {
+    if (pans.has(e.pointerId)) {
+      // A two-finger gesture ends as a whole when either finger lifts: the one still down must not
+      // carry on as a scroll, or the page would slide and fling away as the hand leaves.
+      const pinch = pans.size > 1;
+      if (pinch) pans.clear();
+      else pans.delete(e.pointerId);
       svg.style.cursor = CURSORS[tool];
-      const flick = !pans.size && vel && e.type === 'pointerup' && e.pointerType !== 'mouse' && e.timeStamp - vel.t < 60;
+      const flick = !pinch && vel && e.type === 'pointerup' && e.pointerType !== 'mouse' && e.timeStamp - vel.t < 60;
       if (flick) coast();
       else vel = null;
     }
