@@ -254,11 +254,13 @@ try {
   const endsAtPenDown = zoomEnds;
   fire('pointermove', 370, 250, 'touch', 22, { t: 40116 });
   fire('pointermove', 150, 280, 'pen', 2, { t: 40132, pressure: 0.4 });
+  const previewWhileDrawing = nib.style.display;
   fire('pointerup', 150, 280, 'pen', 2, { t: 40148, buttons: 0 });
   fire('pointerup', 100, 250, 'touch', 21, { t: 40200 });
   fire('pointerup', 370, 250, 'touch', 22, { t: 40200 });
   check('when the stylus lands, fingers already on the page stop scrolling and zooming',
-    zoomed === midPinch && ink.getStrokes().length === 2 && nib.style.display === 'none');
+    zoomed === midPinch && ink.getStrokes().length === 2);
+  check('a drawing tool\'s preview is hidden while the stylus is drawing', previewWhileDrawing === 'none');
   check('...and the pinch it cut short is reported as ended, once', endsAtPenDown === endsBefore + 1 && zoomEnds === endsBefore + 1);
   ink.undo();
 
@@ -304,6 +306,31 @@ try {
   const back = svg.querySelectorAll('path');
   check('undo puts the same element back in its place instead of rebuilding the page',
     back.length === 2 && back[0] === lineEl && back[1] === dotEl);
+
+  // --- the eraser's ring and size ---
+  fire('pointerdown', 320, 30);
+  const ringAtDown = nib.style.display !== 'none' && +nib.getAttribute('cx') === 320 && +nib.getAttribute('cy') === 30;
+  fire('pointermove', 330, 60);
+  check('the eraser\'s ring shows where it lands and follows it for as long as it erases',
+    ringAtDown && nib.style.display !== 'none' && +nib.getAttribute('cx') === 330 && +nib.getAttribute('cy') === 60 &&
+    +nib.getAttribute('r') === 8 && nib.getAttribute('stroke') !== 'none');
+  fire('pointerup', 330, 60, 'mouse', 7, { buttons: 0 });
+  check('...and stays while the mouse still hovers there with the eraser', nib.style.display !== 'none');
+  ink.setTool('pen');
+  fire('pointermove', 331, 61, 'mouse', 7, { buttons: 0 });
+  check('a mouse with a drawing tool has no ring', nib.style.display === 'none');
+  ink.setTool('eraser');
+
+  // the first stroke is a line along y = 50 from x = 50 to 150, 3 wide: a pass along y = 75 is 25 away
+  drag(80, 75, 120, 75);
+  check('an eraser 8 across its radius misses a stroke 25 away', ink.getStrokes().length === 2);
+  ink.setEraserSize(30);
+  fire('pointerdown', 80, 75);
+  const bigRing = +nib.getAttribute('r');
+  fire('pointermove', 120, 75); fire('pointerup', 120, 75);
+  check('a bigger eraser reaches it, and its ring shows the new size', ink.getStrokes().length === 1 && bigRing === 30);
+  ink.undo();
+  ink.setEraserSize(8);
 
   // The app zooms the page with a CSS transform on an ancestor. Safari's getScreenCTM() ignores that,
   // so positions must come from where the svg really is on screen. At scale 0.5 this svg is drawn at

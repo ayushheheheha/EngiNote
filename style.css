@@ -212,6 +212,37 @@ body.editing #library { display: none; }
 }
 .sep { width: 1px; height: 22px; margin: 0 6px; background: var(--border); }
 
+/* A tool with a flyout: a panel that drops below the button (in the full-screen rail: out to its left). */
+.tool-wrap { position: relative; display: flex; }
+.flyout {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.tool-wrap.open .flyout { display: flex; }
+/* A small corner mark on the eraser while it is the tool: there is more behind a second tap. */
+#eraser-wrap > [aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  border: 3px solid transparent;
+  border-right-color: currentColor;
+  border-bottom-color: currentColor;
+}
+#eraser-range { width: 150px; height: var(--hit); margin: 0; accent-color: var(--accent); touch-action: none; /* a finger drags the slider, not the page */ }
+.dot-box { display: grid; place-items: center; flex: none; width: 46px; height: 46px; }
+#eraser-dot { border-radius: 50%; border: 1.5px solid var(--muted); background: rgb(128 128 128 / .15); }
+
 /* Until the window is wide enough for all three strips side by side (about 1500px): name and zoom
    share the first row, the tools get their own row, centred. */
 @media (max-width: 1500px) {
@@ -370,6 +401,12 @@ body.full .group { display: contents; } /* every button is a row of the rail its
 body.full .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
 body.full .chip { width: var(--hit); padding: 0; font-size: 11px; }
 body.full .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
+
+/* A tool with a flyout of its own (the eraser and its size). In the rail the pair is one row; the
+   button grows along a column to fill it, as #color-btn does. */
+body.full .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
+body.full .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
+body.full .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: translateY(-50%); }
 
 /* Colours in the rail: one multicolour button; the swatches fly out to its left when it is tapped. */
 body.full #colors { display: flex; flex-direction: column; flex: 0 1 36px; min-height: 22px; position: relative; }

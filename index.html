@@ -74,9 +74,16 @@
           <button class="icon-btn" type="button" data-tool="highlighter" title="Highlighter (H)" aria-label="Highlighter">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4l6 6-8 8H8l-2-2v-4l8-8z"/><path d="M4 21h16"/></svg>
           </button>
-          <button class="icon-btn" type="button" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 19l-4-4 9-10 7 7-7 7H8z"/><path d="M8.5 10l7 6.5"/><path d="M13 19h7"/></svg>
-          </button>
+          <!-- The eraser and its size slider, which flies out when the eraser is tapped while already selected. -->
+          <div id="eraser-wrap" class="tool-wrap">
+            <button class="icon-btn" type="button" data-tool="eraser" title="Eraser (E). Tap again to set its size" aria-label="Eraser" aria-haspopup="true" aria-expanded="false">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 19l-4-4 9-10 7 7-7 7H8z"/><path d="M8.5 10l7 6.5"/><path d="M13 19h7"/></svg>
+            </button>
+            <div class="flyout">
+              <span class="dot-box"><span id="eraser-dot"></span></span>
+              <input id="eraser-range" type="range" min="4" max="40" step="1" value="8" aria-label="Eraser size">
+            </div>
+          </div>
           <button id="auto-erase" class="icon-btn chip" type="button" aria-pressed="false" hidden
             title="Auto-deselect: go back to the previous tool after erasing" aria-label="Auto-deselect the eraser after use">Auto</button>
           <button class="icon-btn" type="button" data-tool="hand" title="Hand (V)" aria-label="Hand">

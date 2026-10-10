@@ -341,27 +341,46 @@ let tool = 'pen';
 let beforeEraser = 'pen'; // the tool to go back to from the eraser
 const autoBtn = $('auto-erase'); // the eraser's option; only shown while the eraser is selected
 
-// In the full-screen rail the colours hide behind one button and open as a flyout.
-const colors = $('colors'), colorBtn = $('color-btn');
-function openColors(open) {
-  colors.classList.toggle('open', open);
-  colorBtn.setAttribute('aria-expanded', open);
+// A flyout: a panel that opens beside its button (`wrap` holds both) and is put away by a touch
+// anywhere outside it, the page included.
+function flyout(wrap, button) {
+  const set = open => {
+    wrap.classList.toggle('open', open);
+    button.setAttribute('aria-expanded', open);
+  };
+  document.addEventListener('pointerdown', e => { if (!wrap.contains(e.target)) set(false); });
+  return { set, toggle: () => set(!wrap.classList.contains('open')) };
 }
-colorBtn.onclick = () => openColors(!colors.classList.contains('open'));
-// Tapping anywhere else (the page included) puts the flyout away.
-document.addEventListener('pointerdown', e => { if (!colors.contains(e.target)) openColors(false); });
+
+// In the full-screen rail the colours hide behind one button and open as a flyout.
+const colorBtn = $('color-btn'), colorFly = flyout($('colors'), colorBtn);
+colorBtn.onclick = colorFly.toggle;
+
+// The eraser's size: a slider in a flyout, opened by tapping the eraser button while it is already the tool.
+const eraserBtn = document.querySelector('[data-tool="eraser"]'), eraserFly = flyout($('eraser-wrap'), eraserBtn);
+const eraserRange = $('eraser-range'), eraserDot = $('eraser-dot');
+function setEraserSize(radius) {
+  ink.setEraserSize(radius);
+  eraserRange.value = radius;
+  eraserDot.style.width = eraserDot.style.height = radius + 4 + 'px'; // a picture of the size, not to scale: 8 to 44px for 4 to 40
+}
+eraserRange.oninput = () => {
+  setEraserSize(Number(eraserRange.value));
+  try { localStorage.setItem('eraserSize', eraserRange.value); } catch { /* lasts for this visit only */ }
+};
 
 const setters = {
   tool: v => {
     if (v === 'eraser' && tool !== 'eraser') beforeEraser = tool;
     tool = v;
     autoBtn.hidden = v !== 'eraser';
+    if (v !== 'eraser') eraserFly.set(false);
     ink.setTool(v);
   },
   color: v => {
     ink.setColor(v);
     colorBtn.style.setProperty('--c', v); // the button shows the colour in use
-    openColors(false);
+    colorFly.set(false);
   },
   size: v => ink.setSize(Number(v)),
 };
@@ -376,6 +395,7 @@ function choose(kind, value) {
 $('toolbar').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (!btn) return;
+  if (btn === eraserBtn && tool === 'eraser') return eraserFly.toggle(); // already the tool: the tap is for its size
   for (const kind in setters) if (btn.dataset[kind]) choose(kind, btn.dataset[kind]);
 });
 undoBtn.onclick = () => ink.undo();
@@ -406,6 +426,10 @@ function option(btn, key, apply = () => {}) {
 const autoDeselect = option(autoBtn, 'autoDeselect');
 // Off by default: fingers scroll and zoom, and only a stylus or mouse draws.
 option($('finger-btn'), 'fingerDraw', on => ink.setFingerDraw(on));
+
+let savedEraser = 0;
+try { savedEraser = Number(localStorage.getItem('eraserSize')); } catch { /* storage blocked */ }
+setEraserSize(savedEraser >= Number(eraserRange.min) && savedEraser <= Number(eraserRange.max) ? savedEraser : 8);
 
 choose('tool', 'pen');
 choose('color', '#111111');

@@ -3,7 +3,7 @@
 const NS = 'http://www.w3.org/2000/svg';
 const HIGHLIGHTER_SCALE = 5;      // highlighter width = size * this
 const HIGHLIGHTER_OPACITY = 0.35;
-const ERASER_RADIUS = 8;          // page px, on top of half the stroke's width
+const ERASER_RADIUS = 8;          // page px, on top of half the stroke's width; the default, see setEraserSize()
 const MIN_STEP = 0.5;             // page px; closer points are dropped
 const MAX_HISTORY = 100;
 // A glow stroke is its line drawn several times over: wide and faint underneath, then narrower and
@@ -217,22 +217,32 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   const layer = document.createElementNS(NS, 'g');
   svg.appendChild(layer);
 
-  // Preview of the tip under a hovering stylus (Apple Pencil hover, S Pen, Surface Pen).
+  // The tip's circle. For a drawing tool it is a preview under a hovering stylus (Apple Pencil hover,
+  // S Pen, Surface Pen): the size and colour the line will have. For the eraser it is the area that
+  // erases: shown under a hovering stylus or mouse, and for as long as the eraser is being dragged.
   const nib = document.createElementNS(NS, 'circle');
-  nib.setAttribute('fill-opacity', 0.5);
+  nib.setAttribute('stroke-width', 1.5);
+  nib.setAttribute('vector-effect', 'non-scaling-stroke');   // the ring stays 1.5px on screen at any zoom
   nib.style.pointerEvents = 'none';
   nib.style.display = 'none';
   svg.appendChild(nib);
+  let eraserRadius = ERASER_RADIUS;
 
   function showNib(e) {
-    const pt = !penDown && tool !== 'hand' && svg.contains(e.target) && toPoint(e);
+    const erasing = act && !act.path;
+    if (erasing && act.id !== e.pointerId) return;   // while erasing, only the eraser's own pointer moves the ring
+    const hovering = !erasing && tool !== 'hand' && svg.contains(e.target) &&
+      (e.pointerType === 'pen' ? !penDown : e.pointerType === 'mouse' && tool === 'eraser' && e.buttons === 0);
+    if (!erasing && !hovering && e.pointerType === 'touch') return;   // a finger elsewhere leaves a stylus's preview alone
+    const pt = (erasing || hovering) && toPoint(e);
     nib.style.display = pt ? '' : 'none';
     if (!pt) return;
-    const rubber = tool === 'eraser';
+    const rubber = erasing || tool === 'eraser';
     nib.setAttribute('cx', pt[0]);
     nib.setAttribute('cy', pt[1]);
-    nib.setAttribute('r', rubber ? ERASER_RADIUS : Math.max(1.5, strokeWidth({ tool, size }) / 2));
-    nib.setAttribute('fill', rubber ? 'none' : color);
+    nib.setAttribute('r', rubber ? eraserRadius : Math.max(1.5, strokeWidth({ tool, size }) / 2));
+    nib.setAttribute('fill', rubber ? '#888' : color);
+    nib.setAttribute('fill-opacity', rubber ? 0.15 : 0.5);
     nib.setAttribute('stroke', rubber ? '#888' : 'none');
   }
 
@@ -340,16 +350,16 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   function eraseAlong(a, to) {
     const [x0, y0] = a.last, [x1, y1] = to;
     a.last = to;
-    const left = Math.min(x0, x1) - ERASER_RADIUS, right = Math.max(x0, x1) + ERASER_RADIUS;
-    const top = Math.min(y0, y1) - ERASER_RADIUS, bottom = Math.max(y0, y1) + ERASER_RADIUS;
+    const left = Math.min(x0, x1) - eraserRadius, right = Math.max(x0, x1) + eraserRadius;
+    const top = Math.min(y0, y1) - eraserRadius, bottom = Math.max(y0, y1) + eraserRadius;
     // Sampled along the sweep, a radius apart, so a fast swipe cannot jump over a stroke.
-    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / ERASER_RADIUS));
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / eraserRadius));
     const gone = new Set();
     strokes.forEach((s, i) => {
       const box = boxOf(s);
       if (box[0] > right || box[2] < left || box[1] > bottom || box[3] < top) return;
       for (let k = 1; k <= steps; k++) {
-        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps)) { gone.add(i); break; }
+        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, eraserRadius)) { gone.add(i); break; }
       }
     });
     if (!gone.size) return;
@@ -419,7 +429,6 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (isPen) {
       penDown = true;
       lastContact = e.timeStamp;
-      nib.style.display = 'none';
       dropPalms();
     } else if (isTouch && (penDown || e.timeStamp - lastContact < PALM_AFTER_PEN)) {
       // Lands while the stylus is writing or the instant it lifted: a palm. It joins no gesture,
@@ -455,15 +464,14 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
         act = { ...base, stroke, path };
       }
     }
+    showNib(e);   // the eraser's ring appears where it lands; a drawing tool's preview goes
     try { surface.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
     e.preventDefault();
   }
 
   function move(e) {
-    if (e.pointerType === 'pen') {
-      if (penDown) lastContact = e.timeStamp;
-      showNib(e);
-    }
+    if (e.pointerType === 'pen' && penDown) lastContact = e.timeStamp;
+    showNib(e);
     const p = pans.get(e.pointerId);
     if (p) {
       if (!p.live && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) >= PAN_SLOP) p.live = true;
@@ -549,12 +557,15 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (act && act.id === e.pointerId) {
       if (act.touch && e.type === 'pointercancel') discard();
       else finish();
+      nib.style.display = 'none';   // the eraser's ring goes with the gesture...
+      showNib(e);                   // ...unless a stylus or mouse is still hovering there
     }
   }
 
   surface.addEventListener('pointerdown', down);
   surface.addEventListener('pointermove', move);
-  svg.addEventListener('pointerleave', () => { nib.style.display = 'none'; });
+  // Not while erasing: capturing the pointer for a gesture counts as it leaving the svg.
+  svg.addEventListener('pointerleave', () => { if (!act || act.path) nib.style.display = 'none'; });
   for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) surface.addEventListener(type, end);
 
   function step(from, to) {
@@ -573,6 +584,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       svg.style.cursor = CURSORS[name];
     },
     setFingerDraw(on) { fingerDraw = !!on; },
+    setEraserSize(radius) { if (+radius > 0) eraserRadius = +radius; },   // page px
     setColor(cssColor) { if (cssColor) color = String(cssColor); },
     setSize(n) { if (+n > 0) size = +n; },
     undo: () => step(undoStack, redoStack),
