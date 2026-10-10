@@ -6,7 +6,7 @@
 <svg id="s" viewBox="0 0 400 300" style="display:block; width:800px; height:600px; background:#f4f4f4"></svg>
 <div id="out" style="padding: 8px"></div>
 <script type="module">
-import { createInk, pathData, hitStroke, distToSegment, widthAt } from './ink.js';
+import { createInk, pathData, outlineData, boxOf, hitStroke, distToSegment, widthAt } from './ink.js';
 
 const out = document.getElementById('out');
 let passed = 0, failed = 0;
@@ -46,6 +46,12 @@ try {
   check('hitStroke: misses a far point', !hitStroke(long, 500, 50, 5));
   check('hitStroke: radius accounts for stroke width',
     hitStroke({ ...long, tool: 'highlighter', size: 10 }, 500, 28, 5) && !hitStroke(long, 500, 28, 5));
+  // The eraser skips any stroke whose box it does not reach, so the box must cover all of the ink.
+  check('boxOf: covers the points plus half the stroke width',
+    String(boxOf(long)) === '-1,-1,1001,1' && String(boxOf({ ...long, tool: 'highlighter', size: 10 })) === '-25,-25,1025,25');
+  const pressed = { tool: 'pen', color: '#000', size: 4, points: [[10, 10, 1], [30, 20, 0.2]] };
+  check('boxOf: a pressure stroke is boxed at its widest possible',
+    boxOf(pressed)[0] === 10 - widthAt(4, 1) / 2 && boxOf(pressed)[3] === 20 + widthAt(4, 1) / 2);
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
@@ -161,6 +167,21 @@ try {
   check('a pressure stroke is one filled shape with no holes at its joins',
     heavyPath.getAttribute('fill') === heavy.color && !heavyPath.getAttribute('stroke') &&
     inked(50, 200) && inked(75, 200) && inked(100, 200) && inked(100, 201) && inked(125, 201) && inked(150, 200) && !inked(125, 210));
+  check('its ends are rounded outwards, past the first and last points',
+    inked(49.5, 200) && inked(151, 200) && !inked(47, 200) && !inked(154, 200));
+  check('it is a single closed outline, not a pile of pieces',
+    (heavyPath.getAttribute('d').match(/M/g) || []).length === 1 && heavyPath.getAttribute('d').endsWith('Z'));
+
+  // a line that doubles back on itself must not leave a gap or a flat corner at the turn
+  const hairpin = [[200, 240, 0.6], [240, 240, 0.6], [280, 240, 0.6], [240, 243, 0.6], [200, 246, 0.6]];
+  probe.setAttribute('d', outlineData(hairpin, 6));
+  svg.appendChild(probe);   // hit testing needs the path to be in the page
+  const inProbe = (x, y) => probe.isPointInFill(new DOMPoint(x, y));
+  // The centre line only bends towards the far point (280, 240): it turns at (a + 6b + c) / 8 = (270, 240.4).
+  check('a stroke that doubles back is solid along both legs and round at the turn',
+    inProbe(220, 240) && inProbe(260, 241) && inProbe(220, 245) && inProbe(270, 240.4) && inProbe(272.5, 240.4));
+  check('...and nothing sticks out past the turn', !inProbe(275, 240.4) && !inProbe(280, 240));
+  probe.remove();
   ink.load(ink.getStrokes());
   check('a pressure stroke survives save and load unchanged',
     JSON.stringify(ink.getStrokes()[1]) === JSON.stringify(heavy) &&
@@ -232,11 +253,18 @@ try {
   changes = 0;
   drag(300, 20, 300, 280);
   check('eraser drag that touches nothing changes nothing', ink.getStrokes().length === 2 && changes === 0 && erases === 0);
+  const [lineEl, dotEl] = svg.querySelectorAll('path');
   drag(100, 20, 100, 80);
   check('eraser swipe across the middle of a stroke removes it, one onChange, one onErase',
     ink.getStrokes().length === 1 && changes === 1 && erases === 1);
+  // Erasing must stay cheap on a full page: it may only touch the element of the stroke that goes.
+  check('erasing leaves every other stroke\'s element alone',
+    svg.querySelectorAll('path').length === 1 && svg.querySelector('path') === dotEl && !lineEl.isConnected);
   ink.undo();
   check('undo brings the erased stroke back', ink.getStrokes().length === 2);
+  const back = svg.querySelectorAll('path');
+  check('undo puts the same element back in its place instead of rebuilding the page',
+    back.length === 2 && back[0] === lineEl && back[1] === dotEl);
 
   // The app zooms the page with a CSS transform on an ancestor. Safari's getScreenCTM() ignores that,
   // so positions must come from where the svg really is on screen. At scale 0.5 this svg is drawn at

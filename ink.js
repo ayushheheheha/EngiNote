@@ -32,10 +32,13 @@ export function widthAt(size, p) {
   return size * (PRESSURE_FLOOR + (1 - PRESSURE_FLOOR) * 2 * p);
 }
 
-// A pressure stroke has points [x, y, pressure] and is drawn as a filled shape: discs joined by
-// quads. Every piece winds the same way, so the default nonzero fill unions them without holes.
-// Between samples the outline follows the same midpoint curve as pathData(), cut into short straight
-// steps, so a stylus that only reports 60 points a second still draws round curves.
+// A pressure stroke has points [x, y, pressure] and is drawn as one filled outline. Its centre line
+// is the same midpoint curve pathData() draws (straight from the first point to the first midpoint,
+// then a curve from midpoint to midpoint bending at each point); the outline is that line pushed
+// out by half the width on either side, closed with a round cap at each end.
+// One closed shape per stroke matters: an earlier version stamped a disc and a quad at every step,
+// hundreds of overlapping pieces per stroke, and repainting a page of those was what made erasing
+// and zooming slow.
 function disc([x, y, p], size) {
   const r = round2(widthAt(size, p) / 2);
   return `M${round2(x - r)} ${round2(y)}a${r} ${r} 0 1 0 ${round2(2 * r)} 0a${r} ${r} 0 1 0 ${round2(-2 * r)} 0`;
@@ -43,51 +46,73 @@ function disc([x, y, p], size) {
 
 const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 
-/** Outline from the middle of a-b to the middle of b-c, bending at b (pressure bends with it). */
-export function outlineCurve(a, b, c, size) {
-  const from = mid(a, b), to = mid(b, c);
-  const length = Math.hypot(b[0] - from[0], b[1] - from[1]) + Math.hypot(to[0] - b[0], to[1] - b[1]);
-  const steps = Math.min(8, Math.max(1, Math.ceil(length / 3)));
-  let d = '', prev = from;
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps, u = 1 - t;
-    const p = [0, 1, 2].map(k => u * u * from[k] + 2 * u * t * b[k] + t * t * to[k]);
-    d += outlineStep(prev, p, size);
-    prev = p;
+// Unit vector square to the direction a -> b, or null where the two coincide.
+function across(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+  return len ? [-dy / len, dx / len] : null;
+}
+
+/** Path data for a whole pressure stroke. */
+export function outlineData(points, size) {
+  const n = points.length;
+  if (n === 1) return disc(points[0], size);
+  // The point on one side (+1 or -1) of centre-line point p, where `n` is the unit vector across the line there.
+  const edge = (p, n, side) => {
+    const r = side * widthAt(size, p[2]) / 2;
+    return `${round2(p[0] + n[0] * r)} ${round2(p[1] + n[1] * r)}`;
+  };
+  const NONE = [0, 0];
+  // seg[i]: across the straight run from point i to point i + 1. bend[i]: across the curve where it bends at point i.
+  const seg = [];
+  for (let i = 0; i < n - 1; i++) seg.push(across(points[i], points[i + 1]) || seg[i - 1] || NONE);
+  const bend = i => across(points[i - 1], points[i + 1]) || seg[i - 1];
+  const first = points[0], last = points[n - 1];
+  const cap = p => { const r = round2(widthAt(size, p[2]) / 2); return `A${r} ${r} 0 0 0 `; };
+
+  // out along one side...
+  let d = `M${edge(first, seg[0], 1)}L${edge(mid(first, points[1]), seg[0], 1)}`;
+  for (let i = 1; i < n - 1; i++) d += `Q${edge(points[i], bend(i), 1)} ${edge(mid(points[i], points[i + 1]), seg[i], 1)}`;
+  d += `L${edge(last, seg[n - 2], 1)}${cap(last)}${edge(last, seg[n - 2], -1)}`;
+  // ...and back along the other
+  d += `L${edge(mid(points[n - 2], last), seg[n - 2], -1)}`;
+  for (let i = n - 2; i >= 1; i--) d += `Q${edge(points[i], bend(i), -1)} ${edge(mid(points[i - 1], points[i]), seg[i - 1], -1)}`;
+  d += `L${edge(first, seg[0], -1)}${cap(first)}${edge(first, seg[0], 1)}Z`;
+
+  // Where the line doubles back sharply the outline alone would leave a flat corner: round it with a
+  // disc. The disc goes on the curve's own turning point, (a + 6b + c) / 8, not on b: the curve only
+  // bends towards b, so a disc there would stick out as a knob.
+  for (let i = 1; i < n - 1; i++) {
+    const a = points[i - 1], b = points[i], c = points[i + 1];
+    if ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) < 0) {
+      d += disc([0, 1, 2].map(k => (a[k] + 6 * b[k] + c[k]) / 8), size);
+    }
   }
   return d;
 }
 
-/** Straight piece of outline from point a to point b, ending in a disc at b. */
-export function outlineStep(a, b, size) {
-  const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
-  if (!len) return disc(b, size);
-  const nx = -dy / len, ny = dx / len;
-  const corner = (p, side) => {
-    const r = side * widthAt(size, p[2]) / 2;
-    return `${round2(p[0] + nx * r)} ${round2(p[1] + ny * r)}`;
-  };
-  return `M${corner(a, 1)}L${corner(b, 1)}L${corner(b, -1)}L${corner(a, -1)}Z${disc(b, size)}`;
+/** Path data for any stroke: an outline to fill for a pressure stroke, a line to stroke otherwise. */
+export function strokeData(stroke) {
+  return stroke.points[0].length > 2 ? outlineData(stroke.points, stroke.size) : pathData(stroke.points);
 }
 
-/** The last piece of a pressure stroke: from the middle of its final two points to the final point. */
-export function outlineTail(points, size) {
-  const n = points.length;
-  return n > 1 ? outlineStep(mid(points[n - 2], points[n - 1]), points[n - 1], size) : '';
-}
-
-/** Path data that point number n (default: the newest) adds to a pressure stroke, not counting the tail. */
-export function outlineGrow(points, size, n = points.length) {
-  if (n === 1) return disc(points[0], size);
-  if (n === 2) return outlineStep(points[0], mid(points[0], points[1]), size);
-  return outlineCurve(points[n - 3], points[n - 2], points[n - 1], size);
-}
-
-/** Path data for a whole pressure stroke: exactly what drawing it point by point produces. */
-export function outlineData(points, size) {
-  let d = '';
-  for (let n = 1; n <= points.length; n++) d += outlineGrow(points, size, n);
-  return d + outlineTail(points, size);
+const boxes = new WeakMap();
+/** [minX, minY, maxX, maxY] of a stroke's ink. Cached: a stroke is never changed once it is committed. */
+export function boxOf(stroke) {
+  let box = boxes.get(stroke);
+  if (!box) {
+    const pressure = stroke.points[0].length > 2;
+    const half = Math.max(strokeWidth(stroke), pressure ? widthAt(stroke.size, 1) : 0) / 2;
+    box = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const [x, y] of stroke.points) {
+      if (x < box[0]) box[0] = x;
+      if (y < box[1]) box[1] = y;
+      if (x > box[2]) box[2] = x;
+      if (y > box[3]) box[3] = y;
+    }
+    box[0] -= half; box[1] -= half; box[2] += half; box[3] += half;
+    boxes.set(stroke, box);
+  }
+  return box;
 }
 
 /** SVG path data for [[x, y], ...]: quadratic curves through the midpoints of successive points. */
@@ -147,9 +172,8 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
   let strokes = [];   // committed strokes; the array is replaced, never mutated
   let els = [];       // one <path> per stroke, same order
   const undoStack = [], redoStack = [];   // snapshots of `strokes`
-  // Gesture in progress: draw {id, touch, at, stroke, path, d} or erase {id, touch, at, before, last}.
-  // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm);
-  // `d` is the path data so far of a pressure stroke (null for a plain line).
+  // Gesture in progress: draw {id, touch, at, stroke, path} or erase {id, touch, at, before, last}.
+  // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm).
   let act = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
   // Fingers scroll and zoom; only a stylus or mouse draws. That is the palm rejection that matters:
@@ -173,6 +197,10 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     svg.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   }
 
+  // The strokes live in their own group, in order; the tip preview sits after it, so above them all.
+  const layer = document.createElementNS(NS, 'g');
+  svg.appendChild(layer);
+
   // Preview of the tip under a hovering stylus (Apple Pencil hover, S Pen, Surface Pen).
   const nib = document.createElementNS(NS, 'circle');
   nib.setAttribute('fill-opacity', 0.5);
@@ -190,7 +218,6 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     nib.setAttribute('r', rubber ? ERASER_RADIUS : Math.max(1.5, strokeWidth({ tool, size }) / 2));
     nib.setAttribute('fill', rubber ? 'none' : color);
     nib.setAttribute('stroke', rubber ? '#888' : 'none');
-    if (nib.nextSibling) svg.appendChild(nib);   // keep it above every stroke
   }
 
   const getStrokes = () => strokes.slice();
@@ -198,12 +225,11 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
 
   function makePath(s) {
     const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', strokeData(s));
     if (s.points[0].length > 2) {   // pressure-sensitive: a filled outline, not a stroked line
-      p.setAttribute('d', outlineData(s.points, s.size));
       p.setAttribute('fill', s.color);
       return p;
     }
-    p.setAttribute('d', pathData(s.points));
     p.setAttribute('fill', 'none');
     p.setAttribute('stroke', s.color);
     p.setAttribute('stroke-width', strokeWidth(s));
@@ -217,11 +243,22 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     return p;
   }
 
-  // ponytail: full re-render on undo/redo/load/erase; diff by stroke identity if thousands of strokes get slow.
+  // stroke -> its <path>. Building and painting a path is the costly part, so each stroke gets one
+  // element for life, and it is re-attached, not rebuilt, when the stroke comes back (undo, redo).
+  const elOf = new WeakMap();
+  function pathOf(s) {
+    let p = elOf.get(s);
+    if (!p) elOf.set(s, p = makePath(s));
+    return p;
+  }
+
+  // Make the page show exactly the current strokes, in order, touching only the elements that differ.
   function render() {
-    for (const el of els) el.remove();
-    els = strokes.map(makePath);
-    for (const el of els) svg.appendChild(el);
+    els = strokes.map(pathOf);
+    const keep = new Set(els);
+    for (const el of [...layer.children]) if (!keep.has(el)) el.remove();
+    // What is left is in the right relative order (strokes never reorder), so only the gaps need filling.
+    els.forEach((el, i) => { if (layer.children[i] !== el) layer.insertBefore(el, layer.children[i] || null); });
   }
 
   function commit(next, prev = strokes) {
@@ -239,6 +276,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     act = null;
     if (a.path) {
       els.push(a.path);   // the live path becomes the stroke's element
+      elOf.set(a.stroke, a.path);
       commit([...strokes, a.stroke]);
     } else if (strokes !== a.before) {
       commit(strokes, a.before);   // everything erased in this drag = one undo step
@@ -258,21 +296,28 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     ];
   }
 
-  // Erase along the eraser's path from a.last to `to`, sampled so a fast swipe cannot jump over a stroke.
-  // ponytail: tests every segment of every stroke; add per-stroke bounding boxes if erasing gets slow.
+  // Erase along the eraser's path from a.last to `to`. It has to stay cheap on a full page, since it
+  // runs on every pointer move: only strokes whose bounding box the sweep reaches are examined, and
+  // only the elements of the strokes that go are touched.
   function eraseAlong(a, to) {
     const [x0, y0] = a.last, [x1, y1] = to;
-    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / ERASER_RADIUS));
-    let kept = strokes;
-    for (let i = 1; i <= steps; i++) {
-      const x = x0 + (x1 - x0) * i / steps, y = y0 + (y1 - y0) * i / steps;
-      kept = kept.filter(s => !hitStroke(s, x, y));
-    }
     a.last = to;
-    if (kept.length !== strokes.length) {
-      strokes = kept;
-      render();
-    }
+    const left = Math.min(x0, x1) - ERASER_RADIUS, right = Math.max(x0, x1) + ERASER_RADIUS;
+    const top = Math.min(y0, y1) - ERASER_RADIUS, bottom = Math.max(y0, y1) + ERASER_RADIUS;
+    // Sampled along the sweep, a radius apart, so a fast swipe cannot jump over a stroke.
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / ERASER_RADIUS));
+    const gone = new Set();
+    strokes.forEach((s, i) => {
+      const box = boxOf(s);
+      if (box[0] > right || box[2] < left || box[1] > bottom || box[3] < top) return;
+      for (let k = 1; k <= steps; k++) {
+        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps)) { gone.add(i); break; }
+      }
+    });
+    if (!gone.size) return;
+    for (const i of gone) els[i].remove();
+    strokes = strokes.filter((_, i) => !gone.has(i));
+    els = els.filter((_, i) => !gone.has(i));
   }
 
   // Throw away the gesture in progress without committing it.
@@ -358,8 +403,8 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
         if (tool === 'pen' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
         const stroke = { tool, color, size, points: [pt] };
         const path = makePath(stroke);
-        svg.appendChild(path);
-        act = { ...base, stroke, path, d: pt.length > 2 ? path.getAttribute('d') : null };
+        layer.appendChild(path);
+        act = { ...base, stroke, path };
       }
     }
     try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
@@ -402,14 +447,12 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       const pts = a.stroke.points;
       const last = pts[pts.length - 1];
       if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < MIN_STEP) continue;
-      if (a.d) pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
+      if (last.length > 2) pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
       pts.push(pt);
-      if (a.d) a.d += outlineGrow(pts, a.stroke.size);
     }
-    if (!a.path) return;
-    // ponytail: a plain line rebuilds its whole path string per move; append incrementally (as the
-    // pressure outline does) if very long strokes lag.
-    a.path.setAttribute('d', a.d ? a.d + outlineTail(a.stroke.points, a.stroke.size) : pathData(a.stroke.points));
+    // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
+    // build it incrementally if strokes of several thousand points ever lag.
+    if (a.path) a.path.setAttribute('d', strokeData(a.stroke));
   }
 
   // pointerup, pointercancel and lostpointercapture all end the gesture. A cancelled stylus or mouse
