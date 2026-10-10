@@ -527,6 +527,8 @@ body.wide.editing #rec-bar {
 body.recording .rec-dot { border-radius: 2px; } /* a square: stop */
 #rec-time { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
 body.recording #rec-time { color: #ff3b30; }
+body.paused #rec-time { color: var(--muted); }
+#rec-pause { color: var(--text); }
 #rec-quality {
   height: var(--hit);
   max-width: 44vw;

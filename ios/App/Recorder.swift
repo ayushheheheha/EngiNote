@@ -42,6 +42,13 @@ final class Recorder {
     private var microphone = true
     private var failure: String?
     private var file: URL?
+    // Pausing. ReplayKit cannot pause, so while paused its frames are simply not written; and from
+    // then on every piece is written `offset` earlier than it was made, so the movie has no hole
+    // where the pause was. `lastEnd` is where the movie has got to, in its own time.
+    private var paused = false
+    private var rejoin = false // resumed: the next frame decides the new `offset`
+    private var offset = CMTime.zero
+    private var lastEnd = CMTime.zero
 
     /// A recording has been started and not yet stopped.
     var isActive: Bool {
@@ -92,6 +99,10 @@ final class Recorder {
         self.failure = nil
         self.file = url
         self.microphone = microphone
+        self.paused = false
+        self.rejoin = false
+        self.offset = .zero
+        self.lastEnd = .zero
         if let known = Recorder.qualities[name] { self.quality = known }
         lock.unlock()
 
@@ -102,6 +113,22 @@ final class Recorder {
             if error != nil { self?.forget() }
             DispatchQueue.main.async { done(error?.localizedDescription) }
         })
+    }
+
+    /// Leave out everything from now until resume(). The movie carries on from there with no gap.
+    func pause() {
+        lock.lock()
+        paused = true
+        lock.unlock()
+    }
+
+    func resume() {
+        lock.lock()
+        if paused {
+            paused = false
+            rejoin = true
+        }
+        lock.unlock()
     }
 
     /// Stop and finish the movie. `done` is called on the main thread with the file (nil if there
@@ -154,23 +181,47 @@ final class Recorder {
         guard CMSampleBufferDataIsReady(buffer) else { return }
         lock.lock()
         defer { lock.unlock() }
-        guard let writer = writer, failure == nil else { return }
+        guard let writer = writer, failure == nil, !paused else { return }
+        guard type == .video || type == .audioMic else { return } // the app makes no sound of its own
 
-        switch type {
-        case .video:
-            // The movie is set up on its first frame, because only a frame says how the screen is turned.
-            if video == nil { begin(writer, with: buffer) }
-            if writer.status == .writing, let video = video, video.isReadyForMoreMediaData, !video.append(buffer) {
-                fail(writer.error?.localizedDescription ?? "The picture could not be written.")
-            }
-        case .audioMic:
-            if writer.status == .writing, let audio = audio, audio.isReadyForMoreMediaData, !audio.append(buffer) {
-                fail(writer.error?.localizedDescription ?? "The sound could not be written.")
-            }
-        default:
-            break // the app makes no sound of its own
+        // Back from a pause: the movie goes on from where it had got to, starting with a frame of
+        // picture. That frame's own time says how far to move everything from here on.
+        if rejoin {
+            guard type == .video else { return }
+            if video != nil { offset = CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(buffer), lastEnd) }
+            rejoin = false
         }
+        // The movie is set up on its first frame, because only a frame says how the screen is turned.
+        if type == .video, video == nil { begin(writer, with: buffer) }
+
         if writer.status == .failed { fail(writer.error?.localizedDescription ?? "The recording stopped.") }
+        guard writer.status == .writing, let input = (type == .video ? video : audio), input.isReadyForMoreMediaData else { return }
+        guard let piece = CMTimeCompare(offset, .zero) == 0 ? buffer : moved(buffer, earlierBy: offset) else { return }
+        guard input.append(piece) else {
+            fail(writer.error?.localizedDescription ?? "The recording could not be written.")
+            return
+        }
+        // A frame of picture often does not say how long it lasts: a sixtieth of a second will do.
+        let length = CMSampleBufferGetDuration(piece)
+        let lasts = length.isValid && CMTimeCompare(length, .zero) > 0 ? length : CMTime(value: 1, timescale: 60)
+        let end = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(piece), lasts)
+        if CMTimeCompare(end, lastEnd) > 0 { lastEnd = end }
+    }
+
+    /// A copy of a piece of picture or sound, timed `offset` earlier.
+    private func moved(_ buffer: CMSampleBuffer, earlierBy offset: CMTime) -> CMSampleBuffer? {
+        var count: CMItemCount = 0
+        CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count)
+        guard count > 0 else { return nil }
+        var timing = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: count, arrayToFill: &timing, entriesNeededOut: &count)
+        for i in timing.indices {
+            timing[i].presentationTimeStamp = CMTimeSubtract(timing[i].presentationTimeStamp, offset)
+            if timing[i].decodeTimeStamp.isValid { timing[i].decodeTimeStamp = CMTimeSubtract(timing[i].decodeTimeStamp, offset) }
+        }
+        var copy: CMSampleBuffer?
+        CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: buffer, sampleTimingEntryCount: timing.count, sampleTimingArray: &timing, sampleBufferOut: &copy)
+        return copy
     }
 
     // With the lock held: add picture and sound to the movie and start it at this frame's time.

@@ -943,9 +943,11 @@ wideBtn.onclick = () => {
 // 16:9 window; these controls sit outside it (style.css, #rec-bar).
 const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
-  const recBtn = $('rec-btn'), recTime = $('rec-time'), recQuality = $('rec-quality');
+  const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');
   const micOn = option($('rec-mic'), 'recMic', undefined, true);
-  let recording = false, startedAt = 0, ticker = 0;
+  // 'idle', 'recording' or 'paused'. The clock counts recorded time only: `done` ms from before the
+  // last pause, plus the time since `since` while it runs.
+  let state = 'idle', done = 0, since = 0, ticker = 0;
   document.body.classList.add('can-record');
 
   try { recQuality.value = localStorage.getItem('recQuality') ?? recQuality.value; } catch { /* storage blocked */ }
@@ -955,33 +957,43 @@ if (shellRecorder) {
   };
 
   const showTime = () => {
-    const s = recording ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+    const s = Math.floor((done + (state === 'recording' ? Date.now() - since : 0)) / 1000);
     recTime.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   };
-  function showRecording(on) {
-    recording = on;
+  function showState(next) {
+    if (state === 'recording') done += Date.now() - since; // the stretch that just ended
+    if (next === 'idle' || state === 'idle') done = 0;     // over, or a new recording
+    state = next;
+    since = Date.now();
+    const on = state !== 'idle';
     document.body.classList.toggle('recording', on);
+    document.body.classList.toggle('paused', state === 'paused');
     recBtn.setAttribute('aria-pressed', on);
     $('rec-label').textContent = on ? 'Stop' : 'Record';
+    recPause.hidden = !on;
+    recPause.textContent = state === 'paused' ? 'Resume' : 'Pause';
+    recPause.setAttribute('aria-pressed', state === 'paused');
     // Fixed for the length of a recording: its settings, and the 16:9 window it is a picture of.
     $('rec-mic').disabled = recQuality.disabled = wideBtn.disabled = on;
     clearInterval(ticker);
-    if (on) {
-      startedAt = Date.now();
-      ticker = setInterval(showTime, 1000);
-    }
+    if (state === 'recording') ticker = setInterval(showTime, 1000);
     showTime();
   }
 
+  // Each button waits for the app's answer: starting asks the user's permission, stopping finishes the file.
   recBtn.onclick = () => {
-    recBtn.disabled = true; // until the app answers: starting asks the user's permission, stopping finishes the file
-    shellRecorder.postMessage(recording ? { action: 'stop' } : { action: 'start', quality: recQuality.value, microphone: micOn() });
+    recBtn.disabled = recPause.disabled = true;
+    shellRecorder.postMessage(state === 'idle' ? { action: 'start', quality: recQuality.value, microphone: micOn() } : { action: 'stop' });
+  };
+  recPause.onclick = () => {
+    recBtn.disabled = recPause.disabled = true;
+    shellRecorder.postMessage({ action: state === 'paused' ? 'resume' : 'pause' });
   };
   addEventListener('recorder', e => {
-    recBtn.disabled = false;
-    showRecording(e.detail?.state === 'recording');
+    recBtn.disabled = recPause.disabled = false;
+    showState(['recording', 'paused'].includes(e.detail?.state) ? e.detail.state : 'idle');
     if (e.detail?.message) notify(e.detail.message);
-    if (!recording) askVideos(); // there may be a new one
+    if (state === 'idle') askVideos(); // there may be a new one
   });
 }
 

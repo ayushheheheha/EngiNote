@@ -98,10 +98,17 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     self.send("recorder", ["state": "recording"])
                 }
             }
+        case "pause" where recorder.isActive:
+            recorder.pause()
+            send("recorder", ["state": "paused"])
+        case "resume" where recorder.isActive:
+            recorder.resume()
+            send("recorder", ["state": "recording"])
         case "stop":
             stopRecording(because: nil)
         default:
-            break
+            // Asked to pause or resume a recording that is no longer running: say how things stand.
+            send("recorder", ["state": "idle"])
         }
     }
 
