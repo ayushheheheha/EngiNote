@@ -39,6 +39,7 @@ final class Recorder {
     private var video: AVAssetWriterInput?
     private var audio: AVAssetWriterInput?
     private var quality = Quality(width: 1920, height: 1080, bitRate: 4_000_000)
+    private var wholeScreen = false // keep all of the screen, not just the 16:9 band across its middle
     private var microphone = true
     private var failure: String?
     private var file: URL?
@@ -97,11 +98,15 @@ final class Recorder {
         try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     }
 
-    /// Start recording. `enhance`: record the voice with the background noise taken out.
+    /// Start recording. `wide`: the page's 16:9 window is on, and the video is to be that window;
+    /// otherwise it is the whole screen. `enhance`: record the voice with the background noise taken out.
     /// `done` is called on the main thread: with what went wrong (which includes the user saying
     /// no to the system's question), or nil; and with something the user should know even though
     /// recording did start (the app could not listen to the microphone itself).
-    func start(quality name: String, microphone: Bool, enhance: Bool, done: @escaping (_ error: String?, _ note: String?) -> Void) {
+    func start(quality name: String, wide: Bool, microphone: Bool, enhance: Bool, done: @escaping (_ error: String?, _ note: String?) -> Void) {
+        lock.lock()
+        wholeScreen = !wide
+        lock.unlock()
         let screen = RPScreenRecorder.shared()
         guard screen.isAvailable, !screen.isRecording, !isActive else {
             done("Screen recording is not available right now.", nil)
@@ -370,11 +375,27 @@ final class Recorder {
             }
         }
 
+        // The picture's size, as it is watched. For the 16:9 window: the quality's own. For the whole
+        // screen: the screen's shape, with its shorter side the quality's height (1080 or 720).
+        var across = quality.width
+        var down = quality.height
+        if wholeScreen, let image = CMSampleBufferGetImageBuffer(buffer) {
+            let width = CVPixelBufferGetWidth(image), height = CVPixelBufferGetHeight(image)
+            let screenAcross = sideways ? height : width, screenDown = sideways ? width : height
+            let even = { (n: Int) in max(2, n / 2 * 2) } // encoders want even numbers
+            if screenAcross >= screenDown, screenDown > 0 {
+                across = even(quality.height * screenAcross / screenDown)
+                down = quality.height
+            } else if screenAcross > 0 {
+                across = quality.height
+                down = even(quality.height * screenDown / screenAcross)
+            }
+        }
         let size: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264, // plays and edits everywhere, unlike HEVC on some PCs
-            AVVideoWidthKey: sideways ? quality.height : quality.width,
-            AVVideoHeightKey: sideways ? quality.width : quality.height,
-            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill, // this is the crop to 16:9
+            AVVideoWidthKey: sideways ? down : across,
+            AVVideoHeightKey: sideways ? across : down,
+            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill, // for the 16:9 window, this is the crop
         ]
         var picture = size
         picture[AVVideoCompressionPropertiesKey] = [

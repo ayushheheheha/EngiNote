@@ -90,7 +90,10 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         switch body["action"] as? String {
         case "start":
             let microphone = body["microphone"] as? Bool ?? true
-            recorder.start(quality: body["quality"] as? String ?? "standard", microphone: microphone, enhance: body["enhance"] as? Bool ?? false) { [weak self] error, note in
+            recorder.start(
+                quality: body["quality"] as? String ?? "standard", wide: body["wide"] as? Bool ?? true,
+                microphone: microphone, enhance: body["enhance"] as? Bool ?? false
+            ) { [weak self] error, note in
                 guard let self = self else { return }
                 if let error = error {
                     self.send("recorder", ["state": "idle", "message": "Recording did not start: \(error)"])

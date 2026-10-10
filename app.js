@@ -397,6 +397,11 @@ page.style.width = PAGE_WIDTH + 'px';
 //   #page   inside it is scaled to `zoom`, and is redrawn whenever that changes.
 let pos = [0, 0];
 const MARGIN = GUTTER / 2; // the grey band kept around the sheet
+// The toolbar floats over the top of the window, a sheet of glass with the note passing beneath it
+// (style.css). So the sheet's resting place, at the start of the note, is below the toolbar. In
+// full screen the tools are a rail beside the window, and nothing is in the way.
+const toolbar = $('toolbar');
+const restTop = () => MARGIN + (document.body.classList.contains('full') ? 0 : toolbar.offsetHeight);
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const showZoom = (value = zoom) => { $('zoom-label').textContent = Math.round(value * 100) + '%'; };
@@ -410,10 +415,10 @@ function origin() {
 // `at`, brought back within bounds: the sheet may not leave the window (its margin may just show),
 // and it sits centred when it is narrower than the window.
 function within([x, y]) {
-  const w = PAGE_WIDTH * zoom, h = pageHeight * zoom, vw = scroller.clientWidth, vh = scroller.clientHeight;
+  const w = PAGE_WIDTH * zoom, h = pageHeight * zoom, vw = scroller.clientWidth, vh = scroller.clientHeight, top = restTop();
   return [
     w + GUTTER <= vw ? (vw - w) / 2 : Math.min(MARGIN, Math.max(vw - w - MARGIN, x)),
-    h + GUTTER <= vh ? MARGIN : Math.min(MARGIN, Math.max(vh - h - MARGIN, y)),
+    h + top + MARGIN <= vh ? top : Math.min(top, Math.max(vh - h - MARGIN, y)),
   ];
 }
 
@@ -426,10 +431,10 @@ function place(at = pos, glide = false) {
   mover.style.transition = glide ? 'transform .2s ease-out' : '';
   mover.style.transform = `translate(${snap(pos[0])}px, ${snap(pos[1])}px)`;
   // The thin bar at the right edge: how far down the note the window is.
-  const h = pageHeight * zoom + GUTTER, vh = scroller.clientHeight, length = Math.max(28, vh * vh / h);
+  const top = restTop(), h = pageHeight * zoom + top + MARGIN, vh = scroller.clientHeight, length = Math.max(28, vh * vh / h);
   bar.hidden = h <= vh;
   bar.style.height = length + 'px';
-  bar.style.transform = `translateY(${(MARGIN - pos[1]) / (h - vh) * (vh - length)}px)`;
+  bar.style.transform = `translateY(${(top - pos[1]) / (h - vh) * (vh - length)}px)`;
 }
 
 // Move the view by a scroll amount: positive goes right / down the note.
@@ -454,7 +459,7 @@ function setPageHeight(height) {
 function resetZoom(value) {
   zoom = clampZoom(value);
   layout();
-  place([0, MARGIN]);
+  place([0, restTop()]);
   showZoom();
 }
 
@@ -797,7 +802,7 @@ addWrap.addEventListener('click', e => {
   showPanel(true);
 });
 
-$('toolbar').addEventListener('click', e => {
+toolbar.addEventListener('click', e => {
   const value = e.target.closest('button')?.dataset.tool;
   if (!value) return;
   if (value !== tool) return choose(value);
@@ -988,7 +993,7 @@ if (shellRecorder) {
   recBtn.onclick = () => {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
-      ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn() }
+      ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), wide: document.body.classList.contains('wide') }
       : { action: 'stop' });
   };
   recPause.onclick = () => {
@@ -1029,7 +1034,7 @@ document.addEventListener('keydown', e => {
     panBy(0, SCROLL_KEYS[key] * scroller.clientHeight * (e.shiftKey && key === ' ' ? -1 : 1));
   } else if (key === 'home' || key === 'end') {
     e.preventDefault();
-    place([pos[0], key === 'home' ? MARGIN : -Infinity]);
+    place([pos[0], key === 'home' ? Infinity : -Infinity]); // place() brings either back to the note's first or last line
   }
 });
 

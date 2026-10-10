@@ -1,36 +1,71 @@
+/* The look is glass, after iOS: controls sit on translucent panes that float over the content,
+   blur and brighten what is behind them, and catch the light along their top edge. */
 :root {
-  --bg: #f3f4f7;
-  --canvas: #e6e8ee;
-  --surface: #ffffff;
-  --text: #1f2430;
-  --muted: #7a8194;
-  --border: #e3e6ec;
+  --bg: #eef0f6;
+  --canvas: #e3e6ee;
+  --surface: #ffffff; /* what glass falls back to where it cannot be see-through */
+  --text: #1c2030;
+  --muted: #6f778c;
+  --border: rgb(120 128 150 / .28);
   --accent: #2f6fed;
-  --accent-soft: #e6eeff;
+  --accent-soft: rgb(47 111 237 / .14);
   --danger: #d6336c;
-  --radius: 14px;
-  --shadow: 0 1px 2px rgba(20, 25, 40, .06), 0 4px 16px rgba(20, 25, 40, .08);
+  --radius: 22px;
+  --shadow: 0 2px 6px rgb(20 25 40 / .07), 0 18px 48px rgb(20 25 40 / .14); /* the sheet of paper */
   --hit: 36px; /* button size */
-  --thumb: #f7f8fb;
-  --faint: #b6bccb; /* dashed outlines, placeholder icons */
+  --thumb: linear-gradient(160deg, #f6f8fc, #e8ecf6);
+  --faint: #aab1c3; /* dashed outlines, placeholder icons */
+
+  /* Glass. --glass is a pane over content (toolbars); --glass-thick one with things to read on it
+     (menus, panels, cards). --rim is the light on its edges, --sheen the glow across its top. */
+  --glass: rgb(255 255 255 / .66);
+  --glass-thick: rgb(255 255 255 / .82);
+  --sheen: rgb(255 255 255 / .55);
+  --rim: inset 0 1px 0 rgb(255 255 255 / .95), inset 0 0 0 1px rgb(255 255 255 / .45), inset 0 -1px 0 rgb(20 25 40 / .05);
+  --float: 0 1px 2px rgb(20 25 40 / .06), 0 10px 30px rgb(20 25 40 / .13); /* the shadow a pane casts */
+  --blur: blur(22px) saturate(180%) brightness(1.06);
+  --fill: rgb(110 120 145 / .14); /* a control on glass, hovered or holding something */
+  /* soft light behind everything, so the glass has colour to pick up */
+  --glow-a: rgb(96 130 255 / .22);
+  --glow-b: rgb(255 120 196 / .15);
+  --glow-c: rgb(70 205 190 / .13);
   color-scheme: light;
 }
 
 /* data-theme is set by the inline script in index.html and flipped by the theme buttons. */
 :root[data-theme="dark"] {
-  --bg: #15171c;
-  --canvas: #0c0d10;
+  --bg: #101216;
+  --canvas: #0a0b0e;
   --surface: #23262e;
-  --text: #e7e9ee;
-  --muted: #8f96a8;
-  --border: #363a45;
-  --accent: #6b9bff;
-  --accent-soft: #283758;
+  --text: #eceef3;
+  --muted: #979eb1;
+  --border: rgb(255 255 255 / .14);
+  --accent: #74a2ff;
+  --accent-soft: rgb(116 162 255 / .22);
   --danger: #ff6b93;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .45);
-  --thumb: #1b1e25;
-  --faint: #565c6b;
+  --shadow: 0 2px 6px rgb(0 0 0 / .4), 0 18px 48px rgb(0 0 0 / .55);
+  --thumb: linear-gradient(160deg, #23272f, #181b21);
+  --faint: #5b6272;
+
+  --glass: rgb(40 43 54 / .7);
+  --glass-thick: rgb(36 39 48 / .8);
+  --sheen: rgb(255 255 255 / .09);
+  --rim: inset 0 1px 0 rgb(255 255 255 / .2), inset 0 0 0 1px rgb(255 255 255 / .08), inset 0 -1px 0 rgb(0 0 0 / .3);
+  --float: 0 1px 2px rgb(0 0 0 / .35), 0 12px 34px rgb(0 0 0 / .5);
+  --blur: blur(22px) saturate(170%) brightness(.72); /* a white page behind dark glass must not wash out what is on it */
+  --fill: rgb(255 255 255 / .11);
+  --glow-a: rgb(84 116 255 / .2);
+  --glow-b: rgb(214 92 170 / .12);
+  --glow-c: rgb(52 170 160 / .1);
   color-scheme: dark;
+}
+
+/* Where glass cannot be see-through (no backdrop blur), or the user has asked for less of it, it is solid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root, :root[data-theme="dark"] { --glass: var(--surface); --glass-thick: var(--surface); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root, :root[data-theme="dark"] { --glass: var(--surface); --glass-thick: var(--surface); --blur: none; }
 }
 
 /* Fingers and styluses need bigger targets than a mouse. */
@@ -46,14 +81,35 @@ html, body { overscroll-behavior: none; touch-action: pan-x pan-y; }
 
 body {
   margin: 0;
-  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   color: var(--text);
   background: var(--bg);
   -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* A pane of glass. ponytail: the blur is the costly part on a slow device; if the toolbar ever makes
+   drawing or zooming stutter, shorten --blur or take it off .strip. */
+.strip, .flyout, #pen-panel, #message, .btn-secondary {
+  background: linear-gradient(180deg, var(--sheen), transparent 48%), var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--rim), var(--float);
+}
+/* Panes with something to read on them are thicker. */
+.flyout, #pen-panel, #message { background: linear-gradient(180deg, var(--sheen), transparent 40%), var(--glass-thick); }
+/* A pane that hangs from a pane: not every browser lets it blur what is behind both, so it is
+   nearly solid, and looks right either way. */
+.strip .flyout { background: linear-gradient(180deg, var(--sheen), transparent 40%), color-mix(in srgb, var(--surface) 94%, transparent); }
+
 button { font: inherit; color: inherit; cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Everything pressable gives a little under the finger. */
+button, .card { transition: transform .16s cubic-bezier(.3, .7, .3, 1.4), background-color .16s, color .16s, box-shadow .2s; }
+button:active:not(:disabled) { transform: scale(.94); }
+@media (prefers-reduced-motion: reduce) {
+  button, .card, .pen svg { transition: none; }
+}
 
 .icon {
   width: 20px;
@@ -74,21 +130,20 @@ body.editing #library { display: none; }
 /* ---------- Shared buttons ---------- */
 
 .btn-primary {
-  height: 40px;
-  padding: 0 18px;
+  height: 42px;
+  padding: 0 20px;
   border: 0;
-  border-radius: 12px;
-  background: var(--accent);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgb(255 255 255 / .22), transparent 55%), var(--accent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .4), inset 0 0 0 1px rgb(255 255 255 / .12), 0 8px 20px rgb(47 111 237 / .32);
   color: #fff;
   font-weight: 600;
 }
 .btn-secondary {
-  height: 40px;
-  padding: 0 16px;
+  height: 42px;
+  padding: 0 18px;
   border: 0;
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border-radius: 999px;
   font-weight: 600;
 }
 
@@ -100,12 +155,13 @@ body.editing #library { display: none; }
   height: var(--hit);
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 999px;
   background: none;
 }
-.icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+/* Switched on: a drop of tinted glass. */
+.icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 1px 0 rgb(255 255 255 / .28), inset 0 0 0 1px rgb(47 111 237 / .14); }
 /* Buttons labelled with text instead of an icon: the eraser's "Auto", the "16:9" window. */
-.chip { width: auto; min-width: var(--hit); padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.chip { width: auto; min-width: var(--hit); padding: 0 11px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
 
 @media (hover: hover) {
@@ -113,26 +169,37 @@ body.editing #library { display: none; }
   .icon-btn:not(:disabled):not([aria-pressed="true"]):hover,
   #zoom-label:hover,
   #note-name:hover,
-  #folder-name:hover { background: var(--bg); }
+  #folder-name:hover { background-color: var(--fill); }
   .card-delete:hover { color: var(--danger); }
   .card-move:hover { color: var(--accent); }
-  .btn-secondary:hover { background: var(--bg); }
+  .btn-secondary:hover { filter: brightness(1.04); }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--rim), 0 2px 4px rgb(20 25 40 / .08), 0 18px 40px rgb(20 25 40 / .2); }
   #import-tile:hover { border-color: var(--accent); color: var(--accent); }
 }
 
 /* ---------- Library ---------- */
 
+/* Soft coloured light behind the library, for the glass to pick up. */
+#library {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(900px 540px at 6% -6%, var(--glow-a), transparent 70%),
+    radial-gradient(760px 480px at 100% 4%, var(--glow-b), transparent 70%),
+    radial-gradient(900px 600px at 70% 110%, var(--glow-c), transparent 70%);
+}
 .lib-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 18px 24px;
+  padding: 22px 28px 14px;
 }
-.lib-bar h1 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.lib-bar h1 { display: flex; align-items: center; gap: 13px; margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -.025em; }
 /* The logo mark: a height only, so it always keeps its own proportions. */
-.mark { height: 22px; width: auto; flex: none; fill: currentColor; }
-.lib-actions { display: flex; align-items: center; gap: 8px; }
+.mark { height: 24px; width: auto; flex: none; fill: currentColor; }
+.lib-actions { display: flex; align-items: center; gap: 10px; }
 
 /* A folder is open: its bar (back, name) stands in for the title, and folders cannot be made inside folders. */
 #folder-bar { gap: 4px; padding-right: 8px; }
@@ -143,9 +210,9 @@ body.in-folder #new-folder { display: none; }
 
 #grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 20px;
-  padding: 8px 24px 24px;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 22px;
+  padding: 10px 28px 32px;
 }
 
 #import-tile {
@@ -153,20 +220,21 @@ body.in-folder #new-folder { display: none; }
   place-content: center;
   justify-items: center;
   gap: 4px;
-  min-height: 190px;
-  border: 2px dashed var(--faint);
+  min-height: 196px;
+  border: 1.5px dashed var(--faint);
   border-radius: var(--radius);
-  background: none;
+  background: linear-gradient(180deg, var(--sheen), transparent 60%);
   color: var(--muted);
   font-weight: 600;
 }
 #import-tile small { font-weight: 400; }
 
+/* A card is thick glass with no blur of its own: there may be a whole page of them, and nothing passes behind. */
 .card {
   position: relative;
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: linear-gradient(180deg, var(--sheen), transparent 55%), var(--glass-thick);
+  box-shadow: var(--rim), var(--float);
 }
 .card-open {
   display: block;
@@ -181,13 +249,15 @@ body.in-folder #new-folder { display: none; }
 .card-thumb {
   display: grid;
   place-items: center;
-  height: 124px;
-  border-radius: var(--radius) var(--radius) 0 0;
+  height: 122px;
+  margin: 7px 7px 0;
+  border-radius: 16px; /* the card's corner, less the gap around this */
   background: var(--thumb);
+  box-shadow: inset 0 0 0 1px rgb(128 128 128 / .1);
   color: var(--faint);
 }
 .card-thumb .icon { width: 40px; height: 40px; stroke-width: 1.2; }
-.card-name, .card-date { display: block; padding: 0 14px; }
+.card-name, .card-date { display: block; padding: 0 16px; }
 .card-name {
   margin-top: 10px;
   font-weight: 600;
@@ -195,14 +265,14 @@ body.in-folder #new-folder { display: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card-date { margin: 2px 0 12px; font-size: 12px; color: var(--muted); }
-.card-delete { position: absolute; top: 6px; right: 6px; color: var(--muted); }
+.card-date { margin: 2px 0 14px; font-size: 12px; color: var(--muted); }
+.card-delete { position: absolute; top: 11px; right: 11px; color: var(--muted); }
 /* "Move to a folder": an icon with an invisible native <select> stretched over it. */
-.card-move { position: absolute; top: 6px; right: calc(8px + var(--hit)); color: var(--muted); cursor: pointer; }
+.card-move { position: absolute; top: 11px; right: calc(13px + var(--hit)); color: var(--muted); cursor: pointer; }
 .card-move select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; /* under 16px iOS zooms the page on focus */ }
-.card.folder .card-thumb { color: var(--accent); background: var(--accent-soft); }
+.card.folder .card-thumb { color: var(--accent); background: linear-gradient(160deg, rgb(47 111 237 / .2), rgb(47 111 237 / .08)); }
 /* The recordings folder (the iPad app): its own colour, and nothing can be imported or made inside it. */
-.card.videos .card-thumb { color: #ff3b30; background: rgb(255 59 48 / .12); }
+.card.videos .card-thumb { color: #ff3b30; background: linear-gradient(160deg, rgb(255 59 48 / .2), rgb(255 59 48 / .07)); }
 body.in-videos #import-btn { display: none; }
 
 #empty { margin: 8px 24px 32px; text-align: center; color: var(--muted); }
@@ -213,30 +283,41 @@ body.in-videos #import-btn { display: none; }
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
-  background: var(--canvas);
+  background:
+    radial-gradient(900px 520px at 4% -8%, var(--glow-a), transparent 70%),
+    radial-gradient(760px 460px at 100% 0%, var(--glow-b), transparent 70%),
+    var(--canvas);
 }
 
+/* The toolbar floats over the top of the note's window: the note passes beneath its glass. It is
+   only as solid as its strips; a touch between them goes through to the note.
+   (app.js knows its height: the note's first line rests just below it. See restTop there.) */
 #toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px 0;
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
 }
+#toolbar .strip { pointer-events: auto; }
 
-/* Each strip is a small floating pill; strips and their contents wrap on narrow screens. */
+/* Each strip is a floating capsule of glass; strips and their contents wrap on narrow screens. */
 .strip, .group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .strip {
   max-width: 100%;
   padding: 4px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border-radius: calc(var(--hit) / 2 + 4px); /* round ends on one row of buttons, soft corners on more */
 }
-.sep { width: 1px; height: 22px; margin: 0 6px; background: var(--border); }
+.sep { width: 1px; height: 20px; margin: 0 7px; background: var(--border); }
 
 /* A tool with a flyout: a panel that drops below the button (in the full-screen rail: out to its left). */
 .tool-wrap { position: relative; display: flex; }
@@ -251,13 +332,16 @@ body.in-videos #import-btn { display: none; }
   gap: 8px;
   padding: 6px 14px 6px 8px;
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
 .tool-wrap.open .flyout { display: flex; }
 /* A flyout that is a short menu: its buttons stacked, each as wide as the menu. */
-.flyout.menu { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; white-space: nowrap; }
-.flyout.menu .btn-secondary { box-shadow: none; background: var(--bg); }
+.flyout.menu { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px; white-space: nowrap; }
+/* A line of a menu: plain, lighting up under the finger. Not glass on glass. */
+.flyout.menu .btn-secondary { height: 40px; box-shadow: none; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 14px; text-align: left; font-weight: 500; }
+.flyout.menu .btn-secondary:active { background: var(--fill); }
+@media (hover: hover) {
+  .flyout.menu .btn-secondary:hover { background: var(--fill); filter: none; }
+}
 /* A small corner mark on the eraser while it is the tool: there is more behind a second tap. */
 #eraser-wrap > [aria-pressed="true"]::after {
   content: "";
@@ -282,16 +366,16 @@ body.in-videos #import-btn { display: none; }
   width: 190px;
   max-width: 45vw;
   height: var(--hit);
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 999px;
   background: none;
   font: inherit;
   font-weight: 600;
   color: inherit;
   text-overflow: ellipsis;
 }
-#note-name:focus, #folder-name:focus { background: var(--bg); }
+#note-name:focus, #folder-name:focus { background: var(--fill); }
 
 .swatch::before {
   content: "";
@@ -301,7 +385,7 @@ body.in-videos #import-btn { display: none; }
   background: var(--c);
   box-shadow: inset 0 0 0 1px rgb(128 128 128 / .5); /* keeps black and white visible on any surface */
 }
-.swatch[aria-pressed="true"] { background: none; }
+.swatch[aria-pressed="true"] { background: none; box-shadow: none; }
 .swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
 
 /* ---------- Pens ---------- */
@@ -339,11 +423,9 @@ body.in-videos #import-btn { display: none; }
   z-index: 6;
   display: grid;
   gap: 8px;
-  width: 232px;
-  padding: 8px 12px 12px;
+  width: 244px;
+  padding: 10px 14px 14px;
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -361,9 +443,9 @@ body.in-videos #import-btn { display: none; }
 #zoom-label {
   min-width: 52px;
   height: var(--hit);
-  padding: 0 4px;
+  padding: 0 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 999px;
   background: none;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -399,6 +481,7 @@ body.in-videos #import-btn { display: none; }
   position: absolute;
   top: 0;
   right: 3px;
+  z-index: 5; /* over the toolbar: it shows where the note is, wherever that is */
   width: 4px;
   border-radius: 2px;
   background: var(--muted);
@@ -458,6 +541,7 @@ body.wide #editor {
 
 body.full #editor { flex-direction: row-reverse; }
 body.full #toolbar {
+  position: static; /* beside the note, not over it */
   flex: none; /* the note beside it must never squeeze it */
   flex-direction: column;
   flex-wrap: nowrap;
@@ -513,9 +597,12 @@ body:not(.full) .rail-only { display: none; }
   user-select: none;
   -webkit-user-select: none;
 }
-/* Offered with the 16:9 window on; and always there while recording, wherever the user goes, so it can be stopped. */
-body.can-record.wide.editing #rec-bar,
+/* Offered whenever a note is open; and always there while recording, wherever the user goes, so it can be stopped.
+   Without the 16:9 window there is no black band to keep it in: it floats over the foot of the note, and is in the video. */
+body.can-record.editing #rec-bar,
 body.recording #rec-bar { display: flex; }
+/* While recording nothing about the recording can be changed, so the bar is only what is needed: stop, pause, the clock. */
+body.recording #rec-mic, body.recording #rec-enhance, body.recording #rec-quality { display: none; }
 /* Under the 16:9 window, in the middle of the black band there: the video is that window and nothing
    else, so the bar is never in it. (The band is half of what the window leaves of the page's height.) */
 body.wide.editing #rec-bar {
@@ -532,10 +619,12 @@ body.paused #rec-time { color: var(--muted); }
 #rec-quality {
   height: var(--hit);
   max-width: 44vw;
-  padding: 0 8px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
-  background: var(--bg);
+  border-radius: 999px;
+  -webkit-appearance: none;
+  appearance: none; /* the device's own picker still opens; only the closed look is ours */
+  background: var(--fill);
   color: inherit;
   font: inherit;
   font-size: 16px; /* under 16px iOS zooms the page on focus */
@@ -552,13 +641,27 @@ body.paused #rec-time { color: var(--muted); }
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
   margin: 0;
-  padding: 10px 16px;
-  border-radius: 12px;
-  background: var(--text);
-  color: var(--bg);
-  box-shadow: var(--shadow);
+  padding: 11px 18px;
+  border-radius: 20px;
+  font-weight: 500;
 }
-/* With the 16:9 window on, or a recording running: at the top instead, in the black band above the
-   window, clear of both the picture and the recording bar. */
-body.wide.editing #message,
-body.recording #message { top: 14px; bottom: auto; }
+/* With the 16:9 window on: at the top instead, in the black band above the window, clear of both
+   the picture and the recording bar. Otherwise, where there is a recording bar: just above it. */
+body.wide.editing #message { top: 14px; bottom: auto; }
+body.can-record.editing:not(.wide) #message,
+body.recording:not(.wide) #message { bottom: 76px; }
+/* On the black bands of the 16:9 view the glass is always the dark kind, whatever the theme. */
+body.wide.editing #rec-bar,
+body.wide.editing #message {
+  --text: #eceef3;
+  --muted: #979eb1;
+  --accent: #74a2ff;
+  --accent-soft: rgb(116 162 255 / .22);
+  --glass: rgb(40 43 54 / .7);
+  --glass-thick: rgb(36 39 48 / .8);
+  --sheen: rgb(255 255 255 / .09);
+  --rim: inset 0 1px 0 rgb(255 255 255 / .2), inset 0 0 0 1px rgb(255 255 255 / .08), inset 0 -1px 0 rgb(0 0 0 / .3);
+  --fill: rgb(255 255 255 / .11);
+  color: var(--text);
+  color-scheme: dark;
+}
