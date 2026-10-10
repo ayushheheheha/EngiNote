@@ -268,6 +268,7 @@ body.editing #library { display: none; }
   display: grid;
   place-items: center;
   container-type: size; /* lets the 16:9 window size itself from the room available (cqw / cqh) */
+  overflow: hidden;     /* trims the 16:9 marker lines to the letterbox bars */
 }
 
 #scroller {
@@ -284,6 +285,9 @@ body.wide #scroller {
   height: auto;
   aspect-ratio: 16 / 9;
   background: var(--canvas);
+  /* Dashed red lines where the window starts and ends. An outline sits just outside the box, so the
+     window stays exactly 16:9 and the lines show only on the sides that have a black bar. */
+  outline: 2px dashed #ff3b30;
 }
 
 #page-sizer { margin: 0 auto; }
