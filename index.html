@@ -30,10 +30,19 @@
         <svg class="mark" viewBox="0 0 457.26 304.89" aria-hidden="true"><polygon points="457.26 0 378.29 0 197.77 243.9 197.78 304.89 430.53 304.88 330.01 182.91 457.26 0"/><polygon points="197.77 182.93 197.77 121.95 197.77 121.95 0 121.95 0 121.95 0 182.93 0 182.93 197.77 182.93"/><rect y="243.9" width="263.68" height="60.99" rx="0" ry="0"/><polygon points="197.77 60.98 197.77 0 197.77 0 0 0 0 0 0 60.98 0 60.98 197.77 60.98"/></svg>
         EngiNote
       </h1>
+      <!-- Shown in place of the title while a folder is open: back, and the folder's name (type to rename). -->
+      <div id="folder-bar" class="strip">
+        <button id="folder-back" class="icon-btn" type="button" title="Back to all notes" aria-label="Back to all notes">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <input id="folder-name" type="text" title="Rename folder" aria-label="Folder name" autocomplete="off" spellcheck="false">
+      </div>
       <div class="lib-actions">
         <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
         </button>
+        <button id="new-folder" class="btn-secondary" type="button">New folder</button>
         <button id="import-btn" class="btn-primary" type="button">Import HTML</button>
       </div>
     </header>
@@ -176,6 +185,24 @@
         <span class="card-date"></span>
       </button>
       <button class="icon-btn card-delete" type="button" title="Delete note" aria-label="Delete note">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+      </button>
+      <!-- The select is invisible and covers the icon: tapping it opens the device's own picker. -->
+      <label class="icon-btn card-move" title="Move to a folder">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9.5 13h5M12.5 11l2 2-2 2"/></svg>
+        <select aria-label="Move to a folder"></select>
+      </label>
+    </div>
+  </template>
+
+  <template id="folder-template">
+    <div class="card folder">
+      <button class="card-open" type="button">
+        <span class="card-thumb"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+        <span class="card-name"></span>
+        <span class="card-date"></span>
+      </button>
+      <button class="icon-btn card-delete" type="button" title="Delete folder" aria-label="Delete folder">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
       </button>
     </div>

@@ -9,7 +9,7 @@ const $ = id => document.getElementById(id);
 const grid = $('grid'), importTile = $('import-tile'), empty = $('empty'), fileInput = $('file-input');
 const nameInput = $('note-name'), undoBtn = $('undo-btn'), redoBtn = $('redo-btn');
 const scroller = $('scroller'), mover = $('mover'), bar = $('scrollbar'), page = $('page'), frame = $('frame'), svg = $('ink');
-const message = $('message'), cardTemplate = $('card-template');
+const message = $('message'), cardTemplate = $('card-template'), folderTemplate = $('folder-template'), folderName = $('folder-name');
 
 let current = null;      // the note open in the editor, or null in the library
 let zoom = 1;
@@ -39,6 +39,7 @@ async function withStore(mode, run) {
   });
 }
 
+// The one store holds the notes and, marked type: 'folder', the folders (see the library section).
 // ponytail: all() loads every note's full html just to list names; add a metadata store if libraries get big.
 const db = {
   all: () => withStore('readonly', s => s.getAll()),
@@ -58,22 +59,46 @@ function notify(text) {
 
 /* ---------- Library ---------- */
 
+// Folders, one level deep. A folder is a record in the same store as the notes,
+// { id, type: 'folder', name, updatedAt }, and a note in one carries its id as `folder`.
+// A note whose folder is gone simply shows in the main library again, so deleting a folder is
+// just deleting its record: nothing has to be moved, and no note can be lost with it.
+let folder = null; // the folder the library is showing, or null for the main library
+
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2); // not crypto.randomUUID(): that needs a secure context, and a tablet on http://<lan-ip> is not one
+const plural = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : 'Empty');
+
 async function showLibrary() {
   document.body.classList.remove('editing');
-  let docs;
+  let all;
   try {
-    docs = await db.all();
+    all = await db.all();
   } catch {
     empty.textContent = 'Notes cannot be loaded because browser storage (IndexedDB) is unavailable. Try a regular, non-private window.';
     empty.hidden = false;
     return;
   }
-  docs.sort((a, b) => b.updatedAt - a.updatedAt);
-  grid.replaceChildren(importTile, ...docs.map(makeCard));
-  empty.hidden = docs.length > 0;
+  const folders = all.filter(d => d.type === 'folder')
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const notes = all.filter(d => d.type !== 'folder').sort((a, b) => b.updatedAt - a.updatedAt);
+  const home = note => (folders.some(f => f.id === note.folder) ? note.folder : null); // null: the main library
+  if (folder) folder = folders.find(f => f.id === folder.id) || null; // fresh copy; null if it was deleted
+  const here = notes.filter(note => home(note) === (folder ? folder.id : null));
+
+  document.body.classList.toggle('in-folder', !!folder);
+  folderName.value = folder ? folder.name : '';
+  grid.replaceChildren(
+    importTile,
+    ...(folder ? [] : folders.map(f => makeFolderCard(f, notes.filter(note => home(note) === f.id).length))),
+    ...here.map(note => makeCard(note, folders)),
+  );
+  empty.textContent = folder
+    ? 'This folder is empty. Import an HTML file here, or move notes into it from the main library.'
+    : 'No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.';
+  empty.hidden = here.length > 0 || (!folder && folders.length > 0);
 }
 
-function makeCard(doc) {
+function makeCard(doc, folders) {
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
   const open = card.querySelector('.card-open');
   open.title = doc.name;
@@ -86,8 +111,67 @@ function makeCard(doc) {
     await db.del(doc.id).catch(() => notify('Could not delete the note.'));
     showLibrary();
   };
+
+  // Moving is a native <select>, so a tablet shows its own picker: the places this note is not in.
+  const move = card.querySelector('.card-move'), select = move.querySelector('select');
+  const places = [...(folder ? [{ id: '', name: 'Main library' }] : []), ...folders.filter(f => f.id !== folder?.id)];
+  move.hidden = places.length === 0;
+  select.replaceChildren(new Option('Move to…', '', true, true), ...places.map(p => new Option(p.name, p.id)));
+  select.options[0].disabled = true;
+  select.onchange = async () => {
+    const to = select.value; // '' is the main library
+    if (to) doc.folder = to;
+    else delete doc.folder;
+    await db.put(doc).catch(() => notify('Could not move the note.'));
+    showLibrary();
+  };
   return card;
 }
+
+function makeFolderCard(f, count) {
+  const card = folderTemplate.content.firstElementChild.cloneNode(true);
+  const open = card.querySelector('.card-open');
+  open.title = f.name;
+  open.onclick = () => { folder = f; showLibrary(); };
+  card.querySelector('.card-name').textContent = f.name;
+  card.querySelector('.card-date').textContent = plural(count, 'note');
+  card.querySelector('.card-delete').onclick = async () => {
+    const kept = count ? ` Its ${plural(count, 'note')} will not be deleted: ${count === 1 ? 'it goes' : 'they go'} back to the main library.` : '';
+    if (!confirm(`Delete the folder "${f.name}"?${kept}`)) return;
+    await db.del(f.id).catch(() => notify('Could not delete the folder.'));
+    showLibrary();
+  };
+  return card;
+}
+
+$('new-folder').onclick = async () => {
+  const taken = new Set((await db.all().catch(() => [])).filter(d => d.type === 'folder').map(d => d.name));
+  let name = 'New folder';
+  for (let n = 2; taken.has(name); n++) name = `New folder ${n}`;
+  const made = { id: newId(), type: 'folder', name, updatedAt: Date.now() };
+  try {
+    await db.put(made);
+  } catch {
+    return notify('Could not create the folder.');
+  }
+  folder = made;
+  await showLibrary();
+  folderName.focus(); // straight into naming it
+  folderName.select();
+};
+
+$('folder-back').onclick = () => { folder = null; showLibrary(); };
+
+// "change" fires on Enter and on blur, only when the text was edited.
+folderName.addEventListener('change', () => {
+  if (!folder) return;
+  folder.name = folderName.value.trim() || 'Untitled folder';
+  folderName.value = folder.name;
+  db.put(folder).catch(() => notify('Could not rename the folder.'));
+});
+folderName.addEventListener('keydown', e => {
+  if (e.key === 'Enter') folderName.blur();
+});
 
 async function importFiles(fileList) {
   const files = [...fileList].filter(f => /\.html?$/i.test(f.name));
@@ -97,13 +181,13 @@ async function importFiles(fileList) {
   for (const file of files) {
     try {
       const doc = {
-        // Not crypto.randomUUID(): that needs a secure context, and a tablet on http://<lan-ip> is not one.
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+        id: newId(),
         name: file.name.replace(/\.html?$/i, ''),
         html: await file.text(), // ponytail: assumes UTF-8; sniff <meta charset> if legacy encodings matter
         strokes: [],
         updatedAt: Date.now(),
       };
+      if (folder) doc.folder = folder.id; // imported inside a folder: it belongs there
       await db.put(doc);
       last = doc;
     } catch {
