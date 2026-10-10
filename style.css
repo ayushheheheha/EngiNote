@@ -201,6 +201,9 @@ body.in-folder #new-folder { display: none; }
 .card-move { position: absolute; top: 6px; right: calc(8px + var(--hit)); color: var(--muted); cursor: pointer; }
 .card-move select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; /* under 16px iOS zooms the page on focus */ }
 .card.folder .card-thumb { color: var(--accent); background: var(--accent-soft); }
+/* The recordings folder (the iPad app): its own colour, and nothing can be imported or made inside it. */
+.card.videos .card-thumb { color: #ff3b30; background: rgb(255 59 48 / .12); }
+body.in-videos #import-btn { display: none; }
 
 #empty { margin: 8px 24px 32px; text-align: center; color: var(--muted); }
 

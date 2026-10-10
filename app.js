@@ -70,6 +70,9 @@ const plural = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : 'Empty');
 
 async function showLibrary() {
   document.body.classList.remove('editing');
+  document.body.classList.toggle('in-videos', inVideos);
+  folderName.readOnly = inVideos;
+  if (inVideos) return showVideos();
   let all;
   try {
     all = await db.all();
@@ -89,13 +92,91 @@ async function showLibrary() {
   folderName.value = folder ? folder.name : '';
   grid.replaceChildren(
     importTile,
+    ...(folder || !shellVideos ? [] : [videosCard()]),
     ...(folder ? [] : folders.map(f => makeFolderCard(f, notes.filter(note => home(note) === f.id).length))),
     ...here.map(note => makeCard(note, folders)),
   );
   empty.textContent = folder
     ? 'This folder is empty. Import an HTML file here, or move notes into it from the main library.'
     : 'No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.';
-  empty.hidden = here.length > 0 || (!folder && folders.length > 0);
+  empty.hidden = here.length > 0 || (!folder && (folders.length > 0 || !!shellVideos));
+}
+
+/* Recordings (the iPad app only): the videos made with the recorder. The app keeps the files and
+   does everything to them (ios/App/NoteViewController.swift); the library shows them as one more
+   folder. The page asks with a message, and is sent the list as a 'recordings' event. */
+
+const shellVideos = window.webkit?.messageHandlers?.recordings;
+let videos = [];      // [{ name, size, modified }], newest first, as the app last listed them
+let inVideos = false; // the library is showing them
+// Every message is answered with the list as it then stands.
+const askVideos = (message = { action: 'list' }) => shellVideos?.postMessage(message);
+addEventListener('recordings', e => {
+  videos = (Array.isArray(e.detail?.files) ? e.detail.files : [])
+    .filter(v => v && typeof v.name === 'string')
+    .sort((a, b) => b.modified - a.modified);
+  if (!current) showLibrary();
+});
+
+const VIDEO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>';
+const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
+const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
+
+// The folder itself, in the main library.
+function videosCard() {
+  const card = folderTemplate.content.firstElementChild.cloneNode(true);
+  card.classList.add('videos');
+  card.querySelector('.card-open').onclick = () => {
+    inVideos = true;
+    askVideos();
+    showLibrary();
+  };
+  card.querySelector('.card-thumb').innerHTML = VIDEO_ICON;
+  card.querySelector('.card-name').textContent = 'Recordings';
+  card.querySelector('.card-date').textContent = plural(videos.length, 'video');
+  card.querySelector('.card-delete').remove(); // it is not the user's to delete
+  return card;
+}
+
+function showVideos() {
+  document.body.classList.add('in-folder');
+  folderName.value = 'Recordings';
+  grid.replaceChildren(...videos.map(makeVideoCard));
+  empty.textContent = 'No recordings yet. Open a note, turn on 16:9 and tap Record.';
+  empty.hidden = videos.length > 0;
+}
+
+// One recording: tap to play it; save or share it; delete it.
+function makeVideoCard(video) {
+  const card = cardTemplate.content.firstElementChild.cloneNode(true);
+  const title = video.name.replace(/\.mov$/i, '');
+  const act = action => askVideos({ action, name: video.name });
+  const open = card.querySelector('.card-open');
+  open.title = `Play "${title}"`;
+  open.onclick = () => act('play');
+  card.querySelector('.card-thumb').innerHTML = VIDEO_ICON;
+  // The app names a recording by when it began, "EngiNote 2026-10-11 14.03.22", which is too long
+  // for a card: shown as a date, with the time beside the size. A file renamed since keeps its name.
+  const when = /^EngiNote (\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.\d\d$/.exec(title);
+  const began = when && new Date(when[1], when[2] - 1, when[3], when[4], when[5]);
+  card.querySelector('.card-name').textContent = began ? began.toLocaleDateString(undefined, { dateStyle: 'medium' }) : title;
+  card.querySelector('.card-date').textContent =
+    (began ? `${began.toLocaleTimeString(undefined, { timeStyle: 'short' })} · ` : '') + fileSize(video.size);
+
+  const remove = card.querySelector('.card-delete');
+  remove.title = 'Delete recording';
+  remove.setAttribute('aria-label', 'Delete recording');
+  remove.onclick = () => { if (confirm(`Delete the recording "${title}"? This cannot be undone.`)) act('delete'); };
+
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'icon-btn card-move'; // where a note has its "move to a folder"
+  save.title = 'Save to Photos or Files, or share';
+  save.setAttribute('aria-label', 'Save or share');
+  save.innerHTML = SHARE_ICON;
+  save.onclick = () => act('share');
+  card.querySelector('.card-move').replaceWith(save);
+  return card;
 }
 
 function makeCard(doc, folders) {
@@ -160,7 +241,11 @@ $('new-folder').onclick = async () => {
   folderName.select();
 };
 
-$('folder-back').onclick = () => { folder = null; showLibrary(); };
+$('folder-back').onclick = () => {
+  folder = null;
+  inVideos = false;
+  showLibrary();
+};
 
 // "change" fires on Enter and on blur, only when the text was edited.
 folderName.addEventListener('change', () => {
@@ -896,6 +981,7 @@ if (shellRecorder) {
     recBtn.disabled = false;
     showRecording(e.detail?.state === 'recording');
     if (e.detail?.message) notify(e.detail.message);
+    if (!recording) askVideos(); // there may be a new one
   });
 }
 
@@ -929,3 +1015,4 @@ document.addEventListener('keydown', e => {
 });
 
 showLibrary();
+askVideos();

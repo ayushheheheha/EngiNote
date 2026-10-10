@@ -1,3 +1,4 @@
+import AVKit
 import UIKit
 import WebKit
 
@@ -12,6 +13,8 @@ import WebKit
 ///    backup's name and text (the 'saveFile' message in app.js) and this asks where to keep it.
 ///  - Recording the screen as a 16:9 movie (Recorder.swift), started and stopped by the page
 ///    (the 'recorder' message), which is told how it goes (a 'recorder' event on its window).
+///  - The recordings themselves: the page lists them as a folder, and asks for one to be played,
+///    shared or deleted (the 'recordings' message; the list goes back as a 'recordings' event).
 final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
     private var webView: WKWebView!
     private let recorder = Recorder()
@@ -30,6 +33,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.setURLSchemeHandler(WebFiles(), forURLScheme: WebFiles.scheme)
         configuration.userContentController.add(self, name: "saveFile")
         configuration.userContentController.add(self, name: "recorder")
+        configuration.userContentController.add(self, name: "recordings")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -132,17 +136,71 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             }
             self.send("recorder", ["state": "idle", "message": message])
 
-            // Offer to send the movie somewhere at once: Photos, an editing app, AirDrop.
-            guard let file = file, UIApplication.shared.applicationState == .active, self.presentedViewController == nil else { return }
-            let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
-            sheet.popoverPresentationController?.sourceView = self.view
-            sheet.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY - 40, width: 1, height: 1)
-            self.present(sheet, animated: true)
+            // Offer to send the movie somewhere at once.
+            if let file = file, UIApplication.shared.applicationState == .active { self.share(file) }
         }
+    }
+
+    /// The system's share sheet for a movie: save to Photos or Files, an editing app, AirDrop.
+    private func share(_ file: URL) {
+        guard presentedViewController == nil else { return }
+        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 40, width: 1, height: 1)
+        present(sheet, animated: true)
     }
 
     @objc private func wentToBackground() {
         if recorder.isActive { stopRecording(because: "the app was no longer on screen") }
+    }
+
+    // MARK: The recordings folder
+
+    /// The recording the page means by `name`: a movie directly in the recordings folder that is
+    /// not being written at the moment, and nothing else, whatever the name says.
+    private func recording(named name: Any?) -> URL? {
+        guard let name = name as? String, let folder = try? Recorder.folder() else { return nil }
+        let file = folder.appendingPathComponent((name as NSString).lastPathComponent)
+        guard file.pathExtension.lowercased() == "mov",
+              file.lastPathComponent != recorder.activeFile?.lastPathComponent,
+              FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return file
+    }
+
+    /// Play, share or delete one recording, as the page asks; then, whatever was asked (also just
+    /// "list"), send the page the list as it now stands.
+    private func recordings(_ body: [String: Any]) {
+        if let file = recording(named: body["name"]) {
+            switch body["action"] as? String {
+            case "play":
+                if presentedViewController == nil {
+                    let player = AVPlayerViewController()
+                    player.player = AVPlayer(url: file)
+                    present(player, animated: true) { player.player?.play() }
+                }
+            case "share":
+                share(file)
+            case "delete": // the page has already asked the user if they are sure
+                try? FileManager.default.removeItem(at: file)
+            default:
+                break
+            }
+        }
+
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let active = recorder.activeFile?.lastPathComponent
+        var found: [URL] = []
+        if let folder = try? Recorder.folder() {
+            found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+        }
+        let files: [[String: Any]] = found
+            .filter { $0.pathExtension.lowercased() == "mov" && $0.lastPathComponent != active }
+            .map { url in
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                return ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
+            }
+        send("recordings", ["files": files])
     }
 
     // MARK: Messages from the page
@@ -153,6 +211,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         switch message.name {
         case "saveFile": saveFile(body)
         case "recorder": record(body)
+        case "recordings": recordings(body)
         default: break
         }
     }

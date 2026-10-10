@@ -50,6 +50,18 @@ final class Recorder {
         return writer != nil
     }
 
+    /// The movie being written right now, if any: not to be played, shared or deleted yet.
+    var activeFile: URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        return writer == nil ? nil : file
+    }
+
+    /// Where recordings are kept: the app's Documents folder.
+    static func folder() throws -> URL {
+        try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    }
+
     /// Start recording. `done` is called on the main thread with nil, or with what went wrong
     /// (which includes the user saying no to the system's question).
     func start(quality name: String, microphone: Bool, done: @escaping (String?) -> Void) {
@@ -61,7 +73,7 @@ final class Recorder {
         let url: URL
         let writer: AVAssetWriter
         do {
-            let folder = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let folder = try Recorder.folder()
             let stamp = DateFormatter()
             stamp.locale = Locale(identifier: "en_US_POSIX")
             stamp.dateFormat = "yyyy-MM-dd HH.mm.ss"
