@@ -1,0 +1,330 @@
+:root {
+  --bg: #f3f4f7;
+  --canvas: #e6e8ee;
+  --surface: #ffffff;
+  --text: #1f2430;
+  --muted: #7a8194;
+  --border: #e3e6ec;
+  --accent: #2f6fed;
+  --accent-soft: #e6eeff;
+  --danger: #d6336c;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(20, 25, 40, .06), 0 4px 16px rgba(20, 25, 40, .08);
+  --hit: 36px; /* button size */
+  --thumb: #f7f8fb;
+  --faint: #b6bccb; /* dashed outlines, placeholder icons */
+  color-scheme: light;
+}
+
+/* data-theme is set by the inline script in index.html and flipped by the theme buttons. */
+:root[data-theme="dark"] {
+  --bg: #15171c;
+  --canvas: #0c0d10;
+  --surface: #23262e;
+  --text: #e7e9ee;
+  --muted: #8f96a8;
+  --border: #363a45;
+  --accent: #6b9bff;
+  --accent-soft: #283758;
+  --danger: #ff6b93;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .45);
+  --thumb: #1b1e25;
+  --faint: #565c6b;
+  color-scheme: dark;
+}
+
+/* Fingers and styluses need bigger targets than a mouse. */
+@media (pointer: coarse) {
+  :root { --hit: 40px; }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+/* No browser pinch-zoom or pull-to-refresh: they would zoom or reload the whole app, not the note. */
+html, body { overscroll-behavior: none; touch-action: pan-x pan-y; }
+
+body {
+  margin: 0;
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- View switching ---------- */
+
+#editor { display: none; }
+body.editing #editor { display: flex; }
+body.editing #library { display: none; }
+
+/* ---------- Shared buttons ---------- */
+
+.btn-primary {
+  height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--hit);
+  height: var(--hit);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+}
+.icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.icon-btn:disabled { opacity: .35; cursor: default; }
+
+@media (hover: hover) {
+  .btn-primary:hover { filter: brightness(1.08); }
+  .icon-btn:not(:disabled):not([aria-pressed="true"]):hover,
+  #zoom-label:hover,
+  #note-name:hover { background: var(--bg); }
+  .card-delete:hover { color: var(--danger); }
+  #import-tile:hover { border-color: var(--accent); color: var(--accent); }
+}
+
+/* ---------- Library ---------- */
+
+.lib-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 24px;
+}
+.lib-bar h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.lib-actions { display: flex; align-items: center; gap: 8px; }
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 20px;
+  padding: 8px 24px 24px;
+}
+
+#import-tile {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  min-height: 190px;
+  border: 2px dashed var(--faint);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+#import-tile small { font-weight: 400; }
+
+.card {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.card-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  text-align: left;
+}
+.card-thumb {
+  display: grid;
+  place-items: center;
+  height: 124px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--thumb);
+  color: var(--faint);
+}
+.card-thumb .icon { width: 40px; height: 40px; stroke-width: 1.2; }
+.card-name, .card-date { display: block; padding: 0 14px; }
+.card-name {
+  margin-top: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-date { margin: 2px 0 12px; font-size: 12px; color: var(--muted); }
+.card-delete { position: absolute; top: 6px; right: 6px; color: var(--muted); }
+
+#empty { margin: 8px 24px 32px; text-align: center; color: var(--muted); }
+
+/* ---------- Editor ---------- */
+
+#editor {
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--canvas);
+}
+
+#toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Each strip is a small floating pill; strips and their contents wrap on narrow screens. */
+.strip, .group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.strip {
+  max-width: 100%;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.sep { width: 1px; height: 22px; margin: 0 6px; background: var(--border); }
+
+/* Tablet widths: name and zoom share the first row, the tools get their own row, centred. */
+@media (max-width: 1100px) {
+  #toolbar .strip:nth-child(2) { order: 1; margin: 0 auto; }
+}
+
+#note-name {
+  width: 190px;
+  max-width: 45vw;
+  height: var(--hit);
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-overflow: ellipsis;
+}
+#note-name:focus { background: var(--bg); }
+
+.swatch::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px rgb(128 128 128 / .5); /* keeps black and white visible on any surface */
+}
+.swatch[aria-pressed="true"] { background: none; }
+.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+
+.size::before {
+  content: "";
+  width: 18px;
+  height: var(--s);
+  border-radius: 99px;
+  background: currentColor;
+}
+
+#zoom-label {
+  min-width: 52px;
+  height: var(--hit);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+#scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px; /* horizontal padding x2 = GUTTER in app.js */
+}
+
+#page-sizer { margin: 0 auto; }
+
+#page {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--shadow);
+  transform-origin: 0 0;
+  /* All touches on the sheet go to ink.js; no long-press selection or callout menu on iOS. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  pointer-events: none;
+}
+
+#ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- Full screen: the sheet gets the whole window, the tools become a thin rail on the right ---------- */
+
+body.full #editor { flex-direction: row-reverse; }
+body.full #toolbar {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  padding: 8px 8px 8px 0;
+  overflow-y: auto; /* short screens: the rail scrolls rather than losing buttons */
+  scrollbar-width: none;
+}
+body.full #toolbar .strip { display: none; }
+/* Auto margins centre the rail vertically, and unlike justify-content they collapse when it overflows. */
+body.full #toolbar .strip:nth-child(2) { display: flex; order: 0; margin: auto 0; }
+body.full .strip, body.full .group { flex-direction: column; flex-wrap: nowrap; }
+body.full .sep { width: 22px; height: 1px; margin: 6px 0; }
+body.full .swatch { height: 30px; } /* seven colours: keeps the rail inside a 768px-high tablet */
+
+/* ---------- Toast ---------- */
+
+#message {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 10;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+}

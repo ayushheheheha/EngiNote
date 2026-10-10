@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EngiNote</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Set the theme before first paint (no flash): the saved choice, else what the device prefers.
+    let saved;
+    try { saved = localStorage.getItem('theme'); } catch { /* storage blocked */ }
+    document.documentElement.dataset.theme = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  </script>
+</head>
+<body>
+
+  <!-- Library (home) -->
+  <div id="library">
+    <header class="lib-bar">
+      <h1>EngiNote</h1>
+      <div class="lib-actions">
+        <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
+        </button>
+        <button id="import-btn" class="btn-primary" type="button">Import HTML</button>
+      </div>
+    </header>
+    <main>
+      <div id="grid">
+        <button id="import-tile" type="button">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Import HTML</span>
+          <small>or drop files here</small>
+        </button>
+      </div>
+      <p id="empty" hidden>No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.</p>
+    </main>
+    <input id="file-input" type="file" accept=".html,.htm,text/html" multiple hidden>
+  </div>
+
+  <!-- Editor -->
+  <div id="editor">
+    <div id="toolbar">
+      <div class="strip">
+        <button id="back-btn" class="icon-btn" type="button" title="Back to library" aria-label="Back to library">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <input id="note-name" type="text" title="Rename note" aria-label="Note name" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="strip">
+        <div class="group" role="group" aria-label="Tools">
+          <button class="icon-btn" type="button" data-tool="pen" title="Pen (P)" aria-label="Pen">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1L19 8l-3-3L5 16l-1 4z"/><path d="M14 7l3 3"/></svg>
+          </button>
+          <button class="icon-btn" type="button" data-tool="highlighter" title="Highlighter (H)" aria-label="Highlighter">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4l6 6-8 8H8l-2-2v-4l8-8z"/><path d="M4 21h16"/></svg>
+          </button>
+          <button class="icon-btn" type="button" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 19l-4-4 9-10 7 7-7 7H8z"/><path d="M8.5 10l7 6.5"/><path d="M13 19h7"/></svg>
+          </button>
+          <button class="icon-btn" type="button" data-tool="hand" title="Hand (V)" aria-label="Hand">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+          </button>
+        </div>
+        <span class="sep"></span>
+        <div class="group" role="group" aria-label="Colour">
+          <button class="icon-btn swatch" type="button" data-color="#111111" style="--c:#111111" title="Black" aria-label="Black"></button>
+          <button class="icon-btn swatch" type="button" data-color="#ffffff" style="--c:#ffffff" title="White" aria-label="White"></button>
+          <button class="icon-btn swatch" type="button" data-color="#e03131" style="--c:#e03131" title="Red" aria-label="Red"></button>
+          <button class="icon-btn swatch" type="button" data-color="#1c7ed6" style="--c:#1c7ed6" title="Blue" aria-label="Blue"></button>
+          <button class="icon-btn swatch" type="button" data-color="#2f9e44" style="--c:#2f9e44" title="Green" aria-label="Green"></button>
+          <button class="icon-btn swatch" type="button" data-color="#f08c00" style="--c:#f08c00" title="Orange" aria-label="Orange"></button>
+          <button class="icon-btn swatch" type="button" data-color="#7048e8" style="--c:#7048e8" title="Purple" aria-label="Purple"></button>
+        </div>
+        <span class="sep"></span>
+        <div class="group" role="group" aria-label="Thickness">
+          <button class="icon-btn size" type="button" data-size="2" style="--s:2px" title="Thin" aria-label="Thin"></button>
+          <button class="icon-btn size" type="button" data-size="4" style="--s:4px" title="Medium" aria-label="Medium"></button>
+          <button class="icon-btn size" type="button" data-size="8" style="--s:8px" title="Thick" aria-label="Thick"></button>
+        </div>
+        <span class="sep"></span>
+        <div class="group" role="group" aria-label="History">
+          <button id="undo-btn" class="icon-btn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+          </button>
+          <button id="redo-btn" class="icon-btn" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+          </button>
+        </div>
+        <span class="sep"></span>
+        <button id="full-btn" class="icon-btn" type="button" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        </button>
+      </div>
+
+      <div class="strip" role="group" aria-label="Zoom">
+        <button id="zoom-out" class="icon-btn" type="button" title="Zoom out" aria-label="Zoom out">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <button id="zoom-label" type="button" title="Reset zoom to 100%" aria-label="Reset zoom to 100%">100%</button>
+        <button id="zoom-in" class="icon-btn" type="button" title="Zoom in" aria-label="Zoom in">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg>
+        </button>
+        <button id="zoom-fit" class="icon-btn" type="button" title="Fit width" aria-label="Fit width">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
+        </button>
+        <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="scroller">
+      <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
+      <div id="page-sizer">
+        <div id="page">
+          <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
+          <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
+          <svg id="ink"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p id="message" role="status" hidden></p>
+
+  <template id="card-template">
+    <div class="card">
+      <button class="card-open" type="button">
+        <span class="card-thumb"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg></span>
+        <span class="card-name"></span>
+        <span class="card-date"></span>
+      </button>
+      <button class="icon-btn card-delete" type="button" title="Delete note" aria-label="Delete note">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+      </button>
+    </div>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

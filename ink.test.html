@@ -1,0 +1,218 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ink.js checks</title>
+<!-- Open through the app's http server: browsers refuse module imports from file:// -->
+<body style="font: 14px/1.6 monospace; margin: 0; padding: 0">
+<svg id="s" viewBox="0 0 400 300" style="display:block; width:800px; height:600px; background:#f4f4f4"></svg>
+<div id="out" style="padding: 8px"></div>
+<script type="module">
+import { createInk, pathData, hitStroke, distToSegment, widthAt } from './ink.js';
+
+const out = document.getElementById('out');
+let passed = 0, failed = 0;
+function line(text, ok) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.color = ok ? 'green' : 'crimson';
+  out.appendChild(div);
+}
+function check(name, ok) {
+  console.assert(ok, name);
+  ok ? passed++ : failed++;
+  line(`${ok ? 'PASS' : 'FAIL'}  ${name}`, ok);
+}
+
+try {
+  // --- geometry ---
+  const clean = d => !/NaN|undefined|null/.test(d);
+  const d1 = pathData([[10, 20]]);
+  const d2 = pathData([[10, 20], [30, 40]]);
+  const d5 = pathData([[0, 0], [10, 5], [20, 0], [30.5, 5], [40, 0]]);
+  check('pathData: no points gives an empty string', pathData([]) === '');
+  check('pathData: 1 point is a dot at that point', d1.startsWith('M10 20') && d1.length > 'M10 20'.length && clean(d1));
+  check('pathData: 2 points is a straight line', d2 === 'M10 20L30 40');
+  check('pathData: 5 points gives 3 curves ending on the last point',
+    d5.startsWith('M0 0Q') && d5.split('Q').length - 1 === 3 && d5.endsWith('L40 0') && clean(d5));
+
+  // The browser's own path parser is the real judge of "well-formed".
+  const probe = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const len = d => (probe.setAttribute('d', d), probe.getTotalLength());
+  check('pathData: browser parses all three', len(d1) > 0 && Math.abs(len(d2) - Math.hypot(20, 20)) < 0.01 && len(d5) > 40);
+
+  const long = { tool: 'pen', color: '#000', size: 2, points: [[0, 0], [1000, 0]] };
+  check('distToSegment: perpendicular and past-the-end distances',
+    distToSegment(5, 3, 0, 0, 10, 0) === 3 && distToSegment(13, 4, 0, 0, 10, 0) === 5);
+  check('hitStroke: hits near the middle of a long 2-point segment', hitStroke(long, 500, 3, 5));
+  check('hitStroke: misses a far point', !hitStroke(long, 500, 50, 5));
+  check('hitStroke: radius accounts for stroke width',
+    hitStroke({ ...long, tool: 'highlighter', size: 10 }, 500, 28, 5) && !hitStroke(long, 500, 28, 5));
+
+  // --- engine, on a real <svg> ---
+  const svg = document.getElementById('s');
+  let changes = 0, zoomed = 1;
+  const ink = createInk(svg, {
+    scroller: document.scrollingElement,
+    onChange: () => changes++,
+    onZoom: factor => { zoomed *= factor; },
+  });
+  const saved = [
+    { tool: 'pen', color: '#c00', size: 3, points: [[10, 10], [50, 60.5], [90, 10]] },
+    { tool: 'highlighter', color: 'yellow', size: 4, points: [[20, 100], [200, 100]] },
+  ];
+  const same = () => JSON.stringify(ink.getStrokes()) === JSON.stringify(saved);
+
+  ink.load(undefined);
+  check('load(undefined) is tolerated', ink.getStrokes().length === 0);
+  ink.load(saved);
+  check('load -> getStrokes round-trips', same());
+  check('load renders one <path> per stroke', svg.querySelectorAll('path').length === 2);
+  check('load does not call onChange', changes === 0);
+  check('load resets history', !ink.canUndo() && !ink.canRedo());
+
+  ink.clear();
+  check('clear removes strokes and paths', ink.getStrokes().length === 0 && svg.querySelectorAll('path').length === 0);
+  check('clear calls onChange once', changes === 1);
+  check('after clear: canUndo, not canRedo', ink.canUndo() && !ink.canRedo());
+  ink.clear();
+  check('clear when already empty is a no-op', changes === 1);
+
+  ink.undo();
+  check('undo restores the cleared strokes', same() && svg.querySelectorAll('path').length === 2);
+  check('after undo: canRedo, not canUndo', !ink.canUndo() && ink.canRedo());
+  ink.redo();
+  check('redo clears again; flags flip back', ink.getStrokes().length === 0 && ink.canUndo() && !ink.canRedo());
+
+  // --- pointer input (synthetic events; svg is 2x the viewBox, so screen px / 2 = page px) ---
+  const box = svg.getBoundingClientRect();
+  // `t` fakes the event time, so the palm-rejection time windows can be tested without waiting.
+  const fire = (type, x, y, pointerType = 'mouse', pointerId = 7, { t, ...init } = {}) => {
+    const ev = new PointerEvent(type, {
+      pointerId, pointerType, button: 0, buttons: 1, bubbles: true, cancelable: true,
+      clientX: box.left + x * 2, clientY: box.top + y * 2, ...init,
+    });
+    if (t !== undefined) Object.defineProperty(ev, 'timeStamp', { value: t });
+    svg.dispatchEvent(ev);
+  };
+  const drag = (x0, y0, x1, y1, pointerType) => {
+    fire('pointerdown', x0, y0, pointerType);
+    fire('pointermove', x1, y1, pointerType);
+    fire('pointerup', x1, y1, pointerType);
+  };
+
+  ink.load([]);
+  changes = 0;
+  drag(50, 50, 150, 50);
+  const drawn = ink.getStrokes();
+  check('mouse drag draws one stroke in viewBox units',
+    drawn.length === 1 && changes === 1 && drawn[0].points.length === 2 &&
+    String(drawn[0].points[0]) === '50,50' && String(drawn[0].points[1]) === '150,50');
+
+  // --- touch and stylus ---
+  drag(50, 80, 150, 80, 'touch');
+  check('a finger draws while no stylus has been seen', ink.getStrokes().length === 2 && changes === 2);
+  ink.undo();
+
+  fire('pointerdown', 50, 90, 'touch', 1);
+  fire('pointermove', 150, 90, 'touch', 1);
+  fire('pointercancel', 150, 90, 'touch', 1);
+  check('a finger stroke the system cancels (its own palm rejection) is dropped',
+    ink.getStrokes().length === 1 && svg.querySelectorAll('path').length === 1);
+
+  fire('pointerdown', 100, 100, 'touch', 1);
+  fire('pointermove', 110, 100, 'touch', 1);
+  fire('pointerdown', 200, 100, 'touch', 2);   // fingers now 90 apart...
+  fire('pointermove', 290, 100, 'touch', 2);   // ...then 180 apart
+  fire('pointerup', 290, 100, 'touch', 2);
+  fire('pointerup', 110, 100, 'touch', 1);
+  check('two fingers pinch-zoom and leave no stroke', ink.getStrokes().length === 1 && Math.abs(zoomed - 2) < 0.01);
+
+  fire('pointerdown', 50, 120, 'touch', 1);    // palm lands first and starts a stroke
+  fire('pointermove', 90, 120, 'touch', 1);
+  fire('pointerdown', 50, 140, 'pen', 2);
+  fire('pointermove', 150, 140, 'pen', 2);
+  fire('pointerup', 150, 140, 'pen', 2);
+  fire('pointerup', 90, 120, 'touch', 1);
+  const afterPen = ink.getStrokes();
+  check('a stylus draws, and the palm stroke under way when it lands is dropped',
+    afterPen.length === 2 && afterPen[1].points[0][1] === 140);
+  drag(50, 160, 150, 160, 'touch');
+  check('once a stylus has been seen, a finger pans instead of drawing', ink.getStrokes().length === 2);
+  ink.undo();
+
+  // --- pressure, hover, palm rejection (faked event times, all later than the real ones above) ---
+  check('widthAt: pressure 0.5 gives the nominal size, more pressure is wider',
+    widthAt(4, 0.5) === 4 && widthAt(4, 1) > 4 && widthAt(4, 0) > 0 && widthAt(4, 0) < 4);
+
+  fire('pointerdown', 50, 200, 'pen', 2, { t: 10000, pressure: 0.1 });
+  fire('pointermove', 100, 200, 'pen', 2, { t: 10016, pressure: 0.9 });
+  fire('pointermove', 150, 200, 'pen', 2, { t: 10032, pressure: 0.9 });
+  fire('pointerup', 150, 200, 'pen', 2, { t: 10048, buttons: 0 });
+  const heavy = ink.getStrokes()[1];
+  const heavyPath = svg.querySelectorAll('path')[1];
+  const inked = (x, y) => heavyPath.isPointInFill(new DOMPoint(x, y));
+  check('a stylus stroke records pressure per point and thickens with it',
+    heavy.points.length === 3 && heavy.points.every(p => p.length === 3) && heavy.points[2][2] > heavy.points[0][2]);
+  check('a pressure stroke is one filled shape with no holes at its joins',
+    heavyPath.getAttribute('fill') === heavy.color && !heavyPath.getAttribute('stroke') &&
+    inked(50, 200) && inked(75, 200) && inked(100, 200) && inked(100, 201) && inked(125, 201) && inked(150, 200) && !inked(125, 210));
+  ink.load(ink.getStrokes());
+  check('a pressure stroke survives save and load unchanged',
+    JSON.stringify(ink.getStrokes()[1]) === JSON.stringify(heavy) &&
+    svg.querySelectorAll('path')[1].getAttribute('d') === heavyPath.getAttribute('d'));
+  ink.load(ink.getStrokes().slice(0, 1));
+
+  // Two fingers `from` apart, one moves until they are `to` apart. Returns the zoom factor that produced.
+  const pinch = (t, from = 90, to = 180) => {
+    const before = zoomed;
+    fire('pointerdown', 100, 250, 'touch', 21, { t });
+    fire('pointerdown', 100 + from, 250, 'touch', 22, { t });
+    fire('pointermove', 100 + to, 250, 'touch', 22, { t: t + 16 });
+    fire('pointerup', 100, 250, 'touch', 21, { t: t + 32 });
+    fire('pointerup', 100 + to, 250, 'touch', 22, { t: t + 32 });
+    return zoomed / before;
+  };
+  check('touches that land just after the stylus wrote are taken for the palm', pinch(10300) === 1);
+
+  const nib = svg.querySelector('circle');
+  fire('pointermove', 60, 60, 'pen', 2, { t: 11000, buttons: 0 });
+  check('a hovering stylus shows a preview of the tip and draws nothing',
+    nib.style.display !== 'none' && +nib.getAttribute('cx') === 60 && +nib.getAttribute('cy') === 60 &&
+    !nib.nextSibling && ink.getStrokes().length === 1);
+  check('touches that land while the stylus hovers are taken for the palm', pinch(11050) === 1);
+  check('fingers pan and zoom again once the stylus has gone', Math.abs(pinch(20000) - 2) < 0.01);
+  check('a finger must travel a little before it scrolls or zooms', pinch(30000, 90, 92) === 1);
+
+  fire('pointerdown', 100, 250, 'touch', 21, { t: 40000 });
+  fire('pointerdown', 190, 250, 'touch', 22, { t: 40000 });
+  fire('pointermove', 280, 250, 'touch', 22, { t: 40016 });
+  const midPinch = zoomed;
+  fire('pointerdown', 50, 280, 'pen', 2, { t: 40100, pressure: 0.4 });
+  fire('pointermove', 370, 250, 'touch', 22, { t: 40116 });
+  fire('pointermove', 150, 280, 'pen', 2, { t: 40132, pressure: 0.4 });
+  fire('pointerup', 150, 280, 'pen', 2, { t: 40148, buttons: 0 });
+  fire('pointerup', 100, 250, 'touch', 21, { t: 40200 });
+  fire('pointerup', 370, 250, 'touch', 22, { t: 40200 });
+  check('when the stylus lands, fingers already on the page stop scrolling and zooming',
+    zoomed === midPinch && ink.getStrokes().length === 2 && nib.style.display === 'none');
+  ink.undo();
+
+  fire('pointerdown', 200, 200);
+  fire('pointerup', 200, 200);
+  check('a click leaves a one-point stroke', ink.getStrokes().length === 2 && ink.getStrokes()[1].points.length === 1);
+
+  ink.setTool('eraser');
+  changes = 0;
+  drag(300, 20, 300, 280);
+  check('eraser drag that touches nothing changes nothing', ink.getStrokes().length === 2 && changes === 0);
+  drag(100, 20, 100, 80);
+  check('eraser swipe across the middle of a stroke removes it, one onChange',
+    ink.getStrokes().length === 1 && changes === 1);
+  ink.undo();
+  check('undo brings the erased stroke back', ink.getStrokes().length === 2);
+} catch (err) {
+  failed++;
+  line(`ERROR  ${err && err.stack || err}`, false);
+}
+
+line(`${failed ? 'FAILED' : 'ALL PASSED'}: ${passed} passed, ${failed} failed`, !failed);
+</script>
