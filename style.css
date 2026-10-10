@@ -301,13 +301,59 @@ body.in-folder #new-folder { display: none; }
 .swatch[aria-pressed="true"] { background: none; }
 .swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
 
-.size::before {
-  content: "";
-  width: 18px;
-  height: var(--s);
-  border-radius: 99px;
-  background: currentColor;
+/* ---------- Pens ---------- */
+
+/* A pen in the tray stands tip up with its lower end out of sight, as if in a pot; the one in use
+   stands taller. The picture is made in app.js (penPicture); --c is the pen's colour. */
+.pen {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: var(--hit);
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  overflow: hidden;
 }
+.pen svg { position: absolute; left: 6px; top: 10px; width: 18px; height: 49.5px; transition: transform .12s; }
+.pen[aria-pressed="true"] svg { transform: translateY(-9px); }
+.pen .tip, .pen .band { fill: var(--c); }
+.pen .tip, .pen .nib { stroke: rgb(128 128 128 / .75); stroke-width: .7; stroke-linejoin: round; } /* keeps a black or white tip visible */
+.pen .nib { fill: #c9ccd3; }
+.pen .slit { fill: none; stroke: #5b6170; stroke-width: .8; }
+.pen .spark { fill: none; stroke: var(--c); stroke-width: 1.3; stroke-linecap: round; }
+.pen .barrel { fill: #3f4450; }
+:root[data-theme="dark"] .pen .barrel { fill: #596072; }
+@media (hover: hover) {
+  .pen:not([aria-pressed="true"]):hover svg { transform: translateY(-3px); }
+}
+
+/* The settings of the pen in use. app.js places it (showPanel) inside #editor. */
+#editor { position: relative; }
+#pen-panel {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  gap: 8px;
+  width: 232px;
+  padding: 8px 12px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; }
+.panel-row { display: grid; grid-template-columns: 1fr auto; align-items: center; font-size: 13px; color: var(--muted); }
+.panel-row output { color: var(--text); font-variant-numeric: tabular-nums; }
+.panel-row input { grid-column: 1 / -1; width: 100%; height: 30px; margin: 0; accent-color: var(--accent); touch-action: none; /* a finger drags the slider, not the page */ }
+#pen-colors { display: grid; grid-template-columns: repeat(5, 1fr); justify-items: center; gap: 2px; }
+/* "Another colour": a rainbow until a colour of its own is chosen; the device's colour picker lies invisible over it. */
+.swatch.custom { position: relative; cursor: pointer; }
+.swatch.custom::before { background: conic-gradient(#e03131, #f08c00, #f5d000, #2f9e44, #1c7ed6, #7048e8, #e03131); }
+.swatch.custom[aria-pressed="true"]::before { background: var(--c); }
+.swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 
 #zoom-label {
   min-width: 52px;
@@ -359,20 +405,24 @@ body.in-folder #new-folder { display: none; }
 
 /* 16:9: the whole editor, note and tools together, becomes the largest 16:9 window that fits the
    screen, letterboxed in black (for recording or presenting). */
+html:has(body.wide.editing) { height: 100%; }
 body.wide.editing {
   display: grid;
   place-items: center;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
+  container-type: size; /* the editor below is sized from this box (the cq units) */
   background: #000;
 }
 /* Both sizes are spelled out rather than using aspect-ratio: a box sized by aspect-ratio may grow to
-   fit its content, and the note inside is far taller than the window. */
+   fit its content, and the note inside is far taller than the window.
+   They are measured from the page's own box (cqw, cqh), not from the viewport (vw, dvh): inside the
+   iPad app the viewport units came out at about half the screen, and the window with them. The
+   viewport lines stay only for browsers too old to know the others. */
 body.wide #editor {
   width: min(100vw, calc(100vh * 16 / 9));
-  width: min(100vw, calc(100dvh * 16 / 9));
+  width: min(100cqw, calc(100cqh * 16 / 9));
   height: min(100vh, calc(100vw * 9 / 16));
-  height: min(100dvh, calc(100vw * 9 / 16));
+  height: min(100cqh, calc(100cqw * 9 / 16));
   overflow: hidden;
   /* Dashed red lines where the window starts and ends. An outline sits just outside the box, so the
      window stays exactly 16:9 and the lines show only on the sides that have a black bar. */
@@ -412,7 +462,7 @@ body.full #toolbar {
 }
 body.full #toolbar .strip { display: none; }
 /* One button per row, centred vertically. The rail never scrolls (a scrolling box would clip the
-   colour flyout): when it is short of room, e.g. a 16:9 window in portrait, its buttons give up
+   flyouts): when it is short of room, e.g. a 16:9 window in portrait, its buttons give up
    height instead, from 36px down to 22px. */
 body.full #toolbar .strip:nth-child(2) {
   display: flex;
@@ -424,48 +474,23 @@ body.full #toolbar .strip:nth-child(2) {
   max-height: 100%;
 }
 body.full .group { display: contents; } /* every button is a row of the rail itself */
-body.full .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
+body.full #toolbar .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
 body.full .chip { width: var(--hit); padding: 0; font-size: 11px; }
 body.full .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
 
-/* A tool with a flyout of its own (the eraser and its size). In the rail the pair is one row; the
-   button grows along a column to fill it, as #color-btn does. */
+/* Pens in the rail lie on their side, tip towards the note; the one in use reaches further out. */
+body.full .pen { flex: 0 1 28px; width: var(--hit); height: auto; min-height: 16px; }
+body.full .pen svg { left: 50%; top: 50%; margin: -24.75px 0 0 -9px; transform: translateX(15px) rotate(-90deg); }
+body.full .pen[aria-pressed="true"] svg { transform: translateX(7px) rotate(-90deg); }
+body.full .pen:not([aria-pressed="true"]):hover svg { transform: translateX(12px) rotate(-90deg); }
+
+/* A tool with a flyout of its own (the eraser and its size, "+" and its menu). In the rail the pair
+   is one row; the button grows along a column to fill it (WebKit does not stretch a button across a flex row). */
 body.full .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
-body.full .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
+body.full #toolbar .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
 body.full .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: translateY(-50%); }
 
-/* Colours in the rail: one multicolour button; the swatches fly out to its left when it is tapped. */
-body.full #colors { display: flex; flex-direction: column; flex: 0 1 36px; min-height: 22px; position: relative; }
-/* Grows along the column to fill its slot: WebKit does not stretch a button across a flex row. */
-body.full #color-btn { flex: 1 1 0; min-height: 0; }
-#color-btn::before {
-  content: "";
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  /* the colour in use in the middle, a gap, then the rainbow ring */
-  background:
-    radial-gradient(circle, var(--c, #111) 0 34%, var(--surface) 36% 48%, transparent 50%),
-    conic-gradient(#e03131, #f08c00, #f5d000, #2f9e44, #1c7ed6, #7048e8, #e03131);
-}
-body.full .swatches {
-  display: none;
-  position: absolute;
-  right: calc(100% + 12px);
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  gap: 2px;
-  padding: 4px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-body.full #colors.open .swatches { display: flex; }
-body.full .swatches .icon-btn { flex: none; width: var(--hit); height: var(--hit); }
-
-/* Outside the rail the swatches are simply part of the toolbar row, and rail-only buttons are hidden. */
-body:not(.full) .swatches { display: contents; }
+/* Buttons that only belong in the rail. */
 body:not(.full) .rail-only { display: none; }
 
 /* ---------- Toast ---------- */

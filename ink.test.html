@@ -6,7 +6,7 @@
 <svg id="s" viewBox="0 0 400 300" style="display:block; width:800px; height:600px; background:#f4f4f4"></svg>
 <div id="out" style="padding: 8px"></div>
 <script type="module">
-import { createInk, pathData, outlineData, boxOf, hitStroke, distToSegment, widthAt } from './ink.js';
+import { createInk, pathData, boxOf, hitStroke, distToSegment, opacityOf } from './ink.js';
 
 const out = document.getElementById('out');
 let passed = 0, failed = 0;
@@ -50,8 +50,11 @@ try {
   check('boxOf: covers the points plus half the stroke width',
     String(boxOf(long)) === '-1,-1,1001,1' && String(boxOf({ ...long, tool: 'highlighter', size: 10 })) === '-25,-25,1025,25');
   const pressed = { tool: 'pen', color: '#000', size: 4, points: [[10, 10, 1], [30, 20, 0.2]] };
-  check('boxOf: a pressure stroke is boxed at its widest possible',
-    boxOf(pressed)[0] === 10 - widthAt(4, 1) / 2 && boxOf(pressed)[3] === 20 + widthAt(4, 1) / 2);
+  check('boxOf: a flow stroke is boxed with room for its widest (its whole size either side)',
+    boxOf(pressed)[0] === 10 - 4 && boxOf(pressed)[3] === 20 + 4 && boxOf({ ...pressed, tool: 'flow', points: [[10, 10], [30, 20]] })[2] === 34);
+  check('opacityOf: a stroke\'s own, else the old highlighter\'s, else solid',
+    opacityOf({ tool: 'pen', opacity: 0.5 }) === 0.5 && opacityOf({ tool: 'highlighter' }) === 0.35 &&
+    opacityOf({ tool: 'highlighter', opacity: 1 }) === 1 && opacityOf({ tool: 'glow' }) === 1);
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
@@ -186,43 +189,58 @@ try {
   ink.load(ink.getStrokes());
   check('a glow stroke survives save and load', ink.getStrokes()[1].tool === 'glow' && strokeEls()[1].tagName === 'g');
   ink.load(ink.getStrokes().slice(0, 1));
-  ink.setTool('crayon');
 
-  // --- pressure, hover, palm rejection (faked event times, all later than the real ones above) ---
-  check('widthAt: pressure 0.5 gives the nominal size, more pressure is wider',
-    widthAt(4, 0.5) === 4 && widthAt(4, 1) > 4 && widthAt(4, 0) > 0 && widthAt(4, 0) < 4);
-
-  fire('pointerdown', 50, 200, 'pen', 2, { t: 10000, pressure: 0.1 });
-  fire('pointermove', 100, 200, 'pen', 2, { t: 10016, pressure: 0.9 });
-  fire('pointermove', 150, 200, 'pen', 2, { t: 10032, pressure: 0.9 });
-  fire('pointerup', 150, 200, 'pen', 2, { t: 10048, buttons: 0 });
-  const heavy = ink.getStrokes()[1];
-  const heavyPath = svg.querySelectorAll('path')[1];
-  const inked = (x, y) => heavyPath.isPointInFill(new DOMPoint(x, y));
-  check('a stylus stroke records pressure per point and thickens with it',
-    heavy.points.length === 3 && heavy.points.every(p => p.length === 3) && heavy.points[2][2] > heavy.points[0][2]);
-  check('a pressure stroke is one filled shape with no holes at its joins',
-    heavyPath.getAttribute('fill') === heavy.color && !heavyPath.getAttribute('stroke') &&
-    inked(50, 200) && inked(75, 200) && inked(100, 200) && inked(100, 201) && inked(125, 201) && inked(150, 200) && !inked(125, 210));
-  check('its ends are rounded outwards, past the first and last points',
-    inked(49.5, 200) && inked(151, 200) && !inked(47, 200) && !inked(154, 200));
-  check('it is a single closed outline, not a pile of pieces',
-    (heavyPath.getAttribute('d').match(/M/g) || []).length === 1 && heavyPath.getAttribute('d').endsWith('Z'));
-
-  // a line that doubles back on itself must not leave a gap or a flat corner at the turn
-  const hairpin = [[200, 240, 0.6], [240, 240, 0.6], [280, 240, 0.6], [240, 243, 0.6], [200, 246, 0.6]];
-  probe.setAttribute('d', outlineData(hairpin, 6));
-  svg.appendChild(probe);   // hit testing needs the path to be in the page
-  const inProbe = (x, y) => probe.isPointInFill(new DOMPoint(x, y));
-  // The centre line only bends towards the far point (280, 240): it turns at (a + 6b + c) / 8 = (270, 240.4).
-  check('a stroke that doubles back is solid along both legs and round at the turn',
-    inProbe(220, 240) && inProbe(260, 241) && inProbe(220, 245) && inProbe(270, 240.4) && inProbe(272.5, 240.4));
-  check('...and nothing sticks out past the turn', !inProbe(275, 240.4) && !inProbe(280, 240));
-  probe.remove();
+  // --- opacity: a pen's own, on the stroke and on its element ---
+  ink.setOpacity(0.5);
+  penStroke(180, 9400);
+  check('a see-through pen: the stroke carries its opacity, and so does its element',
+    ink.getStrokes()[1].opacity === 0.5 && strokeEls()[1].getAttribute('opacity') === '0.5');
   ink.load(ink.getStrokes());
-  check('a pressure stroke survives save and load unchanged',
-    JSON.stringify(ink.getStrokes()[1]) === JSON.stringify(heavy) &&
-    svg.querySelectorAll('path')[1].getAttribute('d') === heavyPath.getAttribute('d'));
+  check('...and it survives save and load', ink.getStrokes()[1].opacity === 0.5 && strokeEls()[1].getAttribute('opacity') === '0.5');
+  ink.undo();
+  ink.setOpacity(1);
+  ink.load([...ink.getStrokes().slice(0, 1), { tool: 'highlighter', color: '#ff0', size: 4, points: [[50, 180], [150, 180]] }]);
+  check('a highlighter stroke saved before pens had an opacity is still drawn at 35%',
+    ink.getStrokes()[1].opacity === undefined && strokeEls()[1].getAttribute('opacity') === '0.35');
+  ink.setTool('highlighter');
+  penStroke(190, 9600);
+  check('a new highlighter stroke always says how see-through it is, even at 100%',
+    ink.getStrokes()[2].opacity === 1 && !strokeEls()[2].hasAttribute('opacity') && strokeEls()[2].getAttribute('stroke-width') === '15');
+  ink.load(ink.getStrokes().slice(0, 1));
+  ink.setTool('flow');
+
+  // --- the flow pen (shaped by perfect-freehand), hover, palm rejection (faked event times, all later than the real ones above) ---
+  // A stylus line along y = 200, a point every 2px: light for the first half, heavy for the second.
+  fire('pointerdown', 50, 200, 'pen', 2, { t: 10000, pressure: 0.15 });
+  for (let i = 1; i <= 50; i++) fire('pointermove', 50 + i * 2, 200, 'pen', 2, { t: 10000 + i * 8, pressure: i < 25 ? 0.15 : 0.9 });
+  fire('pointerup', 150, 200, 'pen', 2, { t: 10500, buttons: 0 });
+  const heavy = ink.getStrokes()[1];
+  const heavyPath = strokeEls()[1];
+  const inked = (x, y) => heavyPath.isPointInFill(new DOMPoint(x, y));
+  // How far the ink reaches above and below the line at x, in viewBox units.
+  const thick = x => { let n = 0; for (let y = 195; y <= 205; y += 0.1) if (inked(x, y)) n++; return n / 10; };
+  check('the flow pen stores a flow stroke with the stylus pressure on every point',
+    heavy.tool === 'flow' && heavy.points.length === 51 && heavy.points.every(p => p.length === 3) && heavy.points[50][2] > heavy.points[0][2]);
+  check('it is drawn as one filled, closed outline',
+    heavyPath.tagName === 'path' && heavyPath.getAttribute('fill') === heavy.color && !heavyPath.getAttribute('stroke') &&
+    (heavyPath.getAttribute('d').match(/M/g) || []).length === 1 && heavyPath.getAttribute('d').endsWith('Z'));
+  check('solid from end to end, and nowhere else', [52, 75, 100, 125, 148].every(x => inked(x, 200)) && !inked(125, 210) && !inked(40, 200) && !inked(160, 200));
+  check('thin where the stylus was light, thick where it pressed: around its size (3) in between',
+    thick(65) > 0.5 && thick(65) < 3 && thick(135) > 3 && thick(135) < 6);
+
+  ink.load(ink.getStrokes());
+  check('a flow stroke survives save and load unchanged',
+    JSON.stringify(ink.getStrokes()[1]) === JSON.stringify(heavy) && strokeEls()[1].getAttribute('d') === heavyPath.getAttribute('d'));
+  // The "crayon" of earlier versions saved its strokes as 'pen' with a pressure on every point.
+  ink.load([...ink.getStrokes().slice(0, 1), { ...heavy, tool: 'pen' }]);
+  check('an old crayon stroke is still drawn as a filled outline', strokeEls()[1].getAttribute('fill') === heavy.color && !strokeEls()[1].getAttribute('stroke'));
+  ink.load(ink.getStrokes().slice(0, 1));
+
+  drag(50, 200, 150, 200);   // a mouse: no pressure to follow
+  const plain = ink.getStrokes()[1];
+  check('without a pressure reading the flow pen still draws its filled outline, from plain points',
+    plain.tool === 'flow' && plain.points.every(p => p.length === 2) && strokeEls()[1].getAttribute('fill') === plain.color &&
+    strokeEls()[1].isPointInFill(new DOMPoint(100, 200)));
   ink.load(ink.getStrokes().slice(0, 1));
 
   // Two fingers `from` apart, one moves until they are `to` apart. Returns the zoom factor that produced.

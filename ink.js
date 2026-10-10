@@ -1,4 +1,6 @@
-// ink.js — freehand annotation layer for EngiNote. Plain ES module, no dependencies.
+// ink.js — freehand annotation layer for EngiNote. Plain ES module.
+// The flow pen's shape comes from perfect-freehand, kept beside this file.
+import { getStroke } from './perfect-freehand.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const HIGHLIGHTER_SCALE = 5;      // highlighter width = size * this
@@ -11,12 +13,15 @@ const MAX_HISTORY = 100;
 // (A blur filter would look softer, but one per stroke is what makes a full page slow to repaint.)
 const GLOW_HALO = [[5, 0.1], [3.2, 0.16], [2, 0.26]];
 const GLOW_CORE = [0.35, 0.6];    // the pale line down the middle: width factor, opacity
-// The tools, each with its cursor. 'pen' draws an even line; 'crayon' is the pen that follows stylus
-// pressure; 'glow' is an even line with a halo.
-const CURSORS = { pen: 'crosshair', crayon: 'crosshair', glow: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab' };
+// The tools, each with its cursor. 'pen' draws an even line; 'flow' is the pen whose line swells and
+// thins as it is drawn; 'glow' is an even line with a halo.
+const CURSORS = { pen: 'crosshair', flow: 'crosshair', glow: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab' };
+// How perfect-freehand shapes a flow stroke. thinning: how much pressure changes the width (at
+// pressure 0.5 the line is exactly `size` wide). streamline: how far the line lags the hand to
+// take the shake out. Chosen by eye in a browser: tune on the real device.
+const FLOW = { thinning: 0.6, smoothing: 0.5, streamline: 0.4 };
 
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
-const PRESSURE_FLOOR = 0.35;      // width factor at zero pressure; pressure 0.5 gives exactly `size`
 const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothing raw pressure
 const PALM_AFTER_PEN = 300;       // ms after the stylus leaves the page: a touch landing this soon is taken for the palm
 const PAN_SLOP = 8;               // screen px a finger must travel before it starts to scroll or zoom
@@ -29,77 +34,35 @@ const round2 = n => Math.round(n * 100) / 100;
 
 // ---------- pure geometry (no DOM) ----------
 
-/** Rendered width of a stroke in page pixels (for a pressure stroke: its width at pressure 0.5). */
+/** Rendered width of a stroke in page pixels (for a flow stroke: its width at pressure 0.5). */
 export function strokeWidth(stroke) {
   return stroke.tool === 'highlighter' ? stroke.size * HIGHLIGHTER_SCALE : stroke.size;
 }
 
-/** Width of a pressure-sensitive stroke where the pressure is p (0..1). */
-export function widthAt(size, p) {
-  return size * (PRESSURE_FLOOR + (1 - PRESSURE_FLOOR) * 2 * p);
+// A flow stroke is drawn as one filled outline, not a stroked line. Besides 'flow' strokes these
+// are the strokes of the earlier "crayon": saved as 'pen', with a pressure on every point.
+const isFlow = stroke => stroke.tool === 'flow' || stroke.points[0].length > 2;
+
+/** How see-through a stroke is drawn, 0..1. The highlighter's default is for strokes saved before pens had their own. */
+export const opacityOf = stroke => stroke.opacity ?? (stroke.tool === 'highlighter' ? HIGHLIGHTER_OPACITY : 1);
+
+// Path data for the outline of a flow stroke. Its points are [x, y] or, from a stylus that reports
+// it, [x, y, pressure]; without pressure the width follows the speed of the hand instead.
+// `done` is false while the stroke is still being drawn (its end then trails the pointer a little).
+function flowData(stroke, done) {
+  const edge = getStroke(stroke.points, { ...FLOW, size: stroke.size, simulatePressure: stroke.points[0].length < 3, last: done });
+  const n = edge.length;
+  if (n < 4) return '';
+  // Curves through the midpoints of the outline's points, as the library's notes suggest.
+  const half = (a, b) => `${round2((a[0] + b[0]) / 2)} ${round2((a[1] + b[1]) / 2)}`;
+  let d = `M${round2(edge[0][0])} ${round2(edge[0][1])}Q${round2(edge[1][0])} ${round2(edge[1][1])} ${half(edge[1], edge[2])}T`;
+  for (let i = 2; i < n - 1; i++) d += half(edge[i], edge[i + 1]) + ' ';
+  return d + 'Z';
 }
 
-// A pressure stroke has points [x, y, pressure] and is drawn as one filled outline. Its centre line
-// is the same midpoint curve pathData() draws (straight from the first point to the first midpoint,
-// then a curve from midpoint to midpoint bending at each point); the outline is that line pushed
-// out by half the width on either side, closed with a round cap at each end.
-// One closed shape per stroke matters: an earlier version stamped a disc and a quad at every step,
-// hundreds of overlapping pieces per stroke, and repainting a page of those was what made erasing
-// and zooming slow.
-function disc([x, y, p], size) {
-  const r = round2(widthAt(size, p) / 2);
-  return `M${round2(x - r)} ${round2(y)}a${r} ${r} 0 1 0 ${round2(2 * r)} 0a${r} ${r} 0 1 0 ${round2(-2 * r)} 0`;
-}
-
-const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-
-// Unit vector square to the direction a -> b, or null where the two coincide.
-function across(a, b) {
-  const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
-  return len ? [-dy / len, dx / len] : null;
-}
-
-/** Path data for a whole pressure stroke. */
-export function outlineData(points, size) {
-  const n = points.length;
-  if (n === 1) return disc(points[0], size);
-  // The point on one side (+1 or -1) of centre-line point p, where `n` is the unit vector across the line there.
-  const edge = (p, n, side) => {
-    const r = side * widthAt(size, p[2]) / 2;
-    return `${round2(p[0] + n[0] * r)} ${round2(p[1] + n[1] * r)}`;
-  };
-  const NONE = [0, 0];
-  // seg[i]: across the straight run from point i to point i + 1. bend[i]: across the curve where it bends at point i.
-  const seg = [];
-  for (let i = 0; i < n - 1; i++) seg.push(across(points[i], points[i + 1]) || seg[i - 1] || NONE);
-  const bend = i => across(points[i - 1], points[i + 1]) || seg[i - 1];
-  const first = points[0], last = points[n - 1];
-  const cap = p => { const r = round2(widthAt(size, p[2]) / 2); return `A${r} ${r} 0 0 0 `; };
-
-  // out along one side...
-  let d = `M${edge(first, seg[0], 1)}L${edge(mid(first, points[1]), seg[0], 1)}`;
-  for (let i = 1; i < n - 1; i++) d += `Q${edge(points[i], bend(i), 1)} ${edge(mid(points[i], points[i + 1]), seg[i], 1)}`;
-  d += `L${edge(last, seg[n - 2], 1)}${cap(last)}${edge(last, seg[n - 2], -1)}`;
-  // ...and back along the other
-  d += `L${edge(mid(points[n - 2], last), seg[n - 2], -1)}`;
-  for (let i = n - 2; i >= 1; i--) d += `Q${edge(points[i], bend(i), -1)} ${edge(mid(points[i - 1], points[i]), seg[i - 1], -1)}`;
-  d += `L${edge(first, seg[0], -1)}${cap(first)}${edge(first, seg[0], 1)}Z`;
-
-  // Where the line doubles back sharply the outline alone would leave a flat corner: round it with a
-  // disc. The disc goes on the curve's own turning point, (a + 6b + c) / 8, not on b: the curve only
-  // bends towards b, so a disc there would stick out as a knob.
-  for (let i = 1; i < n - 1; i++) {
-    const a = points[i - 1], b = points[i], c = points[i + 1];
-    if ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) < 0) {
-      d += disc([0, 1, 2].map(k => (a[k] + 6 * b[k] + c[k]) / 8), size);
-    }
-  }
-  return d;
-}
-
-/** Path data for any stroke: an outline to fill for a pressure stroke, a line to stroke otherwise. */
-export function strokeData(stroke) {
-  return stroke.points[0].length > 2 ? outlineData(stroke.points, stroke.size) : pathData(stroke.points);
+/** Path data for any stroke: an outline to fill for a flow stroke, a line to stroke otherwise. */
+export function strokeData(stroke, done = true) {
+  return isFlow(stroke) ? flowData(stroke, done) : pathData(stroke.points);
 }
 
 const boxes = new WeakMap();
@@ -107,8 +70,8 @@ const boxes = new WeakMap();
 export function boxOf(stroke) {
   let box = boxes.get(stroke);
   if (!box) {
-    const pressure = stroke.points[0].length > 2;
-    const half = Math.max(strokeWidth(stroke), pressure ? widthAt(stroke.size, 1) : 0) / 2;
+    // A flow stroke at full pressure is 1 + thinning times its size across: allow the whole size either side.
+    const half = isFlow(stroke) ? stroke.size : strokeWidth(stroke) / 2;
     box = [Infinity, Infinity, -Infinity, -Infinity];
     for (const [x, y] of stroke.points) {
       if (x < box[0]) box[0] = x;
@@ -164,9 +127,10 @@ function normalise(list) {
   return (Array.isArray(list) ? list : [])
     .filter(s => s && Array.isArray(s.points) && s.points.length)
     .map(s => ({
-      tool: s.tool === 'highlighter' || s.tool === 'glow' ? s.tool : 'pen',
+      tool: s.tool === 'highlighter' || s.tool === 'glow' || s.tool === 'flow' ? s.tool : 'pen',
       color: String(s.color || '#000'),
       size: +s.size > 0 ? +s.size : 3,
+      ...(s.opacity > 0 && s.opacity <= 1 ? { opacity: +s.opacity } : {}),
       points: s.points,
     }));
 }
@@ -180,9 +144,9 @@ function normalise(list) {
 // it (the app passes the whole note window, so fingers can pan and pinch on the margin too).
 // Strokes and erasing still only start on the svg.
 export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZoomEnd, onDoubleTap, onErase } = {}) {
-  let tool = 'pen', color = '#000', size = 3;
+  let tool = 'pen', color = '#000', size = 3, opacity = 1;
   // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
-  // 'pen', 'highlighter' or 'glow'. A crayon stroke is a 'pen' stroke whose points carry pressure.
+  // 'pen', 'flow', 'highlighter' or 'glow'.
   let strokes = [];
   let els = [];       // one element per stroke, same order
   const undoStack = [], redoStack = [];   // snapshots of `strokes`
@@ -242,14 +206,14 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     nib.setAttribute('cy', pt[1]);
     nib.setAttribute('r', rubber ? eraserRadius : Math.max(1.5, strokeWidth({ tool, size }) / 2));
     nib.setAttribute('fill', rubber ? '#888' : color);
-    nib.setAttribute('fill-opacity', rubber ? 0.15 : 0.5);
+    nib.setAttribute('fill-opacity', rubber ? 0.15 : 0.5 * opacity);
     nib.setAttribute('stroke', rubber ? '#888' : 'none');
   }
 
   const getStrokes = () => strokes.slice();
   const changed = () => { if (onChange) onChange(getStrokes()); };
 
-  // A round-ended line along path data `d`. One path with stroke-opacity: where it crosses itself it does not darken.
+  // A round-ended line along path data `d`.
   function line(d, colour, width, opacity = 1) {
     const p = document.createElementNS(NS, 'path');
     p.setAttribute('d', d);
@@ -263,27 +227,26 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   }
 
   // The element that draws a stroke: a <path>, or for a glow stroke a <g> of them sharing one path data.
-  function makeEl(s) {
-    const d = strokeData(s);
-    if (s.points[0].length > 2) {   // pressure-sensitive: a filled outline, not a stroked line
-      const p = document.createElementNS(NS, 'path');
-      p.setAttribute('d', d);
-      p.setAttribute('fill', s.color);
-      return p;
+  // `done`: the stroke is complete (false for the one being drawn).
+  function makeEl(s, done = true) {
+    const d = strokeData(s, done);
+    let el;
+    if (isFlow(s)) {
+      el = document.createElementNS(NS, 'path');
+      el.setAttribute('d', d);
+      el.setAttribute('fill', s.color);
+    } else if (s.tool === 'glow') {
+      el = document.createElementNS(NS, 'g');
+      for (const [factor, faint] of GLOW_HALO) el.appendChild(line(d, s.color, s.size * factor, faint));
+      el.appendChild(line(d, s.color, s.size));
+      el.appendChild(line(d, '#fff', s.size * GLOW_CORE[0], GLOW_CORE[1]));
+    } else {
+      el = line(d, s.color, strokeWidth(s));
+      if (s.tool === 'highlighter') el.style.mixBlendMode = 'multiply';
     }
-    if (s.tool === 'glow') {
-      const g = document.createElementNS(NS, 'g');
-      for (const [factor, opacity] of GLOW_HALO) g.appendChild(line(d, s.color, s.size * factor, opacity));
-      g.appendChild(line(d, s.color, s.size));
-      g.appendChild(line(d, '#fff', s.size * GLOW_CORE[0], GLOW_CORE[1]));
-      return g;
-    }
-    if (s.tool === 'highlighter') {
-      const p = line(d, s.color, strokeWidth(s), HIGHLIGHTER_OPACITY);
-      p.style.mixBlendMode = 'multiply';
-      return p;
-    }
-    return line(d, s.color, s.size);
+    // On the whole element, so a stroke does not darken where it crosses itself.
+    if (opacityOf(s) < 1) el.setAttribute('opacity', opacityOf(s));
+    return el;
   }
 
   // New path data for a stroke's element, while the stroke is being drawn.
@@ -323,6 +286,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (!a) return;
     act = null;
     if (a.path) {
+      setData(a.path, strokeData(a.stroke));   // its finished shape: a flow stroke's end catches up with the pointer
       els.push(a.path);   // the live path becomes the stroke's element
       elOf.set(a.stroke, a.path);
       commit([...strokes, a.stroke]);
@@ -455,11 +419,13 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
         act = { ...base, before: strokes, last: pt };
         eraseAlong(act, pt);
       } else {
-        // The crayon follows pressure, when the stylus really reports it (0.5 is the "no sensor" value):
-        // its points then carry it and it is drawn as a line of varying width. Otherwise it draws like the pen.
-        if (tool === 'crayon' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
-        const stroke = { tool: tool === 'crayon' ? 'pen' : tool, color, size, points: [pt] };
-        const path = makeEl(stroke);
+        // The flow pen follows pressure, when the stylus really reports it (0.5 is the "no sensor"
+        // value): its points then carry it. Otherwise its width follows the speed of the hand.
+        if (tool === 'flow' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
+        const stroke = { tool, color, size, points: [pt] };
+        // Kept on the stroke only where it says something, so most strokes stay as small as before.
+        if (opacity < 1 || tool === 'highlighter') stroke.opacity = opacity;
+        const path = makeEl(stroke, false);
         layer.appendChild(path);
         act = { ...base, stroke, path };
       }
@@ -516,7 +482,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     }
     // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
     // build it incrementally if strokes of several thousand points ever lag.
-    if (a.path) setData(a.path, strokeData(a.stroke));
+    if (a.path) setData(a.path, strokeData(a.stroke, false));
   }
 
   // pointerup, pointercancel and lostpointercapture all end the gesture. A cancelled stylus or mouse
@@ -587,6 +553,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     setEraserSize(radius) { if (+radius > 0) eraserRadius = +radius; },   // page px
     setColor(cssColor) { if (cssColor) color = String(cssColor); },
     setSize(n) { if (+n > 0) size = +n; },
+    setOpacity(n) { if (+n > 0 && +n <= 1) opacity = +n; },
     undo: () => step(undoStack, redoStack),
     redo: () => step(redoStack, undoStack),
     canUndo: () => undoStack.length > 0,

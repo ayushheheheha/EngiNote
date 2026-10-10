@@ -492,7 +492,7 @@ const ink = createInk(svg, {
   onZoomEnd: pinchEnd,
   onDoubleTap: () => toggleEraser(),
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
-    if (autoDeselect() && tool === 'eraser') choose('tool', beforeEraser);
+    if (autoDeselect() && tool === 'eraser') choose(beforeEraser);
   },
 });
 
@@ -500,10 +500,6 @@ function refreshHistory() {
   undoBtn.disabled = !ink.canUndo();
   redoBtn.disabled = !ink.canRedo();
 }
-
-let tool = 'pen';
-let beforeEraser = 'pen'; // the tool to go back to from the eraser
-const autoBtn = $('auto-erase'); // the eraser's option; only shown while the eraser is selected
 
 // A flyout: a panel that opens beside its button (`wrap` holds both) and is put away by a touch
 // anywhere outside it, the page included.
@@ -516,9 +512,72 @@ function flyout(wrap, button) {
   return { set, toggle: () => set(!wrap.classList.contains('open')) };
 }
 
-// In the full-screen rail the colours hide behind one button and open as a flyout.
-const colorBtn = $('color-btn'), colorFly = flyout($('colors'), colorBtn);
-colorBtn.onclick = colorFly.toggle;
+/* ---------- Pens ---------- */
+
+// The tray holds the user's own pens: each is a kind of pen with a colour, a thickness and an
+// opacity of its own, kept on this device. `tool` is the name ink.js draws that kind with.
+const PEN_TYPES = {
+  pen: { name: 'Pen', tool: 'pen', size: 3, opacity: 1 },
+  flow: { name: 'Flow pen', tool: 'flow', size: 4, opacity: 1 },
+  glow: { name: 'Glow pen', tool: 'glow', size: 4, opacity: 1 },
+  highlighter: { name: 'Highlighter', tool: 'highlighter', size: 4, opacity: 0.35 },
+};
+const MAX_PENS = 12; // the full-screen rail has to hold every one of them
+const FIRST_PENS = [['pen', '#111111'], ['pen', '#ffffff'], ['pen', '#ff1744'], ['flow', '#1c7ed6'], ['glow', '#ffea00'], ['highlighter', '#ffea00']];
+const newPen = (type, color) => ({ id: newId(), type, color, size: PEN_TYPES[type].size, opacity: PEN_TYPES[type].opacity });
+const within1 = (n, low, high) => Math.min(high, Math.max(low, n));
+
+// The saved pens, or the starting set. What comes out of storage is checked: only pens that can be drawn with.
+function readPens() {
+  let list;
+  try { list = JSON.parse(localStorage.getItem('pens')); } catch { /* storage blocked, or not JSON */ }
+  const saved = (Array.isArray(list) ? list : [])
+    .filter(p => p && PEN_TYPES[p.type] && typeof p.id === 'string' && p.id !== 'eraser' && p.id !== 'hand' && /^#[0-9a-f]{6}$/i.test(p.color))
+    .slice(0, MAX_PENS)
+    .map(p => ({ id: p.id, type: p.type, color: p.color, size: within1(+p.size || 3, 1, 12), opacity: within1(+p.opacity || 1, 0.1, 1) }));
+  return saved.length ? saved : FIRST_PENS.map(([type, color]) => newPen(type, color));
+}
+
+const pens = readPens();
+const penOf = id => pens.find(p => p.id === id);
+let tool = ''; // 'eraser', 'hand', or the id of the pen in use
+let beforeEraser = pens[0].id; // the tool to go back to from the eraser
+function savePens() {
+  try {
+    localStorage.setItem('pens', JSON.stringify(pens));
+    if (penOf(tool)) localStorage.setItem('pen', tool);
+  } catch { /* lasts for this visit only */ }
+}
+
+// A pen as a picture, standing tip up: the tip and a band take the pen's colour (--c on the button).
+const PEN_TIPS = {
+  pen: '<path class="tip" d="M8 1l3.5 12h-7z"/>',
+  flow: '<path class="nib" d="M8 0c3 4 4 8 3 13H5C4 8 5 4 8 0z"/><path class="slit" d="M8 5v8"/>',
+  glow: '<path class="tip" d="M8 1l3.5 12h-7z"/><path class="spark" d="M2.5 2v4M.5 4h4M13.5 5v3M12 6.5h3"/>',
+  highlighter: '<path class="tip" d="M4.5 13V6l7-4v11z"/>',
+};
+const penPicture = type => `<svg viewBox="0 0 16 44" aria-hidden="true">${PEN_TIPS[type]}` +
+  `<rect class="barrel" x="3.5" y="13" width="9" height="31" rx="1.5"/><rect class="band" x="3.5" y="${type === 'flow' ? 13 : 24}" width="9" height="3.5"/></svg>`;
+
+const penBox = $('pens'), addWrap = $('add-wrap');
+function renderPens() {
+  penBox.replaceChildren(...pens.map((pen, i) => {
+    const btn = document.createElement('button');
+    const name = PEN_TYPES[pen.type].name;
+    btn.type = 'button';
+    btn.className = 'pen';
+    btn.dataset.tool = pen.id;
+    btn.title = `${name}${i < 9 ? ` (${i + 1})` : ''}. Tap again for its settings`;
+    btn.setAttribute('aria-label', `${name} ${i + 1}`);
+    btn.setAttribute('aria-pressed', pen.id === tool);
+    btn.style.setProperty('--c', pen.color);
+    btn.innerHTML = penPicture(pen.type); // fixed markup from PEN_TIPS; the colour goes in through --c
+    return btn;
+  }));
+  addWrap.hidden = pens.length >= MAX_PENS;
+}
+
+const autoBtn = $('auto-erase'); // the eraser's option; only shown while the eraser is selected
 
 // The eraser's size: a slider in a flyout, opened by tapping the eraser button while it is already the tool.
 const eraserBtn = document.querySelector('[data-tool="eraser"]'), eraserFly = flyout($('eraser-wrap'), eraserBtn);
@@ -533,41 +592,128 @@ eraserRange.oninput = () => {
   try { localStorage.setItem('eraserSize', eraserRange.value); } catch { /* lasts for this visit only */ }
 };
 
-const setters = {
-  tool: v => {
-    if (v === 'eraser' && tool !== 'eraser') beforeEraser = tool;
-    tool = v;
-    autoBtn.hidden = v !== 'eraser';
-    if (v !== 'eraser') eraserFly.set(false);
-    ink.setTool(v);
-  },
-  color: v => {
-    ink.setColor(v);
-    colorBtn.style.setProperty('--c', v); // the button shows the colour in use
-    colorFly.set(false);
-  },
-  size: v => ink.setSize(Number(v)),
-};
-
-function choose(kind, value) {
-  setters[kind](value);
-  for (const btn of document.querySelectorAll(`[data-${kind}]`)) {
-    btn.setAttribute('aria-pressed', btn.dataset[kind] === String(value));
-  }
+// Hand the pen's own settings to the ink layer.
+function usePen(pen) {
+  ink.setTool(PEN_TYPES[pen.type].tool);
+  ink.setColor(pen.color);
+  ink.setSize(pen.size);
+  ink.setOpacity(pen.opacity);
 }
 
+// Make `value` the tool: 'eraser', 'hand' or a pen's id.
+function choose(value) {
+  const pen = penOf(value);
+  if (!pen && value !== 'eraser' && value !== 'hand') return;
+  if (value === 'eraser' && tool !== 'eraser') beforeEraser = tool;
+  if (value !== tool) showPanel(false);
+  tool = value;
+  autoBtn.hidden = value !== 'eraser';
+  if (value !== 'eraser') eraserFly.set(false);
+  if (pen) {
+    usePen(pen);
+    savePens();
+  } else {
+    ink.setTool(value);
+  }
+  for (const btn of document.querySelectorAll('[data-tool]')) btn.setAttribute('aria-pressed', btn.dataset.tool === value);
+}
+
+/* The settings of the pen in use: one panel, filled in for that pen and put beside its button. */
+
+const editor = $('editor'), panel = $('pen-panel'), removeBtn = $('pen-remove');
+const sizeRange = $('pen-size'), opacityRange = $('pen-opacity'), customColor = $('pen-custom');
+
+function fillPanel(pen) {
+  $('pen-type').textContent = PEN_TYPES[pen.type].name;
+  sizeRange.value = pen.size;
+  $('pen-size-out').textContent = pen.size;
+  opacityRange.value = Math.round(pen.opacity * 100);
+  $('pen-opacity-out').textContent = `${opacityRange.value}%`;
+  let listed = false;
+  for (const btn of panel.querySelectorAll('[data-color]')) {
+    const on = btn.dataset.color === pen.color.toLowerCase();
+    btn.setAttribute('aria-pressed', on);
+    listed ||= on;
+  }
+  // A colour that is not one of the swatches shows on the "another colour" button.
+  customColor.value = pen.color;
+  customColor.parentElement.setAttribute('aria-pressed', !listed);
+  customColor.parentElement.style.setProperty('--c', pen.color);
+  removeBtn.disabled = pens.length < 2; // there is always a pen to write with
+}
+
+function showPanel(open) {
+  const pen = penOf(tool), btn = penBox.querySelector('[aria-pressed="true"]');
+  panel.hidden = !(open && pen && btn);
+  if (panel.hidden) return;
+  fillPanel(pen);
+  // Below the toolbar under the pen, or in the full-screen rail to its left: wherever that is, kept inside the editor.
+  const b = btn.getBoundingClientRect(), strip = btn.closest('.strip').getBoundingClientRect(), box = editor.getBoundingClientRect();
+  const w = panel.offsetWidth, h = panel.offsetHeight, rail = document.body.classList.contains('full');
+  const left = rail ? strip.left - w - 12 : b.left + b.width / 2 - w / 2;
+  const top = rail ? b.top + b.height / 2 - h / 2 : strip.bottom + 10;
+  panel.style.left = `${within1(left - box.left, 8, box.width - w - 8)}px`;
+  panel.style.top = `${within1(top - box.top, 8, box.height - h - 8)}px`;
+}
+// Put away by a touch anywhere else. (Not by one on a pen: that tap has its own meaning, below.)
+document.addEventListener('pointerdown', e => { if (!panel.contains(e.target) && !e.target.closest?.('.pen')) showPanel(false); });
+addEventListener('resize', () => showPanel(false));
+
+// Change the pen in use; it draws with the new setting from the next stroke on.
+function editPen(change) {
+  const pen = penOf(tool);
+  if (!pen) return;
+  Object.assign(pen, change);
+  usePen(pen);
+  savePens();
+  penBox.querySelector('[aria-pressed="true"]')?.style.setProperty('--c', pen.color);
+  fillPanel(pen);
+}
+sizeRange.oninput = () => editPen({ size: Number(sizeRange.value) });
+opacityRange.oninput = () => editPen({ opacity: opacityRange.value / 100 });
+customColor.oninput = () => editPen({ color: customColor.value });
+$('pen-colors').addEventListener('click', e => {
+  const color = e.target.closest('[data-color]')?.dataset.color;
+  if (color) editPen({ color });
+});
+removeBtn.onclick = () => {
+  const i = pens.findIndex(p => p.id === tool);
+  if (i < 0 || pens.length < 2) return;
+  pens.splice(i, 1);
+  const next = pens[Math.min(i, pens.length - 1)].id;
+  if (!penOf(beforeEraser)) beforeEraser = next;
+  renderPens();
+  choose(next);
+};
+
+// "+": a new pen of the chosen kind, in the colour of the pen in use, with its settings open.
+const addFly = flyout(addWrap, $('add-pen'));
+$('add-pen').onclick = addFly.toggle;
+addWrap.addEventListener('click', e => {
+  const type = e.target.closest('[data-add]')?.dataset.add;
+  if (!type || pens.length >= MAX_PENS) return;
+  addFly.set(false);
+  const pen = newPen(type, type === 'highlighter' ? '#ffea00' : penOf(tool)?.color ?? '#111111');
+  pens.push(pen);
+  renderPens();
+  choose(pen.id);
+  showPanel(true);
+});
+
 $('toolbar').addEventListener('click', e => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  if (btn === eraserBtn && tool === 'eraser') return eraserFly.toggle(); // already the tool: the tap is for its size
-  for (const kind in setters) if (btn.dataset[kind]) choose(kind, btn.dataset[kind]);
+  const value = e.target.closest('button')?.dataset.tool;
+  if (!value) return;
+  if (value !== tool) return choose(value);
+  // Already the tool: the tap is for its settings.
+  if (value === 'eraser') eraserFly.toggle();
+  else showPanel(panel.hidden);
 });
 undoBtn.onclick = () => ink.undo();
 redoBtn.onclick = () => ink.redo();
 
 // Flip between the eraser and the tool used before it. Bound to a finger double-tap on the page:
 // Apple Pencil's own double-tap (on its barrel) is only given to native apps, never to web pages.
-const toggleEraser = () => choose('tool', tool === 'eraser' ? beforeEraser : 'eraser');
+const toggleEraser = () => choose(tool === 'eraser' ? beforeEraser : 'eraser');
 
 // The iPad app (ios/) passes on what a web page is never told: a double-tap or a squeeze on the
 // Apple Pencil itself. It arrives as a 'pencil' event on the window; in a browser it never fires.
@@ -603,9 +749,10 @@ let savedEraser = 0;
 try { savedEraser = Number(localStorage.getItem('eraserSize')); } catch { /* storage blocked */ }
 setEraserSize(savedEraser >= Number(eraserRange.min) && savedEraser <= Number(eraserRange.max) ? savedEraser : 8);
 
-choose('tool', 'pen');
-choose('color', '#111111');
-choose('size', 4);
+let lastPen;
+try { lastPen = localStorage.getItem('pen'); } catch { /* storage blocked */ }
+renderPens();
+choose(penOf(lastPen) ? lastPen : pens[0].id);
 
 // Mark the open note as changed and save it shortly.
 function touch() {
@@ -695,12 +842,12 @@ wideBtn.onclick = () => {
 
 /* ---------- Keyboard ---------- */
 
-const TOOL_KEYS = { p: 'pen', c: 'crayon', g: 'glow', h: 'highlighter', e: 'eraser', v: 'hand' };
+const TOOL_KEYS = { e: 'eraser', v: 'hand' }; // and 1 to 9: the pens, in tray order
 // The keys a browser scrolls with, as fractions of the window's height (the note is not a browser scroller: see the view section).
 const SCROLL_KEYS = { pagedown: 0.9, ' ': 0.9, pageup: -0.9, arrowdown: 0.12, arrowup: -0.12 };
 
 document.addEventListener('keydown', e => {
-  if (!current || e.target === nameInput) return;
+  if (!current || e.target instanceof HTMLInputElement) return; // typing a name, or moving a slider
   const key = e.key.toLowerCase();
   if (e.ctrlKey || e.metaKey) {
     if (key === 'z') { e.preventDefault(); e.shiftKey ? ink.redo() : ink.undo(); }
@@ -708,7 +855,9 @@ document.addEventListener('keydown', e => {
   } else if (e.altKey) {
     // left to the browser
   } else if (TOOL_KEYS[key]) {
-    choose('tool', TOOL_KEYS[key]);
+    choose(TOOL_KEYS[key]);
+  } else if (pens[key - 1]) {
+    choose(pens[key - 1].id);
   } else if (key === 'f') {
     toggleFull();
   } else if (key in SCROLL_KEYS) {
