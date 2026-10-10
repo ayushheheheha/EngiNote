@@ -226,6 +226,7 @@ const ink = createInk(svg, {
     refreshHistory();
   },
   onZoom: (factor, x, y) => setZoom(zoom * factor, x, y), // two-finger pinch
+  onDoubleTap: () => toggleEraser(),
 });
 
 function refreshHistory() {
@@ -253,6 +254,15 @@ $('toolbar').addEventListener('click', e => {
 });
 undoBtn.onclick = () => ink.undo();
 redoBtn.onclick = () => ink.redo();
+
+// Flip between the eraser and the tool used before it. Bound to a finger double-tap on the page:
+// Apple Pencil's own double-tap (on its barrel) is only given to native apps, never to web pages.
+let beforeEraser = 'pen';
+function toggleEraser() {
+  const now = document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool;
+  if (now !== 'eraser') beforeEraser = now;
+  choose('tool', now === 'eraser' ? beforeEraser : 'eraser');
+}
 
 choose('tool', 'pen');
 choose('color', '#111111');

@@ -49,11 +49,12 @@ try {
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
-  let changes = 0, zoomed = 1;
+  let changes = 0, zoomed = 1, doubleTaps = 0;
   const ink = createInk(svg, {
     scroller: document.scrollingElement,
     onChange: () => changes++,
     onZoom: factor => { zoomed *= factor; },
+    onDoubleTap: () => doubleTaps++,
   });
   const saved = [
     { tool: 'pen', color: '#c00', size: 3, points: [[10, 10], [50, 60.5], [90, 10]] },
@@ -196,6 +197,28 @@ try {
     zoomed === midPinch && ink.getStrokes().length === 2 && nib.style.display === 'none');
   ink.undo();
 
+  // A finger tap: down and up on the same spot `held` ms apart.
+  const tap = (t, x = 200, y = 150, held = 80) => {
+    fire('pointerdown', x, y, 'touch', 31, { t });
+    fire('pointerup', x, y, 'touch', 31, { t: t + held, buttons: 0 });
+  };
+  tap(50000);
+  check('one finger tap is not a double tap', doubleTaps === 0);
+  tap(50200);
+  check('two quick finger taps on the same spot are a double tap', doubleTaps === 1);
+  tap(51000); tap(52000);
+  check('taps too far apart in time are not a double tap', doubleTaps === 1);
+  tap(53000); tap(53200, 300, 150);
+  check('taps too far apart on the page are not a double tap', doubleTaps === 1);
+  tap(54000, 200, 150, 400); tap(54500, 200, 150, 400);
+  check('long presses are not taps', doubleTaps === 1);
+  fire('pointerdown', 50, 280, 'pen', 2, { t: 55000, pressure: 0.4 });
+  fire('pointerup', 50, 280, 'pen', 2, { t: 55050, buttons: 0 });
+  ink.undo();
+  tap(55150); tap(55350);
+  check('a double tap still counts right after writing, when touches are otherwise taken for the palm',
+    doubleTaps === 2 && ink.getStrokes().length === 1);
+
   fire('pointerdown', 200, 200);
   fire('pointerup', 200, 200);
   check('a click leaves a one-point stroke', ink.getStrokes().length === 2 && ink.getStrokes()[1].points.length === 1);
@@ -209,6 +232,24 @@ try {
     ink.getStrokes().length === 1 && changes === 1);
   ink.undo();
   check('undo brings the erased stroke back', ink.getStrokes().length === 2);
+
+  // The app zooms the page with a CSS transform on an ancestor. Safari's getScreenCTM() ignores that,
+  // so positions must come from where the svg really is on screen. At scale 0.5 this svg is drawn at
+  // its viewBox size, so screen px from its corner equal page units.
+  ink.setTool('pen');
+  document.body.style.transformOrigin = '0 0';
+  document.body.style.transform = 'scale(0.5)';
+  const shrunk = svg.getBoundingClientRect();
+  const mouse = (type, x, y) => svg.dispatchEvent(new PointerEvent(type, {
+    pointerId: 7, pointerType: 'mouse', button: 0, buttons: 1, bubbles: true, cancelable: true,
+    clientX: shrunk.left + x, clientY: shrunk.top + y,
+  }));
+  mouse('pointerdown', 100, 50); mouse('pointermove', 200, 60); mouse('pointerup', 200, 60);
+  document.body.style.transform = '';
+  const scaled = ink.getStrokes().at(-1).points;
+  check('ink lands under the pointer when an ancestor is scaled with a CSS transform',
+    Math.abs(shrunk.width - 400) < 1 && String(scaled[0]) === '100,50' && String(scaled.at(-1)) === '200,60');
+  ink.undo();
 } catch (err) {
   failed++;
   line(`ERROR  ${err && err.stack || err}`, false);

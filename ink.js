@@ -14,6 +14,9 @@ const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothin
 const PALM_AFTER_PEN = 600;       // ms after the stylus last touched the page: a new touch is taken for the palm
 const PALM_AFTER_HOVER = 150;     // ms after the stylus last moved just above the page: same
 const PAN_SLOP = 8;               // screen px a finger must travel before it starts to scroll or zoom
+const TAP_MS = 250;               // longest a finger may stay down and still count as a tap
+const DOUBLE_TAP_MS = 400;        // longest gap between the two taps of a double tap
+const DOUBLE_TAP_DIST = 40;       // screen px the two taps may be apart
 
 const round1 = n => Math.round(n * 10) / 10;
 const round2 = n => Math.round(n * 100) / 100;
@@ -30,17 +33,33 @@ export function widthAt(size, p) {
   return size * (PRESSURE_FLOOR + (1 - PRESSURE_FLOOR) * 2 * p);
 }
 
-// A pressure stroke has points [x, y, pressure] and is drawn as a filled shape: a disc at every point
-// and a quad joining neighbours. Every piece winds the same way, so the default nonzero fill unions
-// them without holes.
-// ponytail: straight joins between samples; if fast curves look faceted on a 60 Hz stylus,
-// subdivide each step along the same midpoint curve pathData() uses.
+// A pressure stroke has points [x, y, pressure] and is drawn as a filled shape: discs joined by
+// quads. Every piece winds the same way, so the default nonzero fill unions them without holes.
+// Between samples the outline follows the same midpoint curve as pathData(), cut into short straight
+// steps, so a stylus that only reports 60 points a second still draws round curves.
 function disc([x, y, p], size) {
   const r = round2(widthAt(size, p) / 2);
-  return `M${round2(x - r)} ${y}a${r} ${r} 0 1 0 ${round2(2 * r)} 0a${r} ${r} 0 1 0 ${round2(-2 * r)} 0`;
+  return `M${round2(x - r)} ${round2(y)}a${r} ${r} 0 1 0 ${round2(2 * r)} 0a${r} ${r} 0 1 0 ${round2(-2 * r)} 0`;
 }
 
-/** Path data that extends a pressure stroke from point a to point b. */
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+
+/** Outline from the middle of a-b to the middle of b-c, bending at b (pressure bends with it). */
+export function outlineCurve(a, b, c, size) {
+  const from = mid(a, b), to = mid(b, c);
+  const length = Math.hypot(b[0] - from[0], b[1] - from[1]) + Math.hypot(to[0] - b[0], to[1] - b[1]);
+  const steps = Math.min(8, Math.max(1, Math.ceil(length / 3)));
+  let d = '', prev = from;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps, u = 1 - t;
+    const p = [0, 1, 2].map(k => u * u * from[k] + 2 * u * t * b[k] + t * t * to[k]);
+    d += outlineStep(prev, p, size);
+    prev = p;
+  }
+  return d;
+}
+
+/** Straight piece of outline from point a to point b, ending in a disc at b. */
 export function outlineStep(a, b, size) {
   const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
   if (!len) return disc(b, size);
@@ -52,11 +71,24 @@ export function outlineStep(a, b, size) {
   return `M${corner(a, 1)}L${corner(b, 1)}L${corner(b, -1)}L${corner(a, -1)}Z${disc(b, size)}`;
 }
 
-/** Path data for a whole pressure stroke. */
+/** The last piece of a pressure stroke: from the middle of its final two points to the final point. */
+export function outlineTail(points, size) {
+  const n = points.length;
+  return n > 1 ? outlineStep(mid(points[n - 2], points[n - 1]), points[n - 1], size) : '';
+}
+
+/** Path data that point number n (default: the newest) adds to a pressure stroke, not counting the tail. */
+export function outlineGrow(points, size, n = points.length) {
+  if (n === 1) return disc(points[0], size);
+  if (n === 2) return outlineStep(points[0], mid(points[0], points[1]), size);
+  return outlineCurve(points[n - 3], points[n - 2], points[n - 1], size);
+}
+
+/** Path data for a whole pressure stroke: exactly what drawing it point by point produces. */
 export function outlineData(points, size) {
-  let d = disc(points[0], size);
-  for (let i = 1; i < points.length; i++) d += outlineStep(points[i - 1], points[i], size);
-  return d;
+  let d = '';
+  for (let n = 1; n <= points.length; n++) d += outlineGrow(points, size, n);
+  return d + outlineTail(points, size);
 }
 
 /** SVG path data for [[x, y], ...]: quadratic curves through the midpoints of successive points. */
@@ -110,7 +142,7 @@ function normalise(list) {
 
 // ---------- engine ----------
 
-export function createInk(svg, { scroller, onChange, onZoom } = {}) {
+export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap } = {}) {
   let tool = 'pen', color = '#000', size = 3;
   let strokes = [];   // committed strokes; the array is replaced, never mutated
   let els = [];       // one <path> per stroke, same order
@@ -119,16 +151,26 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
   // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm);
   // `d` is the path data so far of a pressure stroke (null for a plain line).
   let act = null;
-  const pans = new Map();   // pointers that pan: id -> [clientX, clientY]; two of them also pinch-zoom
+  const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
   // Fingers draw until a stylus shows up; from then on they only pan and zoom (palm rejection).
   // ponytail: forgotten on reload and there is no manual switch; add a "draw with finger" toggle if needed.
   let penSeen = false;
+  // Whether the stylus is touching the page, from our own down/up bookkeeping: `buttons` and
+  // `pressure` on its move events are not dependable across browsers.
+  let penDown = false;
   let vel = null;     // scroll velocity of a one-pointer pan in px/ms: {x, y, t}
   let glide = 0;      // rAF handle of the inertia scroll after a flick
   let lastContact = -Infinity, lastHover = -Infinity;   // event times of the stylus touching / hovering over the page
+  const fingers = new Map();   // every finger on the page, palm or not: id -> {x, y, t, solo}, to spot taps
+  let lastTap = null;          // {x, y, t} of a finger tap that may become a double tap
 
   svg.style.touchAction = 'none';
   svg.style.cursor = CURSORS[tool];
+  // Safari on iPad: with Scribble switched on, the system swallows Apple Pencil pointer events on a
+  // page unless the matching touch events are cancelled. This also stops its double-tap zoom.
+  for (const type of ['touchstart', 'touchmove', 'touchend']) {
+    svg.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  }
 
   // Preview of the tip under a hovering stylus (Apple Pencil hover, S Pen, Surface Pen).
   const nib = document.createElementNS(NS, 'circle');
@@ -138,7 +180,7 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
   svg.appendChild(nib);
 
   function showNib(e) {
-    const pt = e.buttons === 0 && tool !== 'hand' && toPoint(e);
+    const pt = !penDown && tool !== 'hand' && toPoint(e);
     nib.style.display = pt ? '' : 'none';
     if (!pt) return;
     const rubber = tool === 'eraser';
@@ -202,12 +244,16 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
     }
   }
 
-  // Pointer position in viewBox units. The matrix is read fresh every time (zoom/scroll/viewBox may change).
+  // Pointer position in viewBox units, from where the svg really is on screen (read fresh every
+  // time: zoom, scroll and viewBox change). Not getScreenCTM(): Safari's ignores a CSS transform on
+  // an ancestor (WebKit bug 209220), and the app zooms the page with one, so ink landed off the tip.
   function toPoint(e) {
-    const m = svg.getScreenCTM();
-    if (!m) return null;
-    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
-    return Number.isFinite(p.x) && Number.isFinite(p.y) ? [round1(p.x), round1(p.y)] : null;
+    const box = svg.getBoundingClientRect(), view = svg.viewBox.baseVal;
+    if (!box.width || !box.height || !view.width) return null;
+    return [
+      round1(view.x + (e.clientX - box.left) / box.width * view.width),
+      round1(view.y + (e.clientY - box.top) / box.height * view.height),
+    ];
   }
 
   // Erase along the eraser's path from a.last to `to`, sampled so a fast swipe cannot jump over a stroke.
@@ -273,8 +319,12 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
     const rubber = e.button === 5;   // the eraser end of a stylus
     if (e.button !== 0 && !rubber) return;   // otherwise primary button / pen tip / finger only
     const isTouch = e.pointerType === 'touch', isPen = e.pointerType === 'pen';
+    if (isTouch) {
+      for (const f of fingers.values()) f.solo = false;
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, solo: fingers.size === 0 });
+    }
     if (isPen) {
-      penSeen = true;
+      penSeen = penDown = true;
       lastContact = e.timeStamp;
       nib.style.display = 'none';
       dropPalms(true);
@@ -318,11 +368,11 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
   function move(e) {
     if (e.pointerType === 'pen') {
       penSeen = true;   // hovering counts, so a palm that lands before the tip is already a palm
-      if (e.buttons === 0) {
+      if (penDown) {
+        lastContact = e.timeStamp;
+      } else {
         lastHover = e.timeStamp;
         dropPalms(false);
-      } else {
-        lastContact = e.timeStamp;
       }
       showNib(e);
     }
@@ -357,22 +407,39 @@ export function createInk(svg, { scroller, onChange, onZoom } = {}) {
       const pts = a.stroke.points;
       const last = pts[pts.length - 1];
       if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) < MIN_STEP) continue;
-      if (a.d) {
-        pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
-        a.d += outlineStep(last, pt, a.stroke.size);
-      }
+      if (a.d) pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
       pts.push(pt);
+      if (a.d) a.d += outlineGrow(pts, a.stroke.size);
     }
+    if (!a.path) return;
     // ponytail: a plain line rebuilds its whole path string per move; append incrementally (as the
     // pressure outline does) if very long strokes lag.
-    if (a.path) a.path.setAttribute('d', a.d || pathData(a.stroke.points));
+    a.path.setAttribute('d', a.d ? a.d + outlineTail(a.stroke.points, a.stroke.size) : pathData(a.stroke.points));
   }
 
   // pointerup, pointercancel and lostpointercapture all end the gesture. A cancelled stylus or mouse
   // stroke is kept; a cancelled finger stroke is dropped, because that is how the system reports a
   // touch it has decided was a palm (or the start of one of its own gestures).
   function end(e) {
-    if (e.pointerType === 'pen') lastContact = e.timeStamp;
+    if (e.pointerType === 'pen') {
+      penDown = false;
+      lastContact = e.timeStamp;
+    }
+    const f = fingers.get(e.pointerId);
+    if (f) {
+      fingers.delete(e.pointerId);
+      // A short, still touch by one finger is a tap; two of them close together are a double tap.
+      // Only once a stylus is in use: before that, fingers draw, and a tap is a dot.
+      const tap = penSeen && !penDown && f.solo && e.type === 'pointerup' && e.timeStamp - f.t < TAP_MS &&
+        Math.hypot(e.clientX - f.x, e.clientY - f.y) < PAN_SLOP;
+      if (tap && lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS &&
+          Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_DIST) {
+        lastTap = null;
+        if (onDoubleTap) onDoubleTap();
+      } else if (tap) {
+        lastTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+      }
+    }
     if (pans.delete(e.pointerId)) {
       svg.style.cursor = CURSORS[tool];
       const flick = !pans.size && vel && e.type === 'pointerup' && e.pointerType !== 'mouse' && e.timeStamp - vel.t < 60;
