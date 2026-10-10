@@ -11,8 +11,7 @@ const CURSORS = { pen: 'crosshair', highlighter: 'crosshair', eraser: 'cell', ha
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
 const PRESSURE_FLOOR = 0.35;      // width factor at zero pressure; pressure 0.5 gives exactly `size`
 const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothing raw pressure
-const PALM_AFTER_PEN = 600;       // ms after the stylus last touched the page: a new touch is taken for the palm
-const PALM_AFTER_HOVER = 150;     // ms after the stylus last moved just above the page: same
+const PALM_AFTER_PEN = 300;       // ms after the stylus leaves the page: a touch landing this soon is taken for the palm
 const PAN_SLOP = 8;               // screen px a finger must travel before it starts to scroll or zoom
 const TAP_MS = 250;               // longest a finger may stay down and still count as a tap
 const DOUBLE_TAP_MS = 400;        // longest gap between the two taps of a double tap
@@ -153,15 +152,16 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
   // `d` is the path data so far of a pressure stroke (null for a plain line).
   let act = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
-  // Fingers draw until a stylus shows up; from then on they only pan and zoom (palm rejection).
-  // ponytail: forgotten on reload and there is no manual switch; add a "draw with finger" toggle if needed.
-  let penSeen = false;
+  // Fingers scroll and zoom; only a stylus or mouse draws. That is the palm rejection that matters:
+  // a hand on the screen can never leave a mark. setFingerDraw(true) lets one finger draw instead
+  // (two still pan and zoom), for people without a stylus.
+  let fingerDraw = false;
   // Whether the stylus is touching the page, from our own down/up bookkeeping: `buttons` and
   // `pressure` on its move events are not dependable across browsers.
   let penDown = false;
   let vel = null;     // scroll velocity of a one-pointer pan in px/ms: {x, y, t}
   let glide = 0;      // rAF handle of the inertia scroll after a flick
-  let lastContact = -Infinity, lastHover = -Infinity;   // event times of the stylus touching / hovering over the page
+  let lastContact = -Infinity;   // event time of the stylus last touching the page
   const fingers = new Map();   // every finger on the page, palm or not: id -> {x, y, t, solo}, to spot taps
   let lastTap = null;          // {x, y, t} of a finger tap that may become a double tap
 
@@ -293,13 +293,13 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     };
   }
 
-  // The stylus is here, so touches on the page belong to the writing hand: stop them scrolling and
-  // zooming, and drop a stroke a finger had started. While it only hovers (`all` false), fingers
-  // that are already scrolling carry on; when it touches the page, everything goes.
-  function dropPalms(all) {
-    for (const [id, p] of pans) if (p.touch && (all || !p.live)) pans.delete(id);
+  // The stylus has touched the page, so touches already on it belong to the writing hand: they stop
+  // scrolling and zooming for as long as they stay down, and a stroke a finger had started is dropped.
+  // (A hovering stylus changes nothing: people scroll with a finger while holding it close.)
+  function dropPalms() {
+    for (const [id, p] of pans) if (p.touch) pans.delete(id);
     if (act && act.touch) discard();
-    if (all) vel = null;
+    vel = null;
   }
 
   // After a flick, keep scrolling and slow down, as touch scrolling does everywhere else.
@@ -326,13 +326,12 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       fingers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, solo: fingers.size === 0 });
     }
     if (isPen) {
-      penSeen = penDown = true;
+      penDown = true;
       lastContact = e.timeStamp;
       nib.style.display = 'none';
-      dropPalms(true);
-    } else if (isTouch && penSeen && ((act && !act.touch) ||
-        e.timeStamp - lastContact < PALM_AFTER_PEN || e.timeStamp - lastHover < PALM_AFTER_HOVER)) {
-      // Lands while the stylus is writing or was here a moment ago: a palm. It joins no gesture,
+      dropPalms();
+    } else if (isTouch && (penDown || e.timeStamp - lastContact < PALM_AFTER_PEN)) {
+      // Lands while the stylus is writing or the instant it lifted: a palm. It joins no gesture,
       // so its later events are ignored for as long as it stays down.
       return;
     } else if (isTouch && act && act.touch) {
@@ -342,7 +341,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     }
     cancelAnimationFrame(glide);
     vel = null;
-    if (tool === 'hand' || (isTouch && (penSeen || pans.size))) {
+    if (tool === 'hand' || (isTouch && (!fingerDraw || pans.size))) {
       // `live`: has travelled PAN_SLOP from where it landed (ox, oy). A resting touch must not nudge the page.
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
       if (tool === 'hand') svg.style.cursor = 'grabbing';
@@ -369,13 +368,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
 
   function move(e) {
     if (e.pointerType === 'pen') {
-      penSeen = true;   // hovering counts, so a palm that lands before the tip is already a palm
-      if (penDown) {
-        lastContact = e.timeStamp;
-      } else {
-        lastHover = e.timeStamp;
-        dropPalms(false);
-      }
+      if (penDown) lastContact = e.timeStamp;
       showNib(e);
     }
     const p = pans.get(e.pointerId);
@@ -431,8 +424,8 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     if (f) {
       fingers.delete(e.pointerId);
       // A short, still touch by one finger is a tap; two of them close together are a double tap.
-      // Only once a stylus is in use: before that, fingers draw, and a tap is a dot.
-      const tap = penSeen && !penDown && f.solo && e.type === 'pointerup' && e.timeStamp - f.t < TAP_MS &&
+      // Not while fingers draw: there a tap is a dot.
+      const tap = !fingerDraw && !penDown && f.solo && e.type === 'pointerup' && e.timeStamp - f.t < TAP_MS &&
         Math.hypot(e.clientX - f.x, e.clientY - f.y) < PAN_SLOP;
       if (tap && lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS &&
           Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_DIST) {
@@ -474,6 +467,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       tool = name;
       svg.style.cursor = CURSORS[name];
     },
+    setFingerDraw(on) { fingerDraw = !!on; },
     setColor(cssColor) { if (cssColor) color = String(cssColor); },
     setSize(n) { if (+n > 0) size = +n; },
     undo: () => step(undoStack, redoStack),

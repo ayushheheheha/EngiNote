@@ -229,7 +229,7 @@ const ink = createInk(svg, {
   onZoom: (factor, x, y) => setZoom(zoom * factor, x, y), // two-finger pinch
   onDoubleTap: () => toggleEraser(),
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
-    if (autoDeselect && tool === 'eraser') choose('tool', beforeEraser);
+    if (autoDeselect() && tool === 'eraser') choose('tool', beforeEraser);
   },
 });
 
@@ -272,14 +272,27 @@ redoBtn.onclick = () => ink.redo();
 // Apple Pencil's own double-tap (on its barrel) is only given to native apps, never to web pages.
 const toggleEraser = () => choose('tool', tool === 'eraser' ? beforeEraser : 'eraser');
 
-let autoDeselect = false;
-try { autoDeselect = localStorage.getItem('autoDeselect') === '1'; } catch { /* storage blocked */ }
-autoBtn.setAttribute('aria-pressed', autoDeselect);
-autoBtn.onclick = () => {
-  autoDeselect = !autoDeselect;
-  autoBtn.setAttribute('aria-pressed', autoDeselect);
-  try { localStorage.setItem('autoDeselect', autoDeselect ? '1' : '0'); } catch { /* lasts for this visit only */ }
-};
+// A toolbar button that switches an option on and off and remembers it on this device.
+// Returns a function that reads the current state.
+function option(btn, key, apply = () => {}) {
+  let on = false;
+  try { on = localStorage.getItem(key) === '1'; } catch { /* storage blocked */ }
+  const set = value => {
+    on = value;
+    btn.setAttribute('aria-pressed', on);
+    apply(on);
+  };
+  btn.onclick = () => {
+    set(!on);
+    try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* lasts for this visit only */ }
+  };
+  set(on);
+  return () => on;
+}
+
+const autoDeselect = option(autoBtn, 'autoDeselect');
+// Off by default: fingers scroll and zoom, and only a stylus or mouse draws.
+option($('finger-btn'), 'fingerDraw', on => ink.setFingerDraw(on));
 
 choose('tool', 'pen');
 choose('color', '#111111');

@@ -278,10 +278,14 @@ body.wide.editing {
   height: 100dvh;
   background: #000;
 }
+/* Both sizes are spelled out rather than using aspect-ratio: a box sized by aspect-ratio may grow to
+   fit its content, and the note inside is far taller than the window. */
 body.wide #editor {
+  width: min(100vw, calc(100vh * 16 / 9));
   width: min(100vw, calc(100dvh * 16 / 9));
-  height: auto;
-  aspect-ratio: 16 / 9;
+  height: min(100vh, calc(100vw * 9 / 16));
+  height: min(100dvh, calc(100vw * 9 / 16));
+  overflow: hidden;
   /* Dashed red lines where the window starts and ends. An outline sits just outside the box, so the
      window stays exactly 16:9 and the lines show only on the sides that have a black bar. */
   outline: 2px dashed #ff3b30;
@@ -319,6 +323,7 @@ body.wide #editor {
 
 body.full #editor { flex-direction: row-reverse; }
 body.full #toolbar {
+  flex: none; /* it scrolls, so its minimum width is 0: without this the note could squeeze it away */
   flex-direction: column;
   flex-wrap: nowrap;
   justify-content: flex-start;
@@ -332,9 +337,10 @@ body.full #toolbar .strip:nth-child(2) { display: flex; order: 0; margin: auto 0
 body.full .strip { flex-direction: column; flex-wrap: nowrap; }
 /* Two buttons per row: one per row is too tall for a 16:9 window on an 11-inch tablet (about 650px). */
 body.full .group { display: grid; grid-template-columns: repeat(2, 30px); gap: 2px; }
-body.full .icon-btn { width: 30px; height: 34px; }
-body.full .swatch, body.full .size { height: 28px; }
+body.full .icon-btn { width: 30px; height: 32px; }
+body.full .swatch, body.full .size { height: 26px; }
 body.full .chip { min-width: 0; padding: 0; font-size: 11px; }
+body.full #finger-btn { grid-column: span 2; width: auto; } /* "Finger" is too long for one cell */
 body.full .sep { width: 40px; height: 1px; margin: 3px 0; }
 
 /* Buttons that only belong in the rail (the top toolbar has its own copy in the zoom strip). */

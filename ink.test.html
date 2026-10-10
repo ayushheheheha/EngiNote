@@ -111,7 +111,10 @@ try {
 
   // --- touch and stylus ---
   drag(50, 80, 150, 80, 'touch');
-  check('a finger draws while no stylus has been seen', ink.getStrokes().length === 2 && changes === 2);
+  check('by default a finger does not draw (it scrolls)', ink.getStrokes().length === 1 && changes === 1);
+  ink.setFingerDraw(true);
+  drag(50, 80, 150, 80, 'touch');
+  check('a finger draws once finger drawing is switched on', ink.getStrokes().length === 2 && changes === 2);
   ink.undo();
 
   fire('pointerdown', 50, 90, 'touch', 1);
@@ -137,8 +140,9 @@ try {
   const afterPen = ink.getStrokes();
   check('a stylus draws, and the palm stroke under way when it lands is dropped',
     afterPen.length === 2 && afterPen[1].points[0][1] === 140);
+  ink.setFingerDraw(false);
   drag(50, 160, 150, 160, 'touch');
-  check('once a stylus has been seen, a finger pans instead of drawing', ink.getStrokes().length === 2);
+  check('with finger drawing switched off again, a finger no longer draws', ink.getStrokes().length === 2);
   ink.undo();
 
   // --- pressure, hover, palm rejection (faked event times, all later than the real ones above) ---
@@ -180,8 +184,8 @@ try {
   check('a hovering stylus shows a preview of the tip and draws nothing',
     nib.style.display !== 'none' && +nib.getAttribute('cx') === 60 && +nib.getAttribute('cy') === 60 &&
     !nib.nextSibling && ink.getStrokes().length === 1);
-  check('touches that land while the stylus hovers are taken for the palm', pinch(11050) === 1);
-  check('fingers pan and zoom again once the stylus has gone', Math.abs(pinch(20000) - 2) < 0.01);
+  check('a stylus hovering nearby does not stop fingers scrolling and zooming', Math.abs(pinch(11050) - 2) < 0.01);
+  check('fingers pan and zoom once the stylus has been off the page a moment', Math.abs(pinch(20000) - 2) < 0.01);
   check('a finger must travel a little before it scrolls or zooms', pinch(30000, 90, 92) === 1);
 
   fire('pointerdown', 100, 250, 'touch', 21, { t: 40000 });
