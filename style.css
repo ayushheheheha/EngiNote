@@ -95,6 +95,8 @@ body.editing #library { display: none; }
   background: none;
 }
 .icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+/* A text option that sits next to its tool (the eraser's "Auto"). */
+.chip { width: auto; min-width: var(--hit); padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
 
 @media (hover: hover) {

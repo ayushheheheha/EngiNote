@@ -49,12 +49,13 @@ try {
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
-  let changes = 0, zoomed = 1, doubleTaps = 0;
+  let changes = 0, zoomed = 1, doubleTaps = 0, erases = 0;
   const ink = createInk(svg, {
     scroller: document.scrollingElement,
     onChange: () => changes++,
     onZoom: factor => { zoomed *= factor; },
     onDoubleTap: () => doubleTaps++,
+    onErase: () => erases++,
   });
   const saved = [
     { tool: 'pen', color: '#c00', size: 3, points: [[10, 10], [50, 60.5], [90, 10]] },
@@ -226,10 +227,10 @@ try {
   ink.setTool('eraser');
   changes = 0;
   drag(300, 20, 300, 280);
-  check('eraser drag that touches nothing changes nothing', ink.getStrokes().length === 2 && changes === 0);
+  check('eraser drag that touches nothing changes nothing', ink.getStrokes().length === 2 && changes === 0 && erases === 0);
   drag(100, 20, 100, 80);
-  check('eraser swipe across the middle of a stroke removes it, one onChange',
-    ink.getStrokes().length === 1 && changes === 1);
+  check('eraser swipe across the middle of a stroke removes it, one onChange, one onErase',
+    ink.getStrokes().length === 1 && changes === 1 && erases === 1);
   ink.undo();
   check('undo brings the erased stroke back', ink.getStrokes().length === 2);
 

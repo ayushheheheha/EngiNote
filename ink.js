@@ -142,7 +142,8 @@ function normalise(list) {
 
 // ---------- engine ----------
 
-export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap } = {}) {
+// onErase() is called after an erasing gesture that removed at least one stroke.
+export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onErase } = {}) {
   let tool = 'pen', color = '#000', size = 3;
   let strokes = [];   // committed strokes; the array is replaced, never mutated
   let els = [];       // one <path> per stroke, same order
@@ -241,6 +242,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap } = {})
       commit([...strokes, a.stroke]);
     } else if (strokes !== a.before) {
       commit(strokes, a.before);   // everything erased in this drag = one undo step
+      if (onErase) onErase();
     }
   }
 

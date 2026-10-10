@@ -227,6 +227,9 @@ const ink = createInk(svg, {
   },
   onZoom: (factor, x, y) => setZoom(zoom * factor, x, y), // two-finger pinch
   onDoubleTap: () => toggleEraser(),
+  onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
+    if (autoDeselect && tool === 'eraser') choose('tool', beforeEraser);
+  },
 });
 
 function refreshHistory() {
@@ -234,8 +237,17 @@ function refreshHistory() {
   redoBtn.disabled = !ink.canRedo();
 }
 
+let tool = 'pen';
+let beforeEraser = 'pen'; // the tool to go back to from the eraser
+const autoBtn = $('auto-erase'); // the eraser's option; only shown while the eraser is selected
+
 const setters = {
-  tool: v => ink.setTool(v),
+  tool: v => {
+    if (v === 'eraser' && tool !== 'eraser') beforeEraser = tool;
+    tool = v;
+    autoBtn.hidden = v !== 'eraser';
+    ink.setTool(v);
+  },
   color: v => ink.setColor(v),
   size: v => ink.setSize(Number(v)),
 };
@@ -257,12 +269,16 @@ redoBtn.onclick = () => ink.redo();
 
 // Flip between the eraser and the tool used before it. Bound to a finger double-tap on the page:
 // Apple Pencil's own double-tap (on its barrel) is only given to native apps, never to web pages.
-let beforeEraser = 'pen';
-function toggleEraser() {
-  const now = document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool;
-  if (now !== 'eraser') beforeEraser = now;
-  choose('tool', now === 'eraser' ? beforeEraser : 'eraser');
-}
+const toggleEraser = () => choose('tool', tool === 'eraser' ? beforeEraser : 'eraser');
+
+let autoDeselect = false;
+try { autoDeselect = localStorage.getItem('autoDeselect') === '1'; } catch { /* storage blocked */ }
+autoBtn.setAttribute('aria-pressed', autoDeselect);
+autoBtn.onclick = () => {
+  autoDeselect = !autoDeselect;
+  autoBtn.setAttribute('aria-pressed', autoDeselect);
+  try { localStorage.setItem('autoDeselect', autoDeselect ? '1' : '0'); } catch { /* lasts for this visit only */ }
+};
 
 choose('tool', 'pen');
 choose('color', '#111111');
