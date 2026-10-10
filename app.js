@@ -968,10 +968,43 @@ const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
   const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');
   const recEnhance = $('rec-enhance'), recBar = $('rec-bar');
+
+  // The bar changes shape: put away it is a dot in the corner, and its buttons come and go with the
+  // recording. morph() makes any such change one movement. The change itself is made at once; the
+  // bar is then shown growing (or shrinking) from the shape and place it had to the ones it now
+  // has, its left end travelling straight from where it was to where it belongs.
+  let moving = null;
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  function morph(change) {
+    const from = recBar.getBoundingClientRect(); // read first: mid-movement, this is where it has got to
+    moving?.cancel();
+    recBar.classList.remove('moving');
+    change();
+    const to = recBar.getBoundingClientRect();
+    if (!from.width || !to.width || still.matches || (from.width === to.width && from.left === to.left)) return;
+    // Put away, the bar hangs from its left edge; otherwise it is centred, by a transform that
+    // follows its width. Either way the extra shift below is what brings the left edge from its old
+    // place to its new one in a straight run, while the width goes from old to new.
+    const centred = !recBar.classList.contains('min');
+    const shift = centred ? from.left - (to.left + to.width / 2 - from.width / 2) : from.left - to.left;
+    recBar.classList.add('moving'); // style.css: nothing spills, and on the way to the corner the buttons stay until it is there
+    moving = recBar.animate(
+      [{ width: `${from.width}px`, translate: `${shift}px ${from.top - to.top}px` }, { width: `${to.width}px`, translate: '0px 0px' }],
+      { duration: 480, easing: 'cubic-bezier(.3, 1.12, .36, 1)' }, // quick off the mark, a touch past, and settle
+    );
+    const mine = moving;
+    mine.onfinish = mine.oncancel = () => {
+      if (moving !== mine) return;
+      moving = null;
+      recBar.classList.remove('moving');
+    };
+  }
+
   // Put away, the bar is a dot in the corner (with the clock, while recording): style.css, #rec-bar.min.
   option($('rec-min'), 'recMin', away => {
-    recBar.classList.toggle('min', away);
+    morph(() => recBar.classList.toggle('min', away));
     $('rec-min').title = away ? 'Show the recording bar' : 'Put the recording bar away in the corner';
+    $('rec-min').setAttribute('aria-label', $('rec-min').title);
   });
   // Enhance: the voice with the background noise taken out. It needs the microphone, so it is out of reach without it.
   const micOn = option($('rec-mic'), 'recMic', on => { recEnhance.disabled = !on || document.body.classList.contains('recording'); }, true);
@@ -997,11 +1030,13 @@ if (shellRecorder) {
     state = next;
     since = Date.now();
     const on = state !== 'idle';
-    document.body.classList.toggle('recording', on);
-    document.body.classList.toggle('paused', state === 'paused');
+    morph(() => { // the bar's buttons change with this (style.css)
+      document.body.classList.toggle('recording', on);
+      document.body.classList.toggle('paused', state === 'paused');
+      $('rec-label').textContent = on ? 'Stop' : 'Record';
+      recPause.textContent = state === 'paused' ? 'Resume' : 'Pause';
+    });
     recBtn.setAttribute('aria-pressed', on);
-    $('rec-label').textContent = on ? 'Stop' : 'Record';
-    recPause.textContent = state === 'paused' ? 'Resume' : 'Pause';
     recPause.setAttribute('aria-pressed', state === 'paused');
     // Fixed for the length of a recording: its settings, and the 16:9 window it is a picture of.
     $('rec-mic').disabled = recQuality.disabled = wideBtn.disabled = on;
