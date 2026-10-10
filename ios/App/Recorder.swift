@@ -51,15 +51,17 @@ final class Recorder {
     private var lastEnd = CMTime.zero
     private var soundPieces = 0 // pieces of sound written so far
 
-    // Enhanced voice. ReplayKit's own microphone is the raw one. For a voice with the background
-    // noise taken out, the app listens to the microphone itself, through the system's voice
-    // processing (the kind calls use), and writes that into the movie instead; ReplayKit then
-    // records the picture only. Using voice processing is also what makes iPadOS offer its
-    // "Voice Isolation" microphone mode in Control Centre, which removes far more.
+    // The voice. The app listens to the microphone itself and writes what it hears into the movie;
+    // ReplayKit records the picture only. (ReplayKit can pass on the microphone too, but on the
+    // iPad this was made for it passed on nothing: recordings came out silent. So that is only the
+    // last resort, if the app's own listening cannot start.)
+    // "Enhanced" listens through the system's voice processing, the kind calls use, which takes
+    // the background noise out; it is also what makes iPadOS offer its stronger "Voice Isolation"
+    // microphone mode in Control Centre.
     // Main thread only:
     private let engine = AVAudioEngine()
     private var listening = false
-    /// How much later (+) or earlier (-) the enhanced voice is written than it was heard: the knob
+    /// How much later (+) or earlier (-) the voice is written than it was heard: the knob
     /// to turn if voice and picture turn out not to line up on the real device.
     private static let voiceShift = CMTime(value: 0, timescale: 1000) // ms
 
@@ -98,15 +100,15 @@ final class Recorder {
     /// Start recording. `enhance`: record the voice with the background noise taken out.
     /// `done` is called on the main thread: with what went wrong (which includes the user saying
     /// no to the system's question), or nil; and with something the user should know even though
-    /// recording did start (enhanced voice not available, so the normal microphone is in use).
+    /// recording did start (the app could not listen to the microphone itself).
     func start(quality name: String, microphone: Bool, enhance: Bool, done: @escaping (_ error: String?, _ note: String?) -> Void) {
         let screen = RPScreenRecorder.shared()
         guard screen.isAvailable, !screen.isRecording, !isActive else {
             done("Screen recording is not available right now.", nil)
             return
         }
-        guard microphone, enhance else {
-            capture(quality: name, microphone: microphone, ownVoice: false, note: nil, done: done)
+        guard microphone else {
+            capture(quality: name, microphone: false, ownVoice: false, note: nil, done: done)
             return
         }
         AVAudioApplication.requestRecordPermission { [weak self] allowed in
@@ -116,14 +118,14 @@ final class Recorder {
                 var own = false
                 if allowed {
                     do {
-                        try self.listen()
+                        try self.listen(enhanced: enhance)
                         own = true
                     } catch {
                         self.stopListening()
-                        note = "Enhanced voice could not start (\(error.localizedDescription)). Recording with the normal microphone."
+                        note = "The microphone could not be started the usual way (\(error.localizedDescription)). Check that the recording has sound."
                     }
                 } else {
-                    note = "EngiNote is not allowed to use the microphone (Settings > EngiNote), so the voice cannot be enhanced."
+                    note = "EngiNote is not allowed to use the microphone (Settings > EngiNote): check that the recording has sound."
                 }
                 self.capture(quality: name, microphone: microphone, ownVoice: own, note: note, done: done)
             }
@@ -176,17 +178,17 @@ final class Recorder {
         })
     }
 
-    // MARK: Enhanced voice
+    // MARK: The voice
 
-    /// Start listening to the microphone through the system's voice processing. What is heard goes
-    /// to take(), like ReplayKit's own sound would; until a recording is running it is dropped there.
-    private func listen() throws {
+    /// Start listening to the microphone; `enhanced`: through the system's voice processing. What is
+    /// heard goes to take(), like ReplayKit's own sound would; until a recording is running it is dropped there.
+    private func listen(enhanced: Bool) throws {
         listening = true
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try session.setActive(true)
         let microphone = engine.inputNode
-        try microphone.setVoiceProcessingEnabled(true)
+        try microphone.setVoiceProcessingEnabled(enhanced)
         let format = microphone.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount == 1 || format.channelCount == 2 else {
             throw NSError(domain: "EngiNote", code: 1, userInfo: [NSLocalizedDescriptionKey: "the microphone's sound is in a form this app cannot record"])

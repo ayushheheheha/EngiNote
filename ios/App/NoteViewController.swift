@@ -104,7 +104,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 guard microphone else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                     guard let self = self, self.recorder.isActive, !self.recorder.isPaused, !self.recorder.hasSound else { return }
-                    self.send("recorder", ["state": "recording", "message": "Warning: no sound is being recorded. Stop, and try again with Enhance switched off."])
+                    self.send("recorder", ["state": "recording", "message": "Warning: no sound is being recorded. Stop and start again; if it stays silent, switch Enhance the other way."])
                 }
             }
         case "pause" where recorder.isActive:
