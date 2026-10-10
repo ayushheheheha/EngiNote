@@ -95,7 +95,7 @@ body.editing #library { display: none; }
   background: none;
 }
 .icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
-/* A text option that sits next to its tool (the eraser's "Auto"). */
+/* Buttons labelled with text instead of an icon: the eraser's "Auto", the "16:9" window. */
 .chip { width: auto; min-width: var(--hit); padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
 
@@ -261,11 +261,29 @@ body.editing #library { display: none; }
   color: var(--muted);
 }
 
-#scroller {
+#stage {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  display: grid;
+  place-items: center;
+  container-type: size; /* lets the 16:9 window size itself from the room available (cqw / cqh) */
+}
+
+#scroller {
+  width: 100%;
+  height: 100%;
   overflow: auto;
   padding: 24px; /* horizontal padding x2 = GUTTER in app.js */
+}
+
+/* 16:9 window: the largest 16:9 box that fits the stage, letterboxed in black (for recording or presenting). */
+body.wide #stage { background: #000; }
+body.wide #scroller {
+  width: min(100cqw, calc(100cqh * 16 / 9));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: var(--canvas);
 }
 
 #page-sizer { margin: 0 auto; }
@@ -311,8 +329,10 @@ body.full #toolbar .strip { display: none; }
 /* Auto margins centre the rail vertically, and unlike justify-content they collapse when it overflows. */
 body.full #toolbar .strip:nth-child(2) { display: flex; order: 0; margin: auto 0; }
 body.full .strip, body.full .group { flex-direction: column; flex-wrap: nowrap; }
-body.full .sep { width: 22px; height: 1px; margin: 6px 0; }
-body.full .swatch { height: 30px; } /* seven colours: keeps the rail inside a 768px-high tablet */
+/* Tightened so the whole rail fits an 11-inch tablet in landscape with the browser's own bars showing. */
+body.full .sep { width: 22px; height: 1px; margin: 3px 0; }
+body.full .swatch { height: 26px; }
+body.full .size { height: 30px; }
 
 /* ---------- Toast ---------- */
 

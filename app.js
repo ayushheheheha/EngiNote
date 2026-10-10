@@ -344,13 +344,16 @@ for (const btn of document.querySelectorAll('.theme-btn')) {
   };
 }
 
-// Full screen is a layout (body.full: tools in a rail on the right) plus, where the browser has it,
-// real full screen. The layout alone still works where there is no Fullscreen API (iPhone Safari).
+// Full screen is a layout (body.full: tools in a rail on the right) plus, on desktop, real full
+// screen. Not on iPad or iPhone: Safari there leaves real full screen whenever a finger drags down
+// (its own exit gesture, which a page cannot turn off), so ordinary scrolling kept dropping out of
+// it. There the layout alone is used; "Add to Home Screen" gives a view with no browser bars.
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const fullBtn = $('full-btn');
 function setFull(on) {
   document.body.classList.toggle('full', on);
   fullBtn.setAttribute('aria-pressed', on);
-  if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch(() => {});
+  if (on && !isIOS && !document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch(() => {});
   if (!on && document.fullscreenElement) document.exitFullscreen();
   refit();
 }
@@ -360,6 +363,13 @@ fullBtn.onclick = toggleFull;
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) setFull(false);
 });
+
+// 16:9: show the note in the largest 16:9 window that fits (see body.wide in style.css).
+const wideBtn = $('wide-btn');
+wideBtn.onclick = () => {
+  wideBtn.setAttribute('aria-pressed', document.body.classList.toggle('wide'));
+  refit();
+};
 
 /* ---------- Keyboard ---------- */
 

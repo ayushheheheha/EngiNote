@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- "Add to Home Screen" on iPad / Android opens the app with no browser bars at all. -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EngiNote">
   <title>EngiNote</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
@@ -95,6 +99,8 @@
         <button id="full-btn" class="icon-btn" type="button" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         </button>
+        <button id="wide-btn" class="icon-btn chip" type="button" aria-pressed="false"
+          title="Show the note in a 16:9 window" aria-label="16 by 9 note window">16:9</button>
       </div>
 
       <div class="strip" role="group" aria-label="Zoom">
@@ -114,13 +120,16 @@
       </div>
     </div>
 
-    <div id="scroller">
-      <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
-      <div id="page-sizer">
-        <div id="page">
-          <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
-          <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
-          <svg id="ink"></svg>
+    <!-- #stage is the room left for the note; #scroller is the note window (all of it, or a 16:9 box inside it). -->
+    <div id="stage">
+      <div id="scroller">
+        <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
+        <div id="page-sizer">
+          <div id="page">
+            <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
+            <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
+            <svg id="ink"></svg>
+          </div>
         </div>
       </div>
     </div>
