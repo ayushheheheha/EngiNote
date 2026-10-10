@@ -242,6 +242,16 @@ let tool = 'pen';
 let beforeEraser = 'pen'; // the tool to go back to from the eraser
 const autoBtn = $('auto-erase'); // the eraser's option; only shown while the eraser is selected
 
+// In the full-screen rail the colours hide behind one button and open as a flyout.
+const colors = $('colors'), colorBtn = $('color-btn');
+function openColors(open) {
+  colors.classList.toggle('open', open);
+  colorBtn.setAttribute('aria-expanded', open);
+}
+colorBtn.onclick = () => openColors(!colors.classList.contains('open'));
+// Tapping anywhere else (the page included) puts the flyout away.
+document.addEventListener('pointerdown', e => { if (!colors.contains(e.target)) openColors(false); });
+
 const setters = {
   tool: v => {
     if (v === 'eraser' && tool !== 'eraser') beforeEraser = tool;
@@ -249,7 +259,11 @@ const setters = {
     autoBtn.hidden = v !== 'eraser';
     ink.setTool(v);
   },
-  color: v => ink.setColor(v),
+  color: v => {
+    ink.setColor(v);
+    colorBtn.style.setProperty('--c', v); // the button shows the colour in use
+    openColors(false);
+  },
   size: v => ink.setSize(Number(v)),
 };
 

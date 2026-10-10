@@ -70,10 +70,13 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
           </button>
           <button id="finger-btn" class="icon-btn chip" type="button" aria-pressed="false"
-            title="Draw with a finger. Off: fingers scroll and zoom, only a stylus or mouse draws" aria-label="Draw with a finger">Finger</button>
+            title="Draw with a finger. Off: fingers scroll and zoom, only a stylus or mouse draws" aria-label="Draw with a finger">F</button>
         </div>
         <span class="sep"></span>
-        <div class="group" role="group" aria-label="Colour">
+        <!-- Top toolbar: the swatches sit in a row. Full-screen rail: only #color-btn shows, and it opens them as a flyout. -->
+        <div id="colors" class="group" role="group" aria-label="Colour">
+          <button id="color-btn" class="icon-btn rail-only" type="button" title="Colours" aria-label="Choose a colour" aria-expanded="false"></button>
+          <div class="swatches">
           <button class="icon-btn swatch" type="button" data-color="#111111" style="--c:#111111" title="Black" aria-label="Black"></button>
           <button class="icon-btn swatch" type="button" data-color="#ffffff" style="--c:#ffffff" title="White" aria-label="White"></button>
           <button class="icon-btn swatch" type="button" data-color="#e03131" style="--c:#e03131" title="Red" aria-label="Red"></button>
@@ -81,6 +84,7 @@
           <button class="icon-btn swatch" type="button" data-color="#2f9e44" style="--c:#2f9e44" title="Green" aria-label="Green"></button>
           <button class="icon-btn swatch" type="button" data-color="#f08c00" style="--c:#f08c00" title="Orange" aria-label="Orange"></button>
           <button class="icon-btn swatch" type="button" data-color="#7048e8" style="--c:#7048e8" title="Purple" aria-label="Purple"></button>
+          </div>
         </div>
         <span class="sep"></span>
         <div class="group" role="group" aria-label="Thickness">

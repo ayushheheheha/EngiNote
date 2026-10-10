@@ -319,31 +319,66 @@ body.wide #editor {
   height: 100%;
 }
 
-/* ---------- Full screen: the sheet gets the whole window, the tools become a narrow rail on the right ---------- */
+/* ---------- Full screen: the sheet gets the whole window, the tools become a thin rail on the right ---------- */
 
 body.full #editor { flex-direction: row-reverse; }
 body.full #toolbar {
-  flex: none; /* it scrolls, so its minimum width is 0: without this the note could squeeze it away */
+  flex: none; /* the note beside it must never squeeze it */
   flex-direction: column;
   flex-wrap: nowrap;
   justify-content: flex-start;
   padding: 8px 8px 8px 0;
-  overflow-y: auto; /* short screens: the rail scrolls rather than losing buttons */
-  scrollbar-width: none;
 }
 body.full #toolbar .strip { display: none; }
-/* Auto margins centre the rail vertically, and unlike justify-content they collapse when it overflows. */
-body.full #toolbar .strip:nth-child(2) { display: flex; order: 0; margin: auto 0; }
-body.full .strip { flex-direction: column; flex-wrap: nowrap; }
-/* Two buttons per row: one per row is too tall for a 16:9 window on an 11-inch tablet (about 650px). */
-body.full .group { display: grid; grid-template-columns: repeat(2, 30px); gap: 2px; }
-body.full .icon-btn { width: 30px; height: 32px; }
-body.full .swatch, body.full .size { height: 26px; }
-body.full .chip { min-width: 0; padding: 0; font-size: 11px; }
-body.full #finger-btn { grid-column: span 2; width: auto; } /* "Finger" is too long for one cell */
-body.full .sep { width: 40px; height: 1px; margin: 3px 0; }
+/* One button per row, centred vertically. The rail never scrolls (a scrolling box would clip the
+   colour flyout): when it is short of room, e.g. a 16:9 window in portrait, its buttons give up
+   height instead, from 36px down to 22px. */
+body.full #toolbar .strip:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  order: 0;
+  margin: auto 0;
+  min-height: 0;
+  max-height: 100%;
+}
+body.full .group { display: contents; } /* every button is a row of the rail itself */
+body.full .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
+body.full .chip { width: var(--hit); padding: 0; font-size: 11px; }
+body.full .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
 
-/* Buttons that only belong in the rail (the top toolbar has its own copy in the zoom strip). */
+/* Colours in the rail: one multicolour button; the swatches fly out to its left when it is tapped. */
+body.full #colors { display: flex; flex-direction: column; flex: 0 1 36px; min-height: 22px; position: relative; }
+/* Grows along the column to fill its slot: WebKit does not stretch a button across a flex row. */
+body.full #color-btn { flex: 1 1 0; min-height: 0; }
+#color-btn::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  /* the colour in use in the middle, a gap, then the rainbow ring */
+  background:
+    radial-gradient(circle, var(--c, #111) 0 34%, var(--surface) 36% 48%, transparent 50%),
+    conic-gradient(#e03131, #f08c00, #f5d000, #2f9e44, #1c7ed6, #7048e8, #e03131);
+}
+body.full .swatches {
+  display: none;
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+body.full #colors.open .swatches { display: flex; }
+body.full .swatches .icon-btn { flex: none; width: var(--hit); height: var(--hit); }
+
+/* Outside the rail the swatches are simply part of the toolbar row, and rail-only buttons are hidden. */
+body:not(.full) .swatches { display: contents; }
 body:not(.full) .rail-only { display: none; }
 
 /* ---------- Toast ---------- */
