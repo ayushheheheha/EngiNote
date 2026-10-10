@@ -390,14 +390,26 @@ function setZoom(value, cx, cy, hold) {
 // at; the rest of the zoom is a scale on #mover, which the browser does by stretching the picture
 // it already has. So a pinch redraws nothing and lays out nothing, and the point the fingers hold
 // stays under them to a fraction of a pixel. The note is redrawn sharp once, when they lift.
+//
+// The fit-width zoom is a magnet: a pinch that comes within MAGNET of it is held there, the sheet
+// centred across the window, until the fingers have pulled clearly past. `raw` is the zoom the
+// fingers alone ask for; `zoom` is what is shown.
 let pinch = null;
+const MAGNET = 0.07;      // how close counts: 7% either side of the fit-width zoom
+const MAGNET_PULL = 150;  // ms the sheet takes to be drawn in to the magnet, or to spring off it
 
 function pinchMove(factor, x, y, hold) {
-  pinch ??= { zoom };
-  pinch.zoom = clampZoom(pinch.zoom * factor);
+  pinch ??= { raw: zoom, held: false, since: -Infinity };
+  pinch.raw = clampZoom(pinch.raw * factor);
+  const fit = clampZoom(fitZoom()), held = Math.abs(Math.log(pinch.raw / fit)) < MAGNET;
+  if (held !== pinch.held) pinch.since = performance.now();
+  pinch.held = held;
+  pinch.zoom = held ? fit : pinch.raw;
   const [left, top] = origin();
   pinch.at = [x - left - hold[0] * pinch.zoom, y - top - hold[1] * pinch.zoom];
-  mover.style.transition = '';
+  if (held) pinch.at[0] = (scroller.clientWidth - PAGE_WIDTH * fit) / 2;
+  // Catching and letting go are a jump in size: for a moment the sheet eases across it instead.
+  mover.style.transition = performance.now() - pinch.since < MAGNET_PULL ? 'transform .1s ease-out' : '';
   mover.style.transform = `translate(${pinch.at[0]}px, ${pinch.at[1]}px) scale(${pinch.zoom / zoom})`;
   showZoom(pinch.zoom);
 }
