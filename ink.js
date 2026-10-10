@@ -176,7 +176,10 @@ function normalise(list) {
 // onZoom(factor, x, y, hold) is called as two fingers move: zoom by `factor` and keep page point
 // `hold` (viewBox units) at screen position (x, y). onZoomEnd() follows once, when that gesture is over.
 // onErase() is called after an erasing gesture that removed at least one stroke.
-export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDoubleTap, onErase } = {}) {
+// `surface` is the element whose pointer events are handled: the svg itself, or something around
+// it (the app passes the whole note window, so fingers can pan and pinch on the margin too).
+// Strokes and erasing still only start on the svg.
+export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZoomEnd, onDoubleTap, onErase } = {}) {
   let tool = 'pen', color = '#000', size = 3;
   // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
   // 'pen', 'highlighter' or 'glow'. A crayon stroke is a 'pen' stroke whose points carry pressure.
@@ -202,12 +205,12 @@ export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDouble
   const fingers = new Map();   // every finger on the page, palm or not: id -> {x, y, t, solo}, to spot taps
   let lastTap = null;          // {x, y, t} of a finger tap that may become a double tap
 
-  svg.style.touchAction = 'none';
+  surface.style.touchAction = svg.style.touchAction = 'none';
   svg.style.cursor = CURSORS[tool];
   // Safari on iPad: with Scribble switched on, the system swallows Apple Pencil pointer events on a
   // page unless the matching touch events are cancelled. This also stops its double-tap zoom.
   for (const type of ['touchstart', 'touchmove', 'touchend']) {
-    svg.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+    surface.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   }
 
   // The strokes live in their own group, in order; the tip preview sits after it, so above them all.
@@ -222,7 +225,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDouble
   svg.appendChild(nib);
 
   function showNib(e) {
-    const pt = !penDown && tool !== 'hand' && toPoint(e);
+    const pt = !penDown && tool !== 'hand' && svg.contains(e.target) && toPoint(e);
     nib.style.display = pt ? '' : 'none';
     if (!pt) return;
     const rubber = tool === 'eraser';
@@ -434,6 +437,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDouble
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
       if (tool === 'hand') svg.style.cursor = 'grabbing';
     } else {
+      if (!svg.contains(e.target)) return;   // ink starts on the sheet, not on the margin around it
       finish();   // a previous gesture whose pointerup got lost must not block this one
       const pt = toPoint(e);
       if (!pt) return;
@@ -451,7 +455,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDouble
         act = { ...base, stroke, path };
       }
     }
-    try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
+    try { surface.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
     e.preventDefault();
   }
 
@@ -548,10 +552,10 @@ export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDouble
     }
   }
 
-  svg.addEventListener('pointerdown', down);
-  svg.addEventListener('pointermove', move);
+  surface.addEventListener('pointerdown', down);
+  surface.addEventListener('pointermove', move);
   svg.addEventListener('pointerleave', () => { nib.style.display = 'none'; });
-  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) svg.addEventListener(type, end);
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) surface.addEventListener(type, end);
 
   function step(from, to) {
     finish();

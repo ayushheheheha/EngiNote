@@ -2,13 +2,13 @@ import { createInk } from './ink.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
-const GUTTER = 48;       // #scroller horizontal padding, both sides (style.css)
+const GUTTER = 48;       // room kept for the grey margin on both sides of the sheet
 const MIN_ZOOM = 0.25, MAX_ZOOM = 3;
 
 const $ = id => document.getElementById(id);
 const grid = $('grid'), importTile = $('import-tile'), empty = $('empty'), fileInput = $('file-input');
 const nameInput = $('note-name'), undoBtn = $('undo-btn'), redoBtn = $('redo-btn');
-const scroller = $('scroller'), sizer = $('page-sizer'), page = $('page'), frame = $('frame'), svg = $('ink');
+const scroller = $('scroller'), mover = $('mover'), bar = $('scrollbar'), page = $('page'), frame = $('frame'), svg = $('ink');
 const message = $('message'), cardTemplate = $('card-template');
 
 let current = null;      // the note open in the editor, or null in the library
@@ -128,24 +128,69 @@ document.addEventListener('drop', e => {
   if (!current && e.dataTransfer.files.length) importFiles(e.dataTransfer.files);
 });
 
-/* ---------- Editor: page size and zoom ---------- */
+/* ---------- Editor: the view (where the sheet sits in the window, and how big) ---------- */
 
 page.style.width = PAGE_WIDTH + 'px';
 
-// The sheet is scaled with a transform (layout stays exactly 900px wide at every zoom level);
-// the sizer is its slot: it takes up the scaled size, so centring and scrolling work.
-// `shift` is how far, in screen px, the sheet is drawn from that slot. Normally a fraction of a
-// pixel; right after a zoom it carries the whole move, until settle() has turned it into scrolling.
-let shift = [0, 0];
+// The browser does not scroll the note. #scroller is a fixed window, and this code alone places the
+// sheet in it: `pos` is where the sheet's top-left corner sits, in px from the window's own top-left
+// corner, and `zoom` is its scale. A finger, the wheel, the keys, a pinch and the zoom buttons all
+// just change those two and call place().
+//
+// The note used to live in a real scrolling box, and every zoom had to end by turning its position
+// into a scroll position. On an iPad that hand-over kept going wrong (the note sat right during a
+// pinch, then jumped as the fingers lifted) in ways a desktop browser never showed. Now there is
+// no hand-over: what a pinch shows is what stays.
+//
+// Two elements, so that moving is cheap and text stays sharp:
+//   #mover  is translated to `pos`. It is its own compositing layer (will-change in style.css), so
+//           moving it redraws nothing.
+//   #page   inside it is scaled to `zoom`, and is redrawn whenever that changes.
+let pos = [0, 0];
+const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const showZoom = (value = zoom) => { $('zoom-label').textContent = Math.round(value * 100) + '%'; };
-const place = () => { page.style.transform = `translate(${shift[0]}px, ${shift[1]}px) scale(${zoom})`; };
 
+// The window's top-left corner on screen.
+function origin() {
+  const box = scroller.getBoundingClientRect();
+  return [box.left + scroller.clientLeft, box.top + scroller.clientTop];
+}
+
+// `at`, brought back within bounds: the sheet may not leave the window (its margin may just show),
+// and it sits centred when it is narrower than the window.
+function within([x, y]) {
+  const w = PAGE_WIDTH * zoom, h = pageHeight * zoom, vw = scroller.clientWidth, vh = scroller.clientHeight;
+  return [
+    w + GUTTER <= vw ? (vw - w) / 2 : Math.min(MARGIN, Math.max(vw - w - MARGIN, x)),
+    h + GUTTER <= vh ? MARGIN : Math.min(MARGIN, Math.max(vh - h - MARGIN, y)),
+  ];
+}
+
+// Put the sheet at `at` (kept within bounds). `glide`: slide there instead of jumping.
+function place(at = pos, glide = false) {
+  pos = within(at);
+  // Drawn on whole device pixels, where text is sharpest; `pos` itself keeps the fractions, so
+  // slow finger movement still adds up.
+  const snap = v => Math.round(v * devicePixelRatio) / devicePixelRatio;
+  mover.style.transition = glide ? 'transform .2s ease-out' : '';
+  mover.style.transform = `translate(${snap(pos[0])}px, ${snap(pos[1])}px)`;
+  // The thin bar at the right edge: how far down the note the window is.
+  const h = pageHeight * zoom + GUTTER, vh = scroller.clientHeight, length = Math.max(28, vh * vh / h);
+  bar.hidden = h <= vh;
+  bar.style.height = length + 'px';
+  bar.style.transform = `translateY(${(MARGIN - pos[1]) / (h - vh) * (vh - length)}px)`;
+}
+
+// Move the view by a scroll amount: positive goes right / down the note.
+const panBy = (dx, dy) => place([pos[0] - dx, pos[1] - dy]);
+
+// Size the sheet for the current zoom. Callers place() it afterwards.
 function layout() {
-  sizer.style.width = PAGE_WIDTH * zoom + 'px';
-  sizer.style.height = pageHeight * zoom + 'px';
-  place();
+  mover.style.width = PAGE_WIDTH * zoom + 'px';
+  mover.style.height = pageHeight * zoom + 'px';
+  page.style.transform = `scale(${zoom})`;
 }
 
 function setPageHeight(height) {
@@ -153,129 +198,59 @@ function setPageHeight(height) {
   frame.style.height = height + 'px';
   svg.setAttribute('viewBox', `0 0 ${PAGE_WIDTH} ${height}`);
   layout();
-}
-
-// Set the zoom outright, with the sheet in its slot: for opening a note, where no point needs holding.
-function resetZoom(value) {
-  cancelAnimationFrame(settling);
-  page.style.transition = '';
-  zoom = clampZoom(value);
-  shift = [0, 0];
-  layout();
-  showZoom();
-}
-
-// Zoom so that page point `hold` (in page px) stays at screen position (cx, cy). The buttons give
-// neither: the point in the middle of the view stays there. The end of a pinch gives both: the
-// point the fingers held stays where they left it.
-//
-// The slot is resized at once and the sheet is drawn, through `shift`, exactly where it must
-// appear; the scroll position catches up in settle(). The scroll is deliberately not set here, in
-// the same breath as the resize. On an iPad scrolling belongs to another process, which has not
-// yet heard that the page changed size and clamps the scroll to the old one: the note then landed
-// somewhere else the moment the fingers lifted.
-function setZoom(value, cx, cy, hold) {
-  const view = scroller.getBoundingClientRect();
-  cx ??= view.left + view.width / 2;
-  cy ??= view.top + view.height / 2;
-  if (!hold) {
-    // Read off the sheet as it is drawn this instant, so a glide still in flight (see settle) is counted.
-    const sheet = page.getBoundingClientRect(), scale = sheet.width / PAGE_WIDTH;
-    hold = [(cx - sheet.left) / scale, (cy - sheet.top) / scale];
-  }
-  page.style.transition = ''; // a glide back from an earlier zoom (see settle) must not animate this one
-  zoom = clampZoom(value);
-  shift = [0, 0];
-  layout();
-  const slot = sizer.getBoundingClientRect(); // measured after the resize: centring may have moved it
-  was = [slot.left, slot.top];
-  shift = [cx - slot.left - hold[0] * zoom, cy - slot.top - hold[1] * zoom];
   place();
+}
+
+// Set the zoom outright and go to the top of the note: for opening one.
+function resetZoom(value) {
+  zoom = clampZoom(value);
+  layout();
+  place([0, MARGIN]);
   showZoom();
-  settle();
 }
 
-// Turn `shift` into scrolling, where it belongs, over the next few frames, and see that it holds.
-// The picture does not move meanwhile: whatever the scroll has not yet taken up stays in `shift`.
-let settling = 0;     // rAF handle
-let watching = false; // the user has not touched anything since settle() began
-// Kept from one settle() to the next, so a scroll made for one zoom is still watched if another follows at once:
-let was = null;       // the slot's corner as the last frame (or resize) left it
-let made = [0, 0];    // how far the last scroll made here moved the slot
-scroller.addEventListener('pointerdown', () => { watching = false; }, true);
-scroller.addEventListener('wheel', () => { watching = false; }, { capture: true, passive: true });
-addEventListener('keydown', () => { watching = false; }, true);
-
-function settle() {
-  cancelAnimationFrame(settling);
-  watching = true;
-  const stalled = [0, 0];   // per axis: frames in a row in which the scroll did not budge
-  let frames = 10;
-  const step = () => {
-    const now = sizer.getBoundingClientRect();
-    if (watching && was) {
-      // Has the last scroll made here been taken back? That shows as the slot moving, untouched by
-      // the user, against that scroll and by no more than it. (Anything else moving the slot, such
-      // as a scroll from the app itself, is left alone.) If so, put the difference back in `shift`,
-      // so the picture stays put, and ask again below.
-      const slip = [now.left - was[0], now.top - was[1]];
-      const undone = slip.some(s => Math.abs(s) >= 0.5) &&
-        slip.every((s, i) => s * made[i] <= 0 && Math.abs(s) <= Math.abs(made[i]) + 1);
-      if (undone) {
-        shift[0] -= slip[0];
-        shift[1] -= slip[1];
-        made = [made[0] + slip[0], made[1] + slip[1]]; // what is left of that scroll, should more of it go
-      }
-    }
-    was = [now.left, now.top];
-    if (Math.abs(shift[0]) >= 1 || Math.abs(shift[1]) >= 1) {
-      scroller.scrollBy({ left: -shift[0], top: -shift[1], behavior: 'instant' });
-      const then = sizer.getBoundingClientRect();
-      made = [then.left - now.left, then.top - now.top];
-      made.forEach((moved, i) => {
-        stalled[i] = Math.abs(shift[i]) >= 1 && Math.abs(moved) < 0.5 ? stalled[i] + 1 : 0;
-        // Three frames without budging: the scroll cannot go there, it is past the edge of the note.
-        // Give up that part and let the sheet glide back inside (a jump of hundreds of px is jarring).
-        if (stalled[i] >= 3) page.style.transition = 'transform .2s ease-out';
-        shift[i] = stalled[i] >= 3 ? 0 : shift[i] - moved;
-      });
-      was = [then.left, then.top];
-    }
-    if (--frames === 0) shift = shift.map(s => (Math.abs(s) < 1 ? s : 0)); // never leave the sheet out of its slot
-    place();
-    if (frames > 0) settling = requestAnimationFrame(step);
-  };
-  settling = requestAnimationFrame(() => { settling = requestAnimationFrame(step); }); // not in the frame of the resize: see setZoom()
+// Zoom so that page point `hold` (in page px) stays at screen position (cx, cy), as far as the
+// bounds allow. The buttons give neither: the point in the middle of the window stays there.
+function setZoom(value, cx, cy, hold) {
+  const [left, top] = origin();
+  cx ??= left + scroller.clientWidth / 2;
+  cy ??= top + scroller.clientHeight / 2;
+  hold ??= [(cx - left - pos[0]) / zoom, (cy - top - pos[1]) / zoom];
+  zoom = clampZoom(value);
+  layout();
+  place([cx - left - hold[0] * zoom, cy - top - hold[1] * zoom]);
+  showZoom();
 }
 
-// A two-finger pinch, while the fingers are down: { zoom, slot, x, y, hold }.
-// During it the sheet is only moved and scaled, by one transform on #page; the real zoom (slot
-// size and scroll position) is settled once, when the fingers lift. Doing the real thing on every
-// move made the note jitter: a scroll position is a whole number of pixels, so the held point
-// wobbled by up to a pixel each step, and the size change and the scroll could reach the screen a
-// frame apart. It also re-laid-out and repainted the whole note at every step.
+// A two-finger pinch, while the fingers are down: { zoom, at }. #page keeps the scale it is drawn
+// at; the rest of the zoom is a scale on #mover, which the browser does by stretching the picture
+// it already has. So a pinch redraws nothing and lays out nothing, and the point the fingers hold
+// stays under them to a fraction of a pixel. The note is redrawn sharp once, when they lift.
 let pinch = null;
 
 function pinchMove(factor, x, y, hold) {
-  if (!pinch) {
-    cancelAnimationFrame(settling); // a zoom still settling is overtaken: this pinch settles for both when it ends
-    page.style.transition = '';
-    pinch = { zoom, slot: sizer.getBoundingClientRect() }; // the slot's corner on screen; fixed until the fingers lift
-    page.style.willChange = 'transform'; // let the browser scale what is already drawn, instead of redrawing per step
-  }
+  pinch ??= { zoom };
   pinch.zoom = clampZoom(pinch.zoom * factor);
-  Object.assign(pinch, { x, y, hold });
-  const left = x - pinch.slot.left - hold[0] * pinch.zoom, top = y - pinch.slot.top - hold[1] * pinch.zoom;
-  page.style.transform = `translate(${left}px, ${top}px) scale(${pinch.zoom})`;
+  const [left, top] = origin();
+  pinch.at = [x - left - hold[0] * pinch.zoom, y - top - hold[1] * pinch.zoom];
+  mover.style.transition = '';
+  mover.style.transform = `translate(${pinch.at[0]}px, ${pinch.at[1]}px) scale(${pinch.zoom / zoom})`;
   showZoom(pinch.zoom);
 }
 
 function pinchEnd() {
   if (!pinch) return;
-  const { zoom: reached, x, y, hold } = pinch;
+  const { zoom: reached, at } = pinch;
   pinch = null;
-  page.style.willChange = '';
-  setZoom(reached, x, y, hold); // resizes for real (the note is redrawn sharp) with the held point still under the fingers
+  // The same picture, now at its real size: the sheet takes the scale, the mover goes back to a
+  // plain move to the very spot the fingers left it.
+  zoom = reached;
+  layout();
+  mover.style.transition = '';
+  mover.style.transform = `translate(${at[0]}px, ${at[1]}px)`;
+  mover.getBoundingClientRect(); // let that take effect before the next line, so a glide starts from here
+  place(at, true);               // if the fingers left it past an edge, it slides back inside
+  showZoom();
 }
 
 const fitZoom = () => (scroller.clientWidth - GUTTER) / PAGE_WIDTH;
@@ -287,6 +262,7 @@ function refit() {
   const fit = fitZoom();
   if (zoom === Math.min(1, lastFit)) setZoom(Math.min(1, fit)); // still at the opening zoom: follow it
   else if (zoom <= lastFit && zoom > fit) setZoom(fit);         // fitted the width before: keep it fitting
+  else place();                                                 // same zoom, new bounds
   lastFit = fit;
 }
 addEventListener('resize', refit);
@@ -296,6 +272,14 @@ $('zoom-in').onclick = () => setZoom(zoom * 1.25);
 $('zoom-label').onclick = () => setZoom(1);
 // Two fit buttons: one in the zoom strip, one in the full-screen rail.
 for (const btn of document.querySelectorAll('.fit-btn')) btn.onclick = () => setZoom(fitZoom());
+
+// Mouse wheel and trackpad. Ctrl + wheel, which is also what a trackpad pinch sends, zooms about the pointer.
+scroller.addEventListener('wheel', e => {
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1; // lines and pages, in px
+  if (e.ctrlKey) setZoom(zoom * Math.exp(-e.deltaY * unit / 300), e.clientX, e.clientY);
+  else panBy(e.deltaX * unit, e.deltaY * unit);
+}, { passive: false });
 
 // Inside the iframe 1vh is 1% of the iframe's own height, and we stretch the iframe to the full
 // content height, so a `min-height: 100vh` cover would swallow the whole sheet. Rewrite height-based
@@ -333,7 +317,8 @@ frame.addEventListener('load', () => {
 /* ---------- Editor: ink, tools, saving ---------- */
 
 const ink = createInk(svg, {
-  scroller,
+  surface: scroller, // fingers pan and pinch anywhere in the window, grey margin included
+  scroller: { scrollBy: ({ left = 0, top = 0 }) => panBy(left, top) }, // ink.js scrolls through this; see the view section
   onChange(strokes) {
     current.strokes = strokes;
     touch();
@@ -455,7 +440,6 @@ async function openDoc(id) {
   refreshHistory();
   lastFit = fitZoom();
   resetZoom(Math.min(1, lastFit));
-  scroller.scrollTo(0, 0);
 }
 
 async function closeDoc() {
@@ -516,6 +500,8 @@ wideBtn.onclick = () => {
 /* ---------- Keyboard ---------- */
 
 const TOOL_KEYS = { p: 'pen', c: 'crayon', g: 'glow', h: 'highlighter', e: 'eraser', v: 'hand' };
+// The keys a browser scrolls with, as fractions of the window's height (the note is not a browser scroller: see the view section).
+const SCROLL_KEYS = { pagedown: 0.9, ' ': 0.9, pageup: -0.9, arrowdown: 0.12, arrowup: -0.12 };
 
 document.addEventListener('keydown', e => {
   if (!current || e.target === nameInput) return;
@@ -523,10 +509,18 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey) {
     if (key === 'z') { e.preventDefault(); e.shiftKey ? ink.redo() : ink.undo(); }
     else if (key === 'y') { e.preventDefault(); ink.redo(); }
-  } else if (!e.altKey && TOOL_KEYS[key]) {
+  } else if (e.altKey) {
+    // left to the browser
+  } else if (TOOL_KEYS[key]) {
     choose('tool', TOOL_KEYS[key]);
-  } else if (!e.altKey && key === 'f') {
+  } else if (key === 'f') {
     toggleFull();
+  } else if (key in SCROLL_KEYS) {
+    e.preventDefault();
+    panBy(0, SCROLL_KEYS[key] * scroller.clientHeight * (e.shiftKey && key === ' ' ? -1 : 1));
+  } else if (key === 'home' || key === 'end') {
+    e.preventDefault();
+    place([pos[0], key === 'home' ? MARGIN : -Infinity]);
   }
 });
 

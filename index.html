@@ -139,15 +139,16 @@
       </div>
     </div>
 
+    <!-- The window onto the note. It does not scroll: app.js moves #mover inside it and scales #page (see "the view" there). -->
     <div id="scroller">
-      <!-- #page-sizer takes the zoomed size in layout; #page is the fixed-width sheet, scaled. -->
-      <div id="page-sizer">
+      <div id="mover">
         <div id="page">
           <!-- No allow-scripts: imported files are untrusted. scrolling="no" keeps a scrollbar from narrowing the layout. -->
           <iframe id="frame" sandbox="allow-same-origin" scrolling="no" tabindex="-1" title="Imported document"></iframe>
           <svg id="ink"></svg>
         </div>
       </div>
+      <div id="scrollbar" hidden></div>
     </div>
   </div>
 

@@ -262,13 +262,40 @@ body.editing #library { display: none; }
   color: var(--muted);
 }
 
+/* The window onto the note. It does not scroll: app.js places the sheet in it (see "the view" there). */
 #scroller {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  overflow-anchor: none; /* zooming places the scroll itself; the browser's own anchoring would fight it */
-  padding: 24px; /* horizontal padding x2 = GUTTER in app.js */
+  position: relative;
+  overflow: hidden;
+  overflow: clip; /* where supported: unlike `hidden`, the browser can then never scroll this box by itself */
+  /* Every touch in the window, grey margin included, goes to ink.js; no long-press selection or callout menu on iOS. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Moved by a translate, and its own compositing layer, so that moving it redraws nothing. */
+#mover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* How far down the note the window is. Shown by app.js when the note is taller than the window. */
+#scrollbar {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: .55;
+  pointer-events: none;
 }
 
 /* 16:9: the whole editor, note and tools together, becomes the largest 16:9 window that fits the
@@ -293,18 +320,11 @@ body.wide #editor {
   outline: 2px dashed #ff3b30;
 }
 
-#page-sizer { margin: 0 auto; }
-
 #page {
   position: relative;
   background: #fff;
   box-shadow: var(--shadow);
   transform-origin: 0 0;
-  /* All touches on the sheet go to ink.js; no long-press selection or callout menu on iOS. */
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
 }
 
 #frame {
