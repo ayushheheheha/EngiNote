@@ -117,7 +117,9 @@ body.editing #library { display: none; }
   gap: 12px;
   padding: 18px 24px;
 }
-.lib-bar h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.lib-bar h1 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 22px; letter-spacing: -.01em; }
+/* The logo mark: a height only, so it always keeps its own proportions. */
+.mark { height: 22px; width: auto; flex: none; fill: currentColor; }
 .lib-actions { display: flex; align-items: center; gap: 8px; }
 
 #grid {

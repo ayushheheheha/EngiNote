@@ -8,7 +8,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="EngiNote">
   <title>EngiNote</title>
-  <link rel="icon" href="data:,">
+  <!-- The Engikode icon, white on black. PNG for Safari (tab and home screen), SVG where it is supported. -->
+  <link rel="icon" href="apple-touch-icon.png" type="image/png" sizes="180x180">
+  <link rel="icon" href="icon.svg" type="image/svg+xml" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
   <script>
     // Set the theme before first paint (no flash): the saved choice, else what the device prefers.
@@ -22,7 +25,11 @@
   <!-- Library (home) -->
   <div id="library">
     <header class="lib-bar">
-      <h1>EngiNote</h1>
+      <h1>
+        <!-- The Engikode icon: the designer's shapes unchanged, coloured by the theme (black on light, white on dark). -->
+        <svg class="mark" viewBox="0 0 457.26 304.89" aria-hidden="true"><polygon points="457.26 0 378.29 0 197.77 243.9 197.78 304.89 430.53 304.88 330.01 182.91 457.26 0"/><polygon points="197.77 182.93 197.77 121.95 197.77 121.95 0 121.95 0 121.95 0 182.93 0 182.93 197.77 182.93"/><rect y="243.9" width="263.68" height="60.99" rx="0" ry="0"/><polygon points="197.77 60.98 197.77 0 197.77 0 0 0 0 0 0 60.98 0 60.98 197.77 60.98"/></svg>
+        EngiNote
+      </h1>
       <div class="lib-actions">
         <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
