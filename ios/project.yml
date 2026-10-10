@@ -51,3 +51,9 @@ targets:
         UIStatusBarHidden: true
         UIViewControllerBasedStatusBarAppearance: true
         ITSAppUsesNonExemptEncryption: false
+        # Screen recording (Recorder.swift): the questions iPadOS asks, and the Files app showing
+        # the app's Documents folder, where the recordings are kept.
+        NSMicrophoneUsageDescription: EngiNote records your voice with the screen when you make a recording.
+        NSPhotoLibraryAddUsageDescription: EngiNote saves a recording to Photos when you choose to.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true

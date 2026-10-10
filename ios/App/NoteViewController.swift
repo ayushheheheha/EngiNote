@@ -10,8 +10,11 @@ import WebKit
 ///    (confirm() would answer "no" by itself, so nothing could ever be deleted).
 ///  - Saving a file. A page in a web view cannot download anything, so the page hands over the
 ///    backup's name and text (the 'saveFile' message in app.js) and this asks where to keep it.
+///  - Recording the screen as a 16:9 movie (Recorder.swift), started and stopped by the page
+///    (the 'recorder' message), which is told how it goes (a 'recorder' event on its window).
 final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
     private var webView: WKWebView!
+    private let recorder = Recorder()
 
     // A note-taking surface: no status bar, the home bar stays out of the way, and a swipe from
     // the bottom edge needs a second swipe, so writing near the edge does not leave the app.
@@ -26,6 +29,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(WebFiles(), forURLScheme: WebFiles.scheme)
         configuration.userContentController.add(self, name: "saveFile")
+        configuration.userContentController.add(self, name: "recorder")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -44,6 +48,10 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         let pencil = UIPencilInteraction()
         pencil.delegate = self
         view.addInteraction(pencil)
+
+        recorder.onFailure = { [weak self] message in self?.stopRecording(because: message) }
+        // iPadOS stops handing over the screen once the app is no longer in front: close the movie properly.
+        NotificationCenter.default.addObserver(self, selector: #selector(wentToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
 
         webView.load(URLRequest(url: WebFiles.home))
     }
@@ -65,13 +73,94 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('pencil', { detail: '\(gesture)' }))", completionHandler: nil)
     }
 
-    // MARK: Saving a file
+    /// An event on the page's window with `detail` as its detail. The detail travels as JSON, so
+    /// whatever text is in it (an error message, say) cannot become code.
+    private func send(_ event: String, _ detail: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: detail), let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('\(event)', { detail: \(json) }))", completionHandler: nil)
+    }
+
+    // MARK: Recording
+
+    private func record(_ body: [String: Any]) {
+        switch body["action"] as? String {
+        case "start":
+            recorder.start(quality: body["quality"] as? String ?? "standard", microphone: body["microphone"] as? Bool ?? true) { [weak self] error in
+                guard let self = self else { return }
+                if let error = error {
+                    self.send("recorder", ["state": "idle", "message": "Recording did not start: \(error)"])
+                } else {
+                    UIApplication.shared.isIdleTimerDisabled = true // the screen must not lock in the middle of a lecture
+                    self.send("recorder", ["state": "recording"])
+                }
+            }
+        case "stop":
+            stopRecording(because: nil)
+        default:
+            break
+        }
+    }
+
+    /// Stop, finish the movie and tell the page. `problem`: why, if it was not the user's choice.
+    private func stopRecording(because problem: String?) {
+        guard recorder.isActive else {
+            send("recorder", ["state": "idle"])
+            return
+        }
+        // Finishing the file may outlast the app being in front: ask iPadOS for the time to do it.
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = UIApplication.shared.beginBackgroundTask {
+            UIApplication.shared.endBackgroundTask(task)
+            task = .invalid
+        }
+        recorder.stop { [weak self] file, error in
+            UIApplication.shared.isIdleTimerDisabled = false
+            if task != .invalid {
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+            guard let self = self else { return }
+            let trouble = problem ?? error
+            let place = "Files, under On My iPad > EngiNote"
+            let message: String
+            if file == nil {
+                message = "Recording failed: \(trouble ?? "nothing was recorded")."
+            } else if let trouble = trouble {
+                message = "Recording stopped: \(trouble). What was recorded is in \(place)."
+            } else {
+                message = "Recording saved. It is also in \(place)."
+            }
+            self.send("recorder", ["state": "idle", "message": message])
+
+            // Offer to send the movie somewhere at once: Photos, an editing app, AirDrop.
+            guard let file = file, UIApplication.shared.applicationState == .active, self.presentedViewController == nil else { return }
+            let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+            sheet.popoverPresentationController?.sourceView = self.view
+            sheet.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY - 40, width: 1, height: 1)
+            self.present(sheet, animated: true)
+        }
+    }
+
+    @objc private func wentToBackground() {
+        if recorder.isActive { stopRecording(because: "the app was no longer on screen") }
+    }
+
+    // MARK: Messages from the page
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         // Only the app's own page may ask: never a frame inside it.
-        guard message.name == "saveFile", message.frameInfo.isMainFrame,
-              let body = message.body as? [String: Any],
-              let name = body["name"] as? String, let text = body["text"] as? String else { return }
+        guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any] else { return }
+        switch message.name {
+        case "saveFile": saveFile(body)
+        case "recorder": record(body)
+        default: break
+        }
+    }
+
+    // MARK: Saving a file
+
+    private func saveFile(_ body: [String: Any]) {
+        guard let name = body["name"] as? String, let text = body["text"] as? String else { return }
 
         // Written to a folder of its own, so that the copy the user saves carries exactly this name.
         // ponytail: these temporary copies are left for iPadOS to clear; delete them here if they ever add up.

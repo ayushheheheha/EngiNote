@@ -737,9 +737,8 @@ addEventListener('pencil', e => {
 
 // A toolbar button that switches an option on and off and remembers it on this device.
 // Returns a function that reads the current state.
-function option(btn, key, apply = () => {}) {
-  let on = false;
-  try { on = localStorage.getItem(key) === '1'; } catch { /* storage blocked */ }
+function option(btn, key, apply = () => {}, on = false) { // `on`: how it starts, until the user has chosen
+  try { on = (localStorage.getItem(key) ?? (on ? '1' : '0')) === '1'; } catch { /* storage blocked */ }
   const set = value => {
     on = value;
     btn.setAttribute('aria-pressed', on);
@@ -851,6 +850,54 @@ wideBtn.onclick = () => {
   wideBtn.setAttribute('aria-pressed', document.body.classList.toggle('wide'));
   refit();
 };
+
+/* ---------- Screen recording (the iPad app only) ---------- */
+
+// A page cannot record the screen; the iPad app can (ios/App/Recorder.swift). The page asks it to
+// start and stop, and is told how it went by 'recorder' events on the window. The video is the
+// 16:9 window; these controls sit outside it (style.css, #rec-bar).
+const shellRecorder = window.webkit?.messageHandlers?.recorder;
+if (shellRecorder) {
+  const recBtn = $('rec-btn'), recTime = $('rec-time'), recQuality = $('rec-quality');
+  const micOn = option($('rec-mic'), 'recMic', undefined, true);
+  let recording = false, startedAt = 0, ticker = 0;
+  document.body.classList.add('can-record');
+
+  try { recQuality.value = localStorage.getItem('recQuality') ?? recQuality.value; } catch { /* storage blocked */ }
+  if (recQuality.selectedIndex < 0) recQuality.value = 'standard'; // a saved value this version does not offer
+  recQuality.onchange = () => {
+    try { localStorage.setItem('recQuality', recQuality.value); } catch { /* lasts for this visit only */ }
+  };
+
+  const showTime = () => {
+    const s = recording ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+    recTime.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+  function showRecording(on) {
+    recording = on;
+    document.body.classList.toggle('recording', on);
+    recBtn.setAttribute('aria-pressed', on);
+    $('rec-label').textContent = on ? 'Stop' : 'Record';
+    // Fixed for the length of a recording: its settings, and the 16:9 window it is a picture of.
+    $('rec-mic').disabled = recQuality.disabled = wideBtn.disabled = on;
+    clearInterval(ticker);
+    if (on) {
+      startedAt = Date.now();
+      ticker = setInterval(showTime, 1000);
+    }
+    showTime();
+  }
+
+  recBtn.onclick = () => {
+    recBtn.disabled = true; // until the app answers: starting asks the user's permission, stopping finishes the file
+    shellRecorder.postMessage(recording ? { action: 'stop' } : { action: 'start', quality: recQuality.value, microphone: micOn() });
+  };
+  addEventListener('recorder', e => {
+    recBtn.disabled = false;
+    showRecording(e.detail?.state === 'recording');
+    if (e.detail?.message) notify(e.detail.message);
+  });
+}
 
 /* ---------- Keyboard ---------- */
 

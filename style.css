@@ -427,6 +427,7 @@ body.wide #editor {
   /* Dashed red lines where the window starts and ends. An outline sits just outside the box, so the
      window stays exactly 16:9 and the lines show only on the sides that have a black bar. */
   outline: 2px dashed #ff3b30;
+  outline-offset: 2px; /* a clear gap: a recording of the window (which is cut at its very edge) never catches a sliver of red */
 }
 
 #page {
@@ -493,6 +494,49 @@ body.full .flyout { top: 50%; left: auto; right: calc(100% + 12px); transform: t
 /* Buttons that only belong in the rail. */
 body:not(.full) .rail-only { display: none; }
 
+/* ---------- Screen recording (the iPad app) ---------- */
+
+#rec-bar {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  z-index: 8;
+  transform: translateX(-50%);
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* Offered with the 16:9 window on; and always there while recording, wherever the user goes, so it can be stopped. */
+body.can-record.wide.editing #rec-bar,
+body.recording #rec-bar { display: flex; }
+/* Under the 16:9 window, in the middle of the black band there: the video is that window and nothing
+   else, so the bar is never in it. (The band is half of what the window leaves of the page's height.) */
+body.wide.editing #rec-bar {
+  bottom: calc((100cqh - min(100cqh, 100cqw * 9 / 16)) / 4);
+  transform: translate(-50%, 50%);
+}
+#rec-btn { display: flex; align-items: center; gap: 7px; color: var(--text); }
+.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff3b30; }
+body.recording .rec-dot { border-radius: 2px; } /* a square: stop */
+#rec-time { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+body.recording #rec-time { color: #ff3b30; }
+#rec-quality {
+  height: var(--hit);
+  max-width: 44vw;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* under 16px iOS zooms the page on focus */
+}
+#rec-bar :disabled { opacity: .45; }
+
 /* ---------- Toast ---------- */
 
 #message {
@@ -501,7 +545,7 @@ body:not(.full) .rail-only { display: none; }
   bottom: 24px;
   z-index: 10;
   transform: translateX(-50%);
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 32px);
   margin: 0;
   padding: 10px 16px;
   border-radius: 12px;
@@ -509,3 +553,7 @@ body:not(.full) .rail-only { display: none; }
   color: var(--bg);
   box-shadow: var(--shadow);
 }
+/* With the 16:9 window on, or a recording running: at the top instead, in the black band above the
+   window, clear of both the picture and the recording bar. */
+body.wide.editing #message,
+body.recording #message { top: 14px; bottom: auto; }
