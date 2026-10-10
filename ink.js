@@ -174,9 +174,9 @@ function normalise(list) {
 // ---------- engine ----------
 
 // onZoom(factor, x, y, hold) is called as two fingers move: zoom by `factor` and keep page point
-// `hold` (viewBox units) at screen position (x, y).
+// `hold` (viewBox units) at screen position (x, y). onZoomEnd() follows once, when that gesture is over.
 // onErase() is called after an erasing gesture that removed at least one stroke.
-export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onErase } = {}) {
+export function createInk(svg, { scroller, onChange, onZoom, onZoomEnd, onDoubleTap, onErase } = {}) {
   let tool = 'pen', color = '#000', size = 3;
   // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
   // 'pen', 'highlighter' or 'glow'. A crayon stroke is a 'pen' stroke whose points carry pressure.
@@ -188,6 +188,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
   let act = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
   let grab = null;          // the page point a two-finger gesture took hold of; it stays under the fingers' centre
+  let zooming = false;      // onZoom has been called in the current two-finger gesture, so onZoomEnd is owed
   // Fingers scroll and zoom; only a stylus or mouse draws. That is the palm rejection that matters:
   // a hand on the screen can never leave a mark. setFingerDraw(true) lets one finger draw instead
   // (two still pan and zoom), for people without a stylus.
@@ -377,8 +378,16 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
   // (A hovering stylus changes nothing: people scroll with a finger while holding it close.)
   function dropPalms() {
     for (const [id, p] of pans) if (p.touch) pans.delete(id);
+    endZoom();
     if (act && act.touch) discard();
     vel = null;
+  }
+
+  // Tell the app the two-finger gesture is over: once, however it ended.
+  function endZoom() {
+    if (!zooming) return;
+    zooming = false;
+    if (onZoomEnd) onZoomEnd();
   }
 
   // After a flick, keep scrolling and slow down, as touch scrolling does everywhere else.
@@ -423,10 +432,6 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
     if (tool === 'hand' || (isTouch && (!fingerDraw || pans.size))) {
       // `live`: has travelled PAN_SLOP from where it landed (ox, oy). A resting touch must not nudge the page.
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
-      if (pans.size === 2) {   // a second finger: from here on the gesture holds on to the page point under their centre
-        const centre = grip();
-        grab = toPoint({ clientX: centre.x, clientY: centre.y });
-      }
       if (tool === 'hand') svg.style.cursor = 'grabbing';
     } else {
       finish();   // a previous gesture whose pointerup got lost must not block this one
@@ -466,9 +471,14 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       const to = grip();
       if (pans.size > 1) {
         // Two fingers pan and zoom in one step: the app zooms by the change in their spread and puts
-        // the grabbed page point back under their centre. Naming that point once per gesture, not
-        // re-reading it every move, is what keeps the page from creeping as rounding errors add up.
-        if (onZoom && from.spread) onZoom(to.spread / from.spread, to.x, to.y, grab);
+        // the grabbed page point back under their centre. That point is named once, as the gesture
+        // really starts (the first move past the slop), not re-read on every move: re-reading is
+        // what let the page creep as rounding errors added up.
+        if (onZoom && from.spread) {
+          if (!zooming) grab = toPoint({ clientX: from.x, clientY: from.y });
+          zooming = true;
+          onZoom(to.spread / from.spread, to.x, to.y, grab);
+        }
         vel = null;
         return;
       }
@@ -526,6 +536,7 @@ export function createInk(svg, { scroller, onChange, onZoom, onDoubleTap, onEras
       const pinch = pans.size > 1;
       if (pinch) pans.clear();
       else pans.delete(e.pointerId);
+      endZoom();
       svg.style.cursor = CURSORS[tool];
       const flick = !pinch && vel && e.type === 'pointerup' && e.pointerType !== 'mouse' && e.timeStamp - vel.t < 60;
       if (flick) coast();

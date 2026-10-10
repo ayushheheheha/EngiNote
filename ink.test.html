@@ -55,12 +55,13 @@ try {
 
   // --- engine, on a real <svg> ---
   const svg = document.getElementById('s');
-  let changes = 0, zoomed = 1, doubleTaps = 0, erases = 0, held = null;
+  let changes = 0, zoomed = 1, doubleTaps = 0, erases = 0, held = null, zoomEnds = 0;
   const strokeEls = () => [...svg.querySelector('g').children];   // one element per stroke, in the strokes' group
   const ink = createInk(svg, {
     scroller: document.scrollingElement,
     onChange: () => changes++,
     onZoom: (factor, x, y, hold) => { zoomed *= factor; held = hold; },
+    onZoomEnd: () => zoomEnds++,
     onDoubleTap: () => doubleTaps++,
     onErase: () => erases++,
   });
@@ -139,6 +140,8 @@ try {
   check('two fingers pinch-zoom and leave no stroke', ink.getStrokes().length === 1 && Math.abs(zoomed - 2) < 0.01);
   // The fingers were at x = 110 and 200 when the second landed, so the page point they hold is midway.
   check('a pinch names the page point it took hold of, for the app to keep under the fingers', String(held) === '155,100');
+  // The app only settles the real zoom when the gesture is over, so it must be told, exactly once.
+  check('the end of a pinch is reported once, when the first finger lifts', zoomEnds === 1);
 
   fire('pointerdown', 50, 120, 'touch', 1);    // palm lands first and starts a stroke
   fire('pointermove', 90, 120, 'touch', 1);
@@ -246,8 +249,9 @@ try {
   fire('pointerdown', 100, 250, 'touch', 21, { t: 40000 });
   fire('pointerdown', 190, 250, 'touch', 22, { t: 40000 });
   fire('pointermove', 280, 250, 'touch', 22, { t: 40016 });
-  const midPinch = zoomed;
+  const midPinch = zoomed, endsBefore = zoomEnds;
   fire('pointerdown', 50, 280, 'pen', 2, { t: 40100, pressure: 0.4 });
+  const endsAtPenDown = zoomEnds;
   fire('pointermove', 370, 250, 'touch', 22, { t: 40116 });
   fire('pointermove', 150, 280, 'pen', 2, { t: 40132, pressure: 0.4 });
   fire('pointerup', 150, 280, 'pen', 2, { t: 40148, buttons: 0 });
@@ -255,6 +259,7 @@ try {
   fire('pointerup', 370, 250, 'touch', 22, { t: 40200 });
   check('when the stylus lands, fingers already on the page stop scrolling and zooming',
     zoomed === midPinch && ink.getStrokes().length === 2 && nib.style.display === 'none');
+  check('...and the pinch it cut short is reported as ended, once', endsAtPenDown === endsBefore + 1 && zoomEnds === endsBefore + 1);
   ink.undo();
 
   // A finger tap: down and up on the same spot `held` ms apart.

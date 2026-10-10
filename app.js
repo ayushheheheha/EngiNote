@@ -148,11 +148,10 @@ function setPageHeight(height) {
 }
 
 // Zoom, then scroll so that page point `hold` (in page px) sits at screen position (cx, cy).
-// The buttons give neither: the point in the middle of the view stays there. A pinch gives both:
-// the point the fingers took hold of stays under them, which also carries any panning.
+// The buttons give neither: the point in the middle of the view stays there. The end of a pinch
+// gives both: the point the fingers held stays where they left it.
 // The sheet is measured after the new layout, so centring and the ends of the scroll range are
-// accounted for, and each call aims at the same page point, so nothing drifts over a long pinch.
-// ponytail: a pinch re-lays-out on every pointer move; batch into requestAnimationFrame if it stutters.
+// accounted for.
 function setZoom(value, cx, cy, hold) {
   const view = scroller.getBoundingClientRect();
   cx ??= view.left + view.width / 2;
@@ -166,6 +165,40 @@ function setZoom(value, cx, cy, hold) {
   const sheet = sizer.getBoundingClientRect();
   scroller.scrollBy({ left: sheet.left + hold[0] * zoom - cx, top: sheet.top + hold[1] * zoom - cy, behavior: 'instant' });
   $('zoom-label').textContent = Math.round(zoom * 100) + '%';
+}
+
+// A two-finger pinch, while the fingers are down: { zoom, sheet, x, y, hold }.
+// During it the sheet is only moved and scaled, by one transform on #page; the real zoom (sizer
+// size and scroll position) is settled once, when the fingers lift. Doing the real thing on every
+// move made the note jitter: a scroll position is a whole number of pixels, so the held point
+// wobbled by up to a pixel each step, and the size change and the scroll could reach the screen a
+// frame apart. It also re-laid-out and repainted the whole note at every step.
+let pinch = null;
+
+function pinchMove(factor, x, y, hold) {
+  if (!pinch) {
+    pinch = { zoom, sheet: sizer.getBoundingClientRect() }; // where the sheet's corner is; fixed until the fingers lift
+    page.style.willChange = 'transform'; // let the browser scale what is already drawn, instead of redrawing per step
+  }
+  pinch.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.zoom * factor));
+  Object.assign(pinch, { x, y, hold });
+  const left = x - pinch.sheet.left - hold[0] * pinch.zoom, top = y - pinch.sheet.top - hold[1] * pinch.zoom;
+  page.style.transform = `translate(${left}px, ${top}px) scale(${pinch.zoom})`;
+  $('zoom-label').textContent = Math.round(pinch.zoom * 100) + '%';
+}
+
+function pinchEnd() {
+  if (!pinch) return;
+  const { zoom: reached, x, y, hold } = pinch;
+  pinch = null;
+  page.style.willChange = '';
+  setZoom(reached, x, y, hold); // lays out for real (redrawing the note sharp at its new size) and scrolls to match
+  // The scroll can only land on a whole pixel. Take up the fraction that is left with a nudge of the
+  // sheet, so the note does not tick sideways as the fingers lift. (A larger gap means the scroll hit
+  // the end of its range, and the note is meant to come back inside it.)
+  const sheet = sizer.getBoundingClientRect();
+  const dx = x - sheet.left - hold[0] * zoom, dy = y - sheet.top - hold[1] * zoom;
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) page.style.transform = `translate(${dx}px, ${dy}px) scale(${zoom})`;
 }
 
 const fitZoom = () => (scroller.clientWidth - GUTTER) / PAGE_WIDTH;
@@ -229,7 +262,8 @@ const ink = createInk(svg, {
     touch();
     refreshHistory();
   },
-  onZoom: (factor, x, y, hold) => setZoom(zoom * factor, x, y, hold), // two-finger pinch and pan
+  onZoom: pinchMove, // two-finger pinch and pan
+  onZoomEnd: pinchEnd,
   onDoubleTap: () => toggleEraser(),
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
     if (autoDeselect() && tool === 'eraser') choose('tool', beforeEraser);
