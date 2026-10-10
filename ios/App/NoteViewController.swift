@@ -89,13 +89,22 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     private func record(_ body: [String: Any]) {
         switch body["action"] as? String {
         case "start":
-            recorder.start(quality: body["quality"] as? String ?? "standard", microphone: body["microphone"] as? Bool ?? true) { [weak self] error in
+            let microphone = body["microphone"] as? Bool ?? true
+            recorder.start(quality: body["quality"] as? String ?? "standard", microphone: microphone, enhance: body["enhance"] as? Bool ?? false) { [weak self] error, note in
                 guard let self = self else { return }
                 if let error = error {
                     self.send("recorder", ["state": "idle", "message": "Recording did not start: \(error)"])
-                } else {
-                    UIApplication.shared.isIdleTimerDisabled = true // the screen must not lock in the middle of a lecture
-                    self.send("recorder", ["state": "recording"])
+                    return
+                }
+                UIApplication.shared.isIdleTimerDisabled = true // the screen must not lock in the middle of a lecture
+                var news: [String: Any] = ["state": "recording"]
+                if let note = note { news["message"] = note }
+                self.send("recorder", news)
+                // A voice that is not arriving must not be found out an hour later: look after a few seconds.
+                guard microphone else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    guard let self = self, self.recorder.isActive, !self.recorder.isPaused, !self.recorder.hasSound else { return }
+                    self.send("recorder", ["state": "recording", "message": "Warning: no sound is being recorded. Stop, and try again with Enhance switched off."])
                 }
             }
         case "pause" where recorder.isActive:

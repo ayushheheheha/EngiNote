@@ -944,7 +944,10 @@ wideBtn.onclick = () => {
 const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
   const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');
-  const micOn = option($('rec-mic'), 'recMic', undefined, true);
+  const recEnhance = $('rec-enhance');
+  // Enhance: the voice with the background noise taken out. It needs the microphone, so it is out of reach without it.
+  const micOn = option($('rec-mic'), 'recMic', on => { recEnhance.disabled = !on || document.body.classList.contains('recording'); }, true);
+  const enhanceOn = option(recEnhance, 'recEnhance');
   // 'idle', 'recording' or 'paused'. The clock counts recorded time only: `done` ms from before the
   // last pause, plus the time since `since` while it runs.
   let state = 'idle', done = 0, since = 0, ticker = 0;
@@ -975,6 +978,7 @@ if (shellRecorder) {
     recPause.setAttribute('aria-pressed', state === 'paused');
     // Fixed for the length of a recording: its settings, and the 16:9 window it is a picture of.
     $('rec-mic').disabled = recQuality.disabled = wideBtn.disabled = on;
+    recEnhance.disabled = on || !micOn();
     clearInterval(ticker);
     if (state === 'recording') ticker = setInterval(showTime, 1000);
     showTime();
@@ -983,7 +987,9 @@ if (shellRecorder) {
   // Each button waits for the app's answer: starting asks the user's permission, stopping finishes the file.
   recBtn.onclick = () => {
     recBtn.disabled = recPause.disabled = true;
-    shellRecorder.postMessage(state === 'idle' ? { action: 'start', quality: recQuality.value, microphone: micOn() } : { action: 'stop' });
+    shellRecorder.postMessage(state === 'idle'
+      ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn() }
+      : { action: 'stop' });
   };
   recPause.onclick = () => {
     recBtn.disabled = recPause.disabled = true;
@@ -991,7 +997,8 @@ if (shellRecorder) {
   };
   addEventListener('recorder', e => {
     recBtn.disabled = recPause.disabled = false;
-    showState(['recording', 'paused'].includes(e.detail?.state) ? e.detail.state : 'idle');
+    const next = ['recording', 'paused'].includes(e.detail?.state) ? e.detail.state : 'idle';
+    if (next !== state) showState(next); // the app may also speak up mid-recording, with nothing changed
     if (e.detail?.message) notify(e.detail.message);
     if (state === 'idle') askVideos(); // there may be a new one
   });

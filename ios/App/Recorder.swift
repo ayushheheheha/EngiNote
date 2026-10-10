@@ -49,6 +49,19 @@ final class Recorder {
     private var rejoin = false // resumed: the next frame decides the new `offset`
     private var offset = CMTime.zero
     private var lastEnd = CMTime.zero
+    private var soundPieces = 0 // pieces of sound written so far
+
+    // Enhanced voice. ReplayKit's own microphone is the raw one. For a voice with the background
+    // noise taken out, the app listens to the microphone itself, through the system's voice
+    // processing (the kind calls use), and writes that into the movie instead; ReplayKit then
+    // records the picture only. Using voice processing is also what makes iPadOS offer its
+    // "Voice Isolation" microphone mode in Control Centre, which removes far more.
+    // Main thread only:
+    private let engine = AVAudioEngine()
+    private var listening = false
+    /// How much later (+) or earlier (-) the enhanced voice is written than it was heard: the knob
+    /// to turn if voice and picture turn out not to line up on the real device.
+    private static let voiceShift = CMTime(value: 0, timescale: 1000) // ms
 
     /// A recording has been started and not yet stopped.
     var isActive: Bool {
@@ -64,19 +77,62 @@ final class Recorder {
         return writer == nil ? nil : file
     }
 
+    var isPaused: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return paused
+    }
+
+    /// Sound has actually reached the movie. (False a few seconds in means the voice is being lost.)
+    var hasSound: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return soundPieces > 0
+    }
+
     /// Where recordings are kept: the app's Documents folder.
     static func folder() throws -> URL {
         try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     }
 
-    /// Start recording. `done` is called on the main thread with nil, or with what went wrong
-    /// (which includes the user saying no to the system's question).
-    func start(quality name: String, microphone: Bool, done: @escaping (String?) -> Void) {
+    /// Start recording. `enhance`: record the voice with the background noise taken out.
+    /// `done` is called on the main thread: with what went wrong (which includes the user saying
+    /// no to the system's question), or nil; and with something the user should know even though
+    /// recording did start (enhanced voice not available, so the normal microphone is in use).
+    func start(quality name: String, microphone: Bool, enhance: Bool, done: @escaping (_ error: String?, _ note: String?) -> Void) {
         let screen = RPScreenRecorder.shared()
         guard screen.isAvailable, !screen.isRecording, !isActive else {
-            done("Screen recording is not available right now.")
+            done("Screen recording is not available right now.", nil)
             return
         }
+        guard microphone, enhance else {
+            capture(quality: name, microphone: microphone, ownVoice: false, note: nil, done: done)
+            return
+        }
+        AVAudioApplication.requestRecordPermission { [weak self] allowed in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                var note: String?
+                var own = false
+                if allowed {
+                    do {
+                        try self.listen()
+                        own = true
+                    } catch {
+                        self.stopListening()
+                        note = "Enhanced voice could not start (\(error.localizedDescription)). Recording with the normal microphone."
+                    }
+                } else {
+                    note = "EngiNote is not allowed to use the microphone (Settings > EngiNote), so the voice cannot be enhanced."
+                }
+                self.capture(quality: name, microphone: microphone, ownVoice: own, note: note, done: done)
+            }
+        }
+    }
+
+    // The recording itself. `ownVoice`: the app is already listening to the microphone, so ReplayKit must not.
+    private func capture(quality name: String, microphone: Bool, ownVoice: Bool, note: String?, done: @escaping (String?, String?) -> Void) {
+        let screen = RPScreenRecorder.shared()
         let url: URL
         let writer: AVAssetWriter
         do {
@@ -87,7 +143,8 @@ final class Recorder {
             url = folder.appendingPathComponent("EngiNote \(stamp.string(from: Date())).mov")
             writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         } catch {
-            done(error.localizedDescription)
+            stopListening()
+            done(error.localizedDescription, nil)
             return
         }
         writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
@@ -103,16 +160,76 @@ final class Recorder {
         self.rejoin = false
         self.offset = .zero
         self.lastEnd = .zero
+        self.soundPieces = 0
         if let known = Recorder.qualities[name] { self.quality = known }
         lock.unlock()
 
-        screen.isMicrophoneEnabled = microphone
+        screen.isMicrophoneEnabled = microphone && !ownVoice
         screen.startCapture(handler: { [weak self] buffer, type, error in
             if error == nil { self?.take(buffer, type) }
         }, completionHandler: { [weak self] error in
             if error != nil { self?.forget() }
-            DispatchQueue.main.async { done(error?.localizedDescription) }
+            DispatchQueue.main.async {
+                if error != nil { self?.stopListening() }
+                done(error?.localizedDescription, error == nil ? note : nil)
+            }
         })
+    }
+
+    // MARK: Enhanced voice
+
+    /// Start listening to the microphone through the system's voice processing. What is heard goes
+    /// to take(), like ReplayKit's own sound would; until a recording is running it is dropped there.
+    private func listen() throws {
+        listening = true
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setActive(true)
+        let microphone = engine.inputNode
+        try microphone.setVoiceProcessingEnabled(true)
+        let format = microphone.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount == 1 || format.channelCount == 2 else {
+            throw NSError(domain: "EngiNote", code: 1, userInfo: [NSLocalizedDescriptionKey: "the microphone's sound is in a form this app cannot record"])
+        }
+        microphone.removeTap(onBus: 0)
+        microphone.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] heard, time in
+            guard let self = self, let piece = Recorder.piece(from: heard, at: time) else { return }
+            self.take(piece, .audioMic)
+        }
+        engine.prepare()
+        try engine.start()
+    }
+
+    /// Stop listening, if listening. Safe to call at any time.
+    private func stopListening() {
+        guard listening else { return }
+        listening = false
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        try? engine.inputNode.setVoiceProcessingEnabled(false)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// What the microphone heard, as a piece of sound the movie can take, timed on the same clock
+    /// as ReplayKit's picture (the device's own).
+    private static func piece(from heard: AVAudioPCMBuffer, at time: AVAudioTime) -> CMSampleBuffer? {
+        guard time.isHostTimeValid, heard.frameLength > 0 else { return nil }
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(heard.format.sampleRate)),
+            presentationTimeStamp: CMTimeAdd(CMClockMakeHostTimeFromSystemUnits(time.hostTime), voiceShift),
+            decodeTimeStamp: .invalid
+        )
+        var made: CMSampleBuffer?
+        let status = CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault, dataBuffer: nil, dataReady: false, makeDataReadyCallback: nil, refcon: nil,
+            formatDescription: heard.format.formatDescription, sampleCount: CMItemCount(heard.frameLength),
+            sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 0, sampleSizeArray: nil, sampleBufferOut: &made
+        )
+        guard status == noErr, let piece = made else { return nil }
+        let filled = CMSampleBufferSetDataBufferFromAudioBufferList(
+            piece, blockBufferAllocator: kCFAllocatorDefault, blockBufferMemoryAllocator: kCFAllocatorDefault, flags: 0, bufferList: heard.audioBufferList
+        )
+        return filled == noErr ? piece : nil
     }
 
     /// Leave out everything from now until resume(). The movie carries on from there with no gap.
@@ -134,6 +251,7 @@ final class Recorder {
     /// Stop and finish the movie. `done` is called on the main thread with the file (nil if there
     /// is nothing to keep) and with what went wrong, if anything did.
     func stop(done: @escaping (URL?, String?) -> Void) {
+        stopListening()
         RPScreenRecorder.shared().stopCapture { [weak self] error in
             guard let self = self else { return }
             self.lock.lock()
@@ -206,6 +324,7 @@ final class Recorder {
         let lasts = length.isValid && CMTimeCompare(length, .zero) > 0 ? length : CMTime(value: 1, timescale: 60)
         let end = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(piece), lasts)
         if CMTimeCompare(end, lastEnd) > 0 { lastEnd = end }
+        if type == .audioMic { soundPieces += 1 }
     }
 
     /// A copy of a piece of picture or sound, timed `offset` earlier.
