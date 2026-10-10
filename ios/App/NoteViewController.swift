@@ -8,7 +8,9 @@ import WebKit
 ///    passed on as a 'pencil' event on the page's window (see app.js).
 ///  - The dialogs behind confirm() and alert(), which a bare web view simply does not show
 ///    (confirm() would answer "no" by itself, so nothing could ever be deleted).
-final class NoteViewController: UIViewController, WKUIDelegate, UIPencilInteractionDelegate {
+///  - Saving a file. A page in a web view cannot download anything, so the page hands over the
+///    backup's name and text (the 'saveFile' message in app.js) and this asks where to keep it.
+final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
     private var webView: WKWebView!
 
     // A note-taking surface: no status bar, the home bar stays out of the way, and a swipe from
@@ -23,6 +25,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, UIPencilInteract
 
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(WebFiles(), forURLScheme: WebFiles.scheme)
+        configuration.userContentController.add(self, name: "saveFile")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -60,6 +63,31 @@ final class NoteViewController: UIViewController, WKUIDelegate, UIPencilInteract
 
     private func tellPage(_ gesture: String) {
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('pencil', { detail: '\(gesture)' }))", completionHandler: nil)
+    }
+
+    // MARK: Saving a file
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Only the app's own page may ask: never a frame inside it.
+        guard message.name == "saveFile", message.frameInfo.isMainFrame,
+              let body = message.body as? [String: Any],
+              let name = body["name"] as? String, let text = body["text"] as? String else { return }
+
+        // Written to a folder of its own, so that the copy the user saves carries exactly this name.
+        // ponytail: these temporary copies are left for iPadOS to clear; delete them here if they ever add up.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let file = folder.appendingPathComponent((name as NSString).lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: file)
+        } catch {
+            let dialog = UIAlertController(title: "The backup could not be saved", message: error.localizedDescription, preferredStyle: .alert)
+            dialog.addAction(UIAlertAction(title: "OK", style: .default))
+            present(dialog, animated: true)
+            return
+        }
+        // The system's "save to Files" sheet: the user picks the place, the app keeps its own copy.
+        present(UIDocumentPickerViewController(forExporting: [file], asCopy: true), animated: true)
     }
 
     // MARK: confirm() and alert()

@@ -252,6 +252,9 @@ body.in-folder #new-folder { display: none; }
   box-shadow: var(--shadow);
 }
 .tool-wrap.open .flyout { display: flex; }
+/* A flyout that is a short menu: its buttons stacked, each as wide as the menu. */
+.flyout.menu { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; white-space: nowrap; }
+.flyout.menu .btn-secondary { box-shadow: none; background: var(--bg); }
 /* A small corner mark on the eraser while it is the tool: there is more behind a second tap. */
 #eraser-wrap > [aria-pressed="true"]::after {
   content: "";

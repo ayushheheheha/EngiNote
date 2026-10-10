@@ -42,6 +42,14 @@
         <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
         </button>
+        <!-- Backup: one button, and a small menu to save everything to a file or load it back. -->
+        <div id="backup-wrap" class="tool-wrap">
+          <button id="backup-btn" class="btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">Backup</button>
+          <div class="flyout menu">
+            <button id="backup-save" class="btn-secondary" type="button">Save a backup file</button>
+            <button id="backup-load" class="btn-secondary" type="button">Restore from a file</button>
+          </div>
+        </div>
         <button id="new-folder" class="btn-secondary" type="button">New folder</button>
         <button id="import-btn" class="btn-primary" type="button">Import HTML</button>
       </div>
@@ -57,6 +65,7 @@
       <p id="empty" hidden>No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.</p>
     </main>
     <input id="file-input" type="file" accept=".html,.htm,text/html" multiple hidden>
+    <input id="backup-input" type="file" accept=".json,application/json" hidden>
   </div>
 
   <!-- Editor -->

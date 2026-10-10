@@ -166,12 +166,92 @@ $('folder-back').onclick = () => { folder = null; showLibrary(); };
 folderName.addEventListener('change', () => {
   if (!folder) return;
   folder.name = folderName.value.trim() || 'Untitled folder';
+  folder.updatedAt = Date.now(); // so a restore from an older backup does not undo the rename
   folderName.value = folder.name;
   db.put(folder).catch(() => notify('Could not rename the folder.'));
 });
 folderName.addEventListener('keydown', e => {
   if (e.key === 'Enter') folderName.blur();
 });
+
+/* ---------- Backup ---------- */
+
+// Everything this app has stored, notes and folders, as one JSON file, and back again. The notes
+// live only in this browser's (or the iPad app's) own storage, so a backup file kept somewhere
+// else is the one thing that survives the app being removed.
+const backupFly = flyout($('backup-wrap'), $('backup-btn'));
+$('backup-btn').onclick = backupFly.toggle;
+
+$('backup-save').onclick = async () => {
+  backupFly.set(false);
+  let docs;
+  try {
+    docs = await db.all();
+  } catch {
+    return notify('Could not read the notes to back them up.');
+  }
+  const text = JSON.stringify({ app: 'EngiNote', version: 1, savedAt: new Date().toISOString(), docs });
+  const name = `EngiNote backup ${new Date().toLocaleDateString('en-CA')}.json`; // en-CA writes the local date as 2026-10-11
+  // In the iPad app a page cannot save a file by itself: the shell does it (ios/App/NoteViewController.swift).
+  const shell = window.webkit?.messageHandlers?.saveFile;
+  if (shell) return shell.postMessage({ name, text });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+};
+
+// A backup file comes from outside, so nothing in it is taken on trust: only records shaped like
+// the ones this app writes are used, and only the fields it knows.
+function fromBackup(d) {
+  if (!d || typeof d.id !== 'string' || !d.id || typeof d.name !== 'string' || !Number.isFinite(d.updatedAt)) return null;
+  if (d.type === 'folder') return { id: d.id, type: 'folder', name: d.name, updatedAt: d.updatedAt };
+  if (typeof d.html !== 'string' || !Array.isArray(d.strokes)) return null;
+  const note = { id: d.id, name: d.name, html: d.html, strokes: d.strokes, updatedAt: d.updatedAt };
+  if (typeof d.folder === 'string') note.folder = d.folder;
+  return note;
+}
+
+const backupInput = $('backup-input');
+$('backup-load').onclick = () => {
+  backupFly.set(false);
+  backupInput.click();
+};
+backupInput.onchange = async () => {
+  const file = backupInput.files[0];
+  backupInput.value = ''; // lets the same file be picked again
+  if (!file) return;
+  let records;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || data.app !== 'EngiNote' || !Array.isArray(data.docs)) throw new Error('not a backup');
+    records = data.docs.map(fromBackup).filter(Boolean);
+  } catch {
+    return notify('That file is not an EngiNote backup.');
+  }
+  // Restoring only ever adds: a record is written if it is missing here, or older here than in
+  // the backup. Nothing is deleted, and nothing newer is overwritten.
+  let notes = 0, folders = 0;
+  try {
+    const here = new Map((await db.all()).map(d => [d.id, d]));
+    for (const record of records) {
+      const mine = here.get(record.id);
+      if (mine && mine.updatedAt >= record.updatedAt) continue;
+      await db.put(record);
+      if (record.type === 'folder') folders++;
+      else notes++;
+    }
+  } catch {
+    notify('The restore stopped part way: storage could not be written.');
+    return showLibrary();
+  }
+  const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  notify(notes + folders
+    ? `Restored ${[notes && count(notes, 'note'), folders && count(folders, 'folder')].filter(Boolean).join(' and ')}.`
+    : 'Nothing to restore: everything in that backup is already here.');
+  showLibrary();
+};
 
 async function importFiles(fileList) {
   const files = [...fileList].filter(f => /\.html?$/i.test(f.name));
@@ -495,10 +575,6 @@ addEventListener('pencil', e => {
   if (!current) return;
   if (e.detail === 'tap') toggleEraser();
   else if (e.detail === 'squeeze') ink.undo();
-  else return;
-  // ponytail: a note on screen for each gesture, so the first builds show whether the Pencil's
-  // signal arrives at all. Remove once that is confirmed on the device.
-  notify(e.detail === 'tap' ? `Pencil double-tap: ${tool}` : 'Pencil squeeze: undo');
 });
 
 // A toolbar button that switches an option on and off and remembers it on this device.
