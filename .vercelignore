@@ -1,3 +1,10 @@
-# This is a static site: every uploaded file is publicly served, so keep local secrets out.
-.env*
-.git
+# This is a static site: every uploaded file is publicly served.
+# So publish an allowlist, the app's own files and nothing else. Anything else that turns up in
+# this folder (design files, notes, local env files) stays on this machine.
+/*
+!/index.html
+!/style.css
+!/app.js
+!/ink.js
+!/ink.test.html
+!/sample.html
