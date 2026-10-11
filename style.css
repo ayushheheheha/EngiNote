@@ -1039,3 +1039,8 @@ body.wide.editing #message {
   color: var(--text);
   color-scheme: dark;
 }
+
+/* ---------- Export (export.js) ---------- */
+
+/* The frame a browser prints a note from: there, so that it can be printed, and out of sight. */
+#print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; visibility: hidden; }

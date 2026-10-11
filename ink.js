@@ -148,6 +148,45 @@ function normalise(list) {
     }));
 }
 
+// ---------- drawing a stroke ----------
+
+// A round-ended line along path data `d`.
+function line(d, colour, width, opacity = 1) {
+  const p = document.createElementNS(NS, 'path');
+  p.setAttribute('d', d);
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', colour);
+  p.setAttribute('stroke-width', width);
+  p.setAttribute('stroke-linecap', 'round');
+  p.setAttribute('stroke-linejoin', 'round');
+  if (opacity < 1) p.setAttribute('stroke-opacity', opacity);
+  return p;
+}
+
+/** The element that draws a stroke: a <path>, or for a glow stroke a <g> of them sharing one path data.
+    `done`: the stroke is complete (false for the one being drawn). Out here, and not in the engine,
+    so that anything else that shows ink as the editor does (an export) draws it with the same code. */
+export function makeEl(s, done = true) {
+  const d = strokeData(s, done);
+  let el;
+  if (isFlow(s)) {
+    el = document.createElementNS(NS, 'path');
+    el.setAttribute('d', d);
+    el.setAttribute('fill', s.color);
+  } else if (s.tool === 'glow') {
+    el = document.createElementNS(NS, 'g');
+    for (const [factor, faint] of GLOW_HALO) el.appendChild(line(d, s.color, s.size * factor, faint));
+    el.appendChild(line(d, s.color, s.size));
+    el.appendChild(line(d, '#fff', s.size * GLOW_CORE[0], GLOW_CORE[1]));
+  } else {
+    el = line(d, s.color, strokeWidth(s));
+    if (s.tool === 'highlighter') el.style.mixBlendMode = 'multiply';
+  }
+  // On the whole element, so a stroke does not darken where it crosses itself.
+  if (opacityOf(s) < 1) el.setAttribute('opacity', opacityOf(s));
+  return el;
+}
+
 // ---------- engine ----------
 
 // onZoom(factor, x, y, hold) is called as two fingers move: zoom by `factor` and keep page point
@@ -238,42 +277,6 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
 
   const getStrokes = () => strokes.slice();
   const changed = () => { if (onChange) onChange(getStrokes()); };
-
-  // A round-ended line along path data `d`.
-  function line(d, colour, width, opacity = 1) {
-    const p = document.createElementNS(NS, 'path');
-    p.setAttribute('d', d);
-    p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', colour);
-    p.setAttribute('stroke-width', width);
-    p.setAttribute('stroke-linecap', 'round');
-    p.setAttribute('stroke-linejoin', 'round');
-    if (opacity < 1) p.setAttribute('stroke-opacity', opacity);
-    return p;
-  }
-
-  // The element that draws a stroke: a <path>, or for a glow stroke a <g> of them sharing one path data.
-  // `done`: the stroke is complete (false for the one being drawn).
-  function makeEl(s, done = true) {
-    const d = strokeData(s, done);
-    let el;
-    if (isFlow(s)) {
-      el = document.createElementNS(NS, 'path');
-      el.setAttribute('d', d);
-      el.setAttribute('fill', s.color);
-    } else if (s.tool === 'glow') {
-      el = document.createElementNS(NS, 'g');
-      for (const [factor, faint] of GLOW_HALO) el.appendChild(line(d, s.color, s.size * factor, faint));
-      el.appendChild(line(d, s.color, s.size));
-      el.appendChild(line(d, '#fff', s.size * GLOW_CORE[0], GLOW_CORE[1]));
-    } else {
-      el = line(d, s.color, strokeWidth(s));
-      if (s.tool === 'highlighter') el.style.mixBlendMode = 'multiply';
-    }
-    // On the whole element, so a stroke does not darken where it crosses itself.
-    if (opacityOf(s) < 1) el.setAttribute('opacity', opacityOf(s));
-    return el;
-  }
 
   // New path data for a stroke's element, while the stroke is being drawn.
   function setData(el, d) {
