@@ -1,6 +1,6 @@
 # EngiNote
 
-Import your notes as HTML files and write over them, like annotating a PDF in GoodNotes or Freenotes, but for web pages. It runs in any browser, and as an iPad app with Apple Pencil support and a built-in screen recorder.
+Import your notes as HTML or PDF files, or start a blank notebook, and write over them, like GoodNotes or Freenotes, but for web pages too. It runs in any browser, and as an iPad app with Apple Pencil support and a built-in screen recorder.
 
 **Try it:** [enginote.vercel.app](https://enginote.vercel.app) · **iPad app:** [latest build (.ipa)](https://github.com/ayushheheheha/EngiNote/releases/latest/download/EngiNote.ipa)
 
@@ -9,14 +9,21 @@ Import your notes as HTML files and write over them, like annotating a PDF in Go
 ## What it does
 
 **Notes**
-- Import one or more `.html` files (button, or drag and drop). Each becomes a note you can open and write on.
+- Import one or more `.html` or `.pdf` files (button, or drag and drop). Each becomes a note you can open and write on.
+- **New notebook** makes blank paged paper: plain, ruled, grid or dotted, in your choice of size, direction, paper colour, line colour and spacing. A thin line marks each page, and pages are added as you write.
+- **Add space**: a blank page between two pages of a notebook or PDF, or a gap between two parts of an HTML note. The ink below moves down with it.
+- **Export** a note with its ink as a PDF (the iPad app makes the file; a browser opens its print dialog, which can save one).
+- Search your notes, sort them by date or name, and duplicate one.
 - Organise notes in folders. Rename anything by typing over its name.
 - Notes are saved automatically, on your device.
 - Back up every note and folder to one file, and restore from it. Restoring only adds; it never deletes or overwrites newer work.
 
 **Writing**
 - A tray of your own pens. Each pen has its own kind, colour, thickness and opacity, and you can add or remove pens (up to 12).
-- Four kinds of pen: an even **pen**, a **flow pen** that swells and thins with pressure, a **glow pen**, and a **highlighter**.
+- Five kinds of pen: an even **pen**, a **flow pen** that swells and thins with pressure, a **glow pen**, a **highlighter**, and a **laser pointer** whose trail fades and is never saved.
+- A **stability** setting on each pen, to steady a shaky line.
+- Hold the tip still at the end of a stroke and it becomes a straight line, ellipse, rectangle or triangle.
+- A **lasso**: circle some ink, then move it, resize it, recolour it or delete it.
 - Strokes are smoothed as you draw, so they stay clean even when zoomed far in.
 - An eraser with an adjustable size, and an option to switch back to your pen after each use.
 - Undo and redo.
@@ -26,12 +33,15 @@ Import your notes as HTML files and write over them, like annotating a PDF in Go
 - Pinch-zoom snaps to fit-width when you get close to it.
 - Light and dark themes.
 - Full screen, with the tools in a thin rail at the side.
+- A small arrow hides the toolbar and brings it back.
 - A 16:9 window, for presenting or recording.
 
 **Only in the iPad app**
 - Apple Pencil double-tap switches between the eraser and your last pen; squeeze undoes.
 - Screen recording to a video file, with your voice, pause and resume, and three quality settings.
 - "Enhance" removes background noise from your voice.
+- A countdown before a recording starts, and a mic check that shows your voice as live sound waves.
+- A camera bubble showing you over the note: drag it anywhere, pinch to resize it, double-tap to change its shape (circle, rounded square, wide, tall).
 - A Recordings folder to play, share or delete your videos.
 
 ## Using it
