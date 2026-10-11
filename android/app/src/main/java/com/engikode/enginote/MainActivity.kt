@@ -66,8 +66,7 @@ class MainActivity : ComponentActivity() {
     private fun log(line: String) {
         penLines.addLast(line)
         while (penLines.size > 9) penLines.removeFirst()
-        penLog.text = penLines.joinToString("
-")
+        penLog.text = penLines.joinToString(separator = "\u000A")
     }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
