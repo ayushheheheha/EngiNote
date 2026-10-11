@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -17,6 +18,10 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.graphics.Color
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +57,18 @@ class MainActivity : ComponentActivity() {
     // The pen's buttons as last seen, so that a press and its release can be told apart.
     private var primaryDownAt = -1L
     private var secondaryDown = false
+    private var lastButtons = -1
+    private var lastTool = -1
+
+    // ponytail: a log of the raw pen input, drawn over the page, until the pad's pen is known to work.
+    private lateinit var penLog: TextView
+    private val penLines = ArrayDeque<String>()
+    private fun log(line: String) {
+        penLines.addLast(line)
+        while (penLines.size > 9) penLines.removeFirst()
+        penLog.text = penLines.joinToString("
+")
+    }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         chooser?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
@@ -143,7 +160,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        setContentView(webView)
+        penLog = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x99000000.toInt())
+            textSize = 11f
+            setPadding(12, 6, 12, 6)
+            text = "pen log: waiting for the pen"
+            isClickable = false
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(webView, FrameLayout.LayoutParams(-1, -1))
+            addView(penLog, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
+        })
         webView.loadUrl("https://$HOST/index.html")
     }
 
@@ -181,17 +209,28 @@ class MainActivity : ComponentActivity() {
     }
 
     /** A press of the pen's button is read from the button state each pen event carries, as events
-     *  that announce a press are not sent by every tablet. */
+     *  that announce a press are not sent by every tablet. Some pens report their button as the
+     *  mouse's right button, so that counts too. */
     private fun watchPen(e: MotionEvent) {
-        if (e.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return
-        val primary = (e.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
-        val secondary = (e.buttonState and MotionEvent.BUTTON_STYLUS_SECONDARY) != 0
+        val tool = e.getToolType(0)
+        val pen = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER || e.isFromSource(InputDevice.SOURCE_STYLUS)
+        if (!pen) return
+        if (tool != lastTool) { lastTool = tool; log("tool $tool source 0x${Integer.toHexString(e.source)}") }
+        val state = e.buttonState
+        if (state != lastButtons) { lastButtons = state; log("buttons 0x${Integer.toHexString(state)} action ${e.actionMasked}") }
+        if (e.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || e.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE) {
+            log("button ${if (e.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) "press" else "release"} ${e.actionButton}")
+        }
+        val primary = (state and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
+        val secondary = (state and MotionEvent.BUTTON_STYLUS_SECONDARY) != 0
         if (primary && primaryDownAt < 0) primaryDownAt = e.eventTime
         if (!primary && primaryDownAt >= 0) {
-            tellPage(if (e.eventTime - primaryDownAt >= HOLD_MS) "squeeze" else "tap")
+            val gesture = if (e.eventTime - primaryDownAt >= HOLD_MS) "squeeze" else "tap"
+            log("-> $gesture")
+            tellPage(gesture)
             primaryDownAt = -1
         }
-        if (secondary && !secondaryDown) tellPage("squeeze")
+        if (secondary && !secondaryDown) { log("-> squeeze (second button)"); tellPage("squeeze") }
         secondaryDown = secondary
     }
 
@@ -206,18 +245,22 @@ class MainActivity : ComponentActivity() {
         return super.dispatchGenericMotionEvent(e)
     }
 
-    // Some pens (Android 14 and later) send their buttons as keys instead.
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY && event.repeatCount == 0) return true
-        if (keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY || keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY) return true
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        when (keyCode) {
-            KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY -> tellPage(if (event.eventTime - event.downTime >= HOLD_MS) "squeeze" else "tap")
-            KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY, KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY -> tellPage("squeeze")
-            else -> return super.onKeyUp(keyCode, event)
+    // Some pens (Android 14 and later) send their buttons as keys instead. Seen before the page
+    // can use them; any other key from a pen-like device is only logged.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        val stylus = code == KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY || code == KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY ||
+            code == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY || code == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL
+        val fromPen = ((event.device?.sources ?: 0) and InputDevice.SOURCE_STYLUS) != 0
+        if (stylus || fromPen) {
+            if (event.repeatCount == 0) log("key ${KeyEvent.keyCodeToString(code)} ${if (event.action == KeyEvent.ACTION_DOWN) "down" else "up"}")
+        }
+        if (!stylus) return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_UP) {
+            val held = event.eventTime - event.downTime >= HOLD_MS
+            val gesture = if (code == KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY && !held) "tap" else "squeeze"
+            log("-> $gesture")
+            tellPage(gesture)
         }
         return true
     }
