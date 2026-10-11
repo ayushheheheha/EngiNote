@@ -8,3 +8,6 @@ ios/App/Info.plist
 ios/build/
 ios/Payload/
 *.ipa
+
+# Agent worktrees
+.claude/
