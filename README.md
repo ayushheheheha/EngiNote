@@ -106,6 +106,7 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `index.html`, `style.css` | The page and its look |
 | `app.js` | The library, the editor, the view (zoom and scroll), pens, backup |
 | `ink.js` | The ink engine: pointer input, palm rejection, strokes, eraser, undo |
+| `lasso.js` | The lasso: selecting ink and moving, resizing, recolouring or deleting it |
 | `perfect-freehand.js` | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) 1.2.3, which shapes the flow pen's strokes |
 | `ink.test.html` | Tests for the ink engine |
 | `sample.html` | A note to try the app with |
