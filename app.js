@@ -3,6 +3,7 @@ import { createLasso } from './lasso.js';
 import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps } from './pages.js';
 import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
+import { exportDoc, printDoc, pinUnits } from './export.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -106,8 +107,8 @@ async function showLibrary() {
     ...here.map(note => makeCard(note, folders)),
   );
   empty.textContent = query ? `No notes ${folder ? 'in this folder ' : ''}match "${search.value.trim()}".` : folder
-    ? 'This folder is empty. Import an HTML file here, or move notes into it from the main library.'
-    : 'No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.';
+    ? 'This folder is empty. Import an HTML or PDF file here, or move notes into it from the main library.'
+    : 'No notes yet. Import an HTML or PDF file, or drop one anywhere on this page, to start annotating.';
   empty.hidden = here.length > 0 || (!query && !folder && (folders.length > 0 || !!shellVideos));
 }
 
@@ -471,28 +472,38 @@ backupInput.onchange = async () => {
   showLibrary();
 };
 
+// An HTML file becomes a note as it is. A PDF becomes a paged note (pages.js), each of its pages a
+// picture: pdfimport.js, which is only loaded, with the PDF reader behind it, when a PDF comes.
 async function importFiles(fileList) {
-  const files = [...fileList].filter(f => /\.html?$/i.test(f.name));
-  if (!files.length) return notify('Only .html files can be imported.');
-  const failed = [];
-  let last;
+  const files = [...fileList].filter(f => /\.(html?|pdf)$/i.test(f.name));
+  if (!files.length) return notify('Only .html and .pdf files can be imported.');
+  const failed = [], into = folder; // the folder shown when the import began: a PDF takes a while
+  let last, slow = false;
   for (const file of files) {
     try {
+      const pdf = /\.pdf$/i.test(file.name);
       const doc = {
         id: newId(),
-        name: file.name.replace(/\.html?$/i, ''),
-        html: await file.text(), // ponytail: assumes UTF-8; sniff <meta charset> if legacy encodings matter
+        name: file.name.replace(/\.(html?|pdf)$/i, ''),
+        html: pdf ? '' : await file.text(), // ponytail: assumes UTF-8; sniff <meta charset> if legacy encodings matter
         strokes: [],
         updatedAt: Date.now(),
       };
-      if (folder) doc.folder = folder.id; // imported inside a folder: it belongs there
-      await db.put(doc);
+      if (pdf) {
+        slow = true;
+        const { pdfPages } = await import('./pdfimport.js');
+        doc.pages = await pdfPages(file, (n, of) => notify(`Importing ${file.name}: page ${n} of ${of}`));
+      }
+      if (into) doc.folder = into.id; // imported inside a folder: it belongs there
+      await db.put(doc); // only now, whole: a PDF that fails part way leaves nothing behind
       last = doc;
-    } catch {
-      failed.push(file.name);
+    } catch (error) {
+      failed.push(error?.name === 'PasswordException' ? `${file.name} (it has a password)` : file.name);
     }
   }
   if (failed.length) notify(`Could not import: ${failed.join(', ')}`);
+  else if (slow) message.hidden = true; // the last "Importing ..."
+  if (current) return; // a note was opened meanwhile: what was imported is in the library
   if (files.length === 1 && last) return openDoc(last.id);
   search.value = ''; // or a search could hide what was just imported
   showLibrary();
@@ -689,7 +700,7 @@ function pinViewportUnits(doc) {
   const pin = style => {
     for (const prop of [...style]) {
       const value = style.getPropertyValue(prop);
-      const pinned = value.replace(/(-?\d*\.?\d+)[dsl]?v(?:h|b|max)\b/g, (_, n) => n * MIN_HEIGHT / 100 + 'px');
+      const pinned = pinUnits(value, MIN_HEIGHT); // export.js: an export shows the same
       if (pinned !== value) style.setProperty(prop, pinned, style.getPropertyPriority(prop));
     }
   };
@@ -1097,6 +1108,36 @@ nameInput.addEventListener('change', () => {
 });
 nameInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') nameInput.blur();
+});
+
+/* ---------- Export ---------- */
+
+// The open note with its ink, as a PDF. export.js makes one document of the two. The iPad app is
+// handed it, makes the file and offers it to be shared (ios/App/Exporter.swift), and says how that
+// went in an 'export' event. A browser prints it: its print dialog can save a PDF.
+const exportBtn = $('export-btn'), shellExport = window.webkit?.messageHandlers?.export;
+exportBtn.onclick = async () => {
+  exportBtn.disabled = true;
+  notify('Preparing the PDF…');
+  await new Promise(done => setTimeout(done, 50)); // let that be seen first: a long note takes a moment
+  let waiting = false;
+  try {
+    const { html, pages } = exportDoc(current, current.strokes || [], { document: frame.contentDocument, height: pageHeight, screen: MIN_HEIGHT });
+    if (shellExport) {
+      shellExport.postMessage({ name: current.name, html, pages });
+      waiting = true; // for the app's answer
+    } else {
+      await printDoc(html);
+      message.hidden = true;
+    }
+  } catch {
+    notify('The note could not be exported.');
+  }
+  exportBtn.disabled = waiting;
+};
+addEventListener('export', e => {
+  exportBtn.disabled = false;
+  notify(e.detail?.ok ? 'The PDF is ready.' : `The PDF could not be made${e.detail?.message ? `: ${e.detail.message}` : ''}.`);
 });
 
 /* ---------- Theme and full screen ---------- */

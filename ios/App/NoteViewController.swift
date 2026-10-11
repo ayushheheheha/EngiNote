@@ -19,10 +19,13 @@ import WebKit
 ///    message) and is sent the levels, or why not, as 'mic' events (Recorder.swift).
 ///  - The camera bubble (CameraBubble.swift), switched on and off and given its shape by the page
 ///    (the 'camera' message), which is told the outcome (a 'camera' event).
+///  - Exporting a note as a PDF (Exporter.swift): the page hands over the note with its ink as a
+///    document (the 'export' message), and is told when the PDF is ready or why not (an 'export' event).
 final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
     private var webView: WKWebView!
     private let recorder = Recorder()
     private let camera = CameraBubble()
+    private let exporter = Exporter()
 
     // A note-taking surface: no status bar, the home bar stays out of the way, and a swipe from
     // the bottom edge needs a second swipe, so writing near the edge does not leave the app.
@@ -41,6 +44,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "recordings")
         configuration.userContentController.add(self, name: "mic")
         configuration.userContentController.add(self, name: "camera")
+        configuration.userContentController.add(self, name: "export")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -177,7 +181,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         }
     }
 
-    /// The system's share sheet for a movie: save to Photos or Files, an editing app, AirDrop.
+    /// The system's share sheet for a file (a movie, an exported PDF): save to Photos or Files, another app, AirDrop.
     private func share(_ file: URL) {
         guard presentedViewController == nil else { return }
         let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
@@ -274,7 +278,39 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "recordings": recordings(body)
         case "mic": recorder.check(on: body["on"] as? Bool ?? false, enhance: body["enhance"] as? Bool ?? false)
         case "camera": showCamera(body)
+        case "export": export(body)
         default: break
+        }
+    }
+
+    // MARK: Exporting a note as a PDF
+
+    private func export(_ body: [String: Any]) {
+        guard let name = body["name"] as? String, let html = body["html"] as? String,
+              let pages = body["pages"] as? [NSNumber], !pages.isEmpty, pages.allSatisfy({ $0.doubleValue >= 1 }) else {
+            send("export", ["ok": false, "message": "the note could not be read"])
+            return
+        }
+        exporter.makePDF(html: html, heights: pages.map { CGFloat($0.doubleValue) }, under: view) { [weak self] data, problem in
+            guard let self = self else { return }
+            guard let data = data else {
+                self.send("export", ["ok": false, "message": problem ?? "nothing was made"])
+                return
+            }
+            // Written to a folder of its own, so that the file the user saves carries the note's name.
+            // ponytail: these temporary copies are left for iPadOS to clear, as the backups are.
+            let title = (name as NSString).lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let file = folder.appendingPathComponent((title.isEmpty ? "Note" : title) + ".pdf")
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try data.write(to: file)
+            } catch {
+                self.send("export", ["ok": false, "message": error.localizedDescription])
+                return
+            }
+            self.send("export", ["ok": true])
+            self.share(file) // save to Files, open in another app, AirDrop
         }
     }
 

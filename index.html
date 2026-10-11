@@ -66,20 +66,20 @@
         </div>
         <button id="new-folder" class="btn-secondary" type="button">New folder</button>
         <button id="new-notebook" class="btn-secondary" type="button">New notebook</button>
-        <button id="import-btn" class="btn-primary" type="button">Import HTML</button>
+        <button id="import-btn" class="btn-primary" type="button">Import</button>
       </div>
     </header>
     <main>
       <div id="grid">
         <button id="import-tile" type="button">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span>Import HTML</span>
+          <span>Import HTML or PDF</span>
           <small>or drop files here</small>
         </button>
       </div>
-      <p id="empty" hidden>No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.</p>
+      <p id="empty" hidden>No notes yet. Import an HTML or PDF file, or drop one anywhere on this page, to start annotating.</p>
     </main>
-    <input id="file-input" type="file" accept=".html,.htm,text/html" multiple hidden>
+    <input id="file-input" type="file" accept=".html,.htm,text/html,.pdf,application/pdf" multiple hidden>
     <input id="backup-input" type="file" accept=".json,application/json" hidden>
   </div>
 
@@ -214,6 +214,10 @@
           <button id="space-btn" class="icon-btn" type="button" aria-pressed="false"
             title="Add space: a blank page, or a gap in the note, with the ink below moving down" aria-label="Add space">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16M4 20h16M12 8v8M8 12h8"/></svg>
+          </button>
+          <!-- Export (export.js): the note with its ink, as a PDF. -->
+          <button id="export-btn" class="icon-btn" type="button" title="Export the note, with its ink, as a PDF" aria-label="Export as PDF">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
           </button>
           <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
