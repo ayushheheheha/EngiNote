@@ -1,4 +1,5 @@
 import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
+import { createLasso } from './lasso.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -700,6 +701,7 @@ const ink = createInk(svg, {
     current.strokes = strokes;
     touch();
     refreshHistory();
+    lasso.changed(); // undo, redo and the rest let go of what the lasso holds
   },
   onZoom: pinchMove, // two-finger pinch and pan
   onZoomEnd: pinchEnd,
@@ -707,6 +709,15 @@ const ink = createInk(svg, {
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
     if (autoDeselect() && tool === 'eraser') choose(beforeEraser);
   },
+});
+
+// The lasso (lasso.js): circle some ink, then move it, resize it, recolour it or delete it. Its bar
+// offers the colours of the pen panel, and keeps to the note's window, clear of the toolbar over its top.
+const lassoBar = $('lasso-bar');
+lassoBar.prepend(...[...document.querySelectorAll('#pen-colors [data-color]')].map(swatch => swatch.cloneNode(true)));
+const lasso = createLasso(svg, ink, lassoBar, () => {
+  const box = scroller.getBoundingClientRect();
+  return [box.left, box.top + restTop() - MARGIN, box.right, box.bottom];
 });
 
 function refreshHistory() {
@@ -831,10 +842,11 @@ function usePen(pen) {
   ink.setOpacity(pen.opacity);
 }
 
-// Make `value` the tool: 'eraser', 'hand' or a pen's id.
+// Make `value` the tool: 'eraser', 'hand', 'lasso' or a pen's id.
 function choose(value) {
   const pen = penOf(value);
-  if (!pen && value !== 'eraser' && value !== 'hand') return;
+  if (!pen && value !== 'eraser' && value !== 'hand' && value !== 'lasso') return;
+  if (value !== 'lasso') lasso.clear(); // what the lasso held is let go with it
   if (value === 'eraser' && tool !== 'eraser') beforeEraser = tool;
   if (value !== tool) showPanel(false);
   tool = value;
@@ -1017,6 +1029,7 @@ async function openDoc(id) {
 
 async function closeDoc() {
   await flush();
+  lasso.clear();
   current = null;
   frame.srcdoc = ''; // drop the document; also guarantees a reload if the same note is reopened
   showLibrary();
@@ -1195,7 +1208,7 @@ if (shellRecorder) {
 
 /* ---------- Keyboard ---------- */
 
-const TOOL_KEYS = { e: 'eraser', v: 'hand' }; // and 1 to 9: the pens, in tray order
+const TOOL_KEYS = { e: 'eraser', v: 'hand', l: 'lasso' }; // and 1 to 9: the pens, in tray order
 // The keys a browser scrolls with, as fractions of the window's height (the note is not a browser scroller: see the view section).
 const SCROLL_KEYS = { pagedown: 0.9, ' ': 0.9, pageup: -0.9, arrowdown: 0.12, arrowup: -0.12 };
 

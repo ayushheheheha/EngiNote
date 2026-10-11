@@ -649,6 +649,30 @@ body.wide #editor {
   height: 100%;
 }
 
+/* ---------- Lasso ---------- */
+
+/* The loop as it is drawn, then the box round what it took, with a handle on each corner. They are
+   drawn in the ink's own svg by lasso.js, which also sets their sizes: the same on screen at any zoom. */
+#ink .lasso { fill: none; stroke: var(--accent); }
+#ink circle.lasso { fill: #fff; }
+/* The bar by the box: a colour for the selected ink, or the bin. lasso.js places it, with `left` and
+   `top` alone. Its width is its content's: left to itself, a bar placed near the right edge would wrap. */
+#lasso-bar {
+  position: absolute;
+  z-index: 5;
+  width: -webkit-max-content;
+  width: max-content;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#lasso-delete { color: var(--danger); }
+/* Room for the Lasso button in the rail where the rail is shortest: the 16:9 window on an upright
+   screen (469px on an 11" iPad; the page's own box is the container while that window is on). Its
+   rows close up there, which is what lets a full tray of pens still fit. */
+@container (orientation: portrait) {
+  body.full #toolbar .strip:nth-child(2) { gap: 0; }
+}
+
 /* ---------- Full screen: the sheet gets the whole window, the tools become a thin rail on the right ---------- */
 
 body.full #editor { flex-direction: row-reverse; }

@@ -19,7 +19,7 @@ const GLOW_HALO = [[5, 0.1], [3.2, 0.16], [2, 0.26]];
 const GLOW_CORE = [0.35, 0.6];    // the pale line down the middle: width factor, opacity
 // The tools, each with its cursor. 'pen' draws an even line; 'flow' is the pen whose line swells and
 // thins as it is drawn; 'glow' is an even line with a halo.
-const CURSORS = { pen: 'crosshair', flow: 'crosshair', glow: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab' };
+const CURSORS = { pen: 'crosshair', flow: 'crosshair', glow: 'crosshair', highlighter: 'crosshair', eraser: 'cell', hand: 'grab', lasso: 'crosshair' };
 // How perfect-freehand shapes a flow stroke. thinning: how much pressure changes the width (at
 // pressure 0.5 the line is exactly `size` wide). streamline: how far the line lags the hand to
 // take the shake out. Chosen by eye in a browser: tune on the real device.
@@ -158,6 +158,10 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // While drawing, in screen px: `tip` is the last position reported, `soft` the smoothed point trailing
   // it (see SMOOTH), `kept` the last one that became a point of the stroke.
   let act = null;
+  // The lasso is a tool the engine only carries the pointer for. Which pointer may use it is decided
+  // here exactly as for a pen (so a palm can no more move ink than leave a mark); what its gesture
+  // does is lasso.js's business. `lasso` is its handler (see setLasso); its gesture is {id, touch, at, own}.
+  let lasso = null;
   const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
   let grab = null;          // the page point a two-finger gesture took hold of; it stays under the fingers' centre
   let zooming = false;      // onZoom has been called in the current two-finger gesture, so onZoomEnd is owed
@@ -198,6 +202,8 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   let eraserRadius = ERASER_RADIUS;
 
   function showNib(e) {
+    // The lasso has no tip to preview. (The eraser end of a stylus still erases with it, and shows its ring.)
+    if (tool === 'lasso' && !(act && act.before)) { nib.style.display = 'none'; return; }
     const erasing = act && !act.path;
     if (erasing && act.id !== e.pointerId) return;   // while erasing, only the eraser's own pointer moves the ring
     const hovering = !erasing && tool !== 'hand' && svg.contains(e.target) &&
@@ -300,6 +306,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const a = act;
     if (!a) return;
     act = null;
+    if (a.own) return lasso.up();
     if (a.path) {
       toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
       setData(a.path, strokeData(a.stroke));   // its finished shape
@@ -352,6 +359,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   function discard() {
     const a = act;
     act = null;
+    if (a.own) return lasso.cancel();
     if (a.path) a.path.remove();
     else if (strokes !== a.before) { strokes = a.before; render(); }
   }
@@ -425,6 +433,13 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       // `live`: has travelled PAN_SLOP from where it landed (ox, oy). A resting touch must not nudge the page.
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
       if (tool === 'hand') svg.style.cursor = 'grabbing';
+    } else if (tool === 'lasso' && lasso && !rubber) {
+      // Anywhere in the window, the margin included: a loop round ink at the sheet's edge starts off it.
+      finish();
+      const pt = toPoint(e);
+      if (!pt) return;
+      act = { id: e.pointerId, touch: isTouch, at: [e.clientX, e.clientY], own: true };
+      lasso.down(pt);
     } else {
       if (!svg.contains(e.target)) return;   // ink starts on the sheet, not on the margin around it
       finish();   // a previous gesture whose pointerup got lost must not block this one
@@ -485,6 +500,11 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (!act || act.id !== e.pointerId) return;
     const a = act;
     a.at = [e.clientX, e.clientY];
+    if (a.own) {
+      const pt = toPoint(e);
+      if (pt) lasso.move(pt);
+      return;
+    }
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     const pts = a.path && a.stroke.points;
     for (const ev of coalesced.length ? coalesced : [e]) {
@@ -598,6 +618,21 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (!strokes.length) return;
       const prev = strokes;
       strokes = [];
+      render();
+      commit(strokes, prev);
+    },
+    // The lasso tool's gestures go to `handler`, as page points: down(point) when a pointer that may
+    // draw lands, move(point) as it goes, then up() when it lifts, or cancel() if it turns out to
+    // have been a palm or the start of a pinch.
+    setLasso(handler) { lasso = handler; },
+    /** The element that draws a committed stroke: to show a change to it (a move, say) before it is made. */
+    elementOf: pathOf,
+    // Put `next` in place of the strokes, as one undo step: for a change made to them from outside.
+    // Strokes are never altered: a changed stroke is a new object in `next`, the others are the same ones.
+    replace(next) {
+      finish();
+      const prev = strokes;
+      strokes = next.slice();
       render();
       commit(strokes, prev);
     },
