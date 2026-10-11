@@ -1121,6 +1121,7 @@ const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
   const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');
   const recEnhance = $('rec-enhance'), recBar = $('rec-bar');
+  const recCount = $('rec-count'), recCheck = $('rec-check'), recWaves = $('rec-waves'), recCam = $('rec-cam'), recShape = $('rec-shape');
 
   // The bar changes shape: put away it is a dot in the corner, and its buttons come and go with the
   // recording. morph() makes any such change one movement. The change itself is made at once; the
@@ -1158,9 +1159,14 @@ if (shellRecorder) {
     $('rec-min').title = away ? 'Show the recording bar' : 'Put the recording bar away in the corner';
     $('rec-min').setAttribute('aria-label', $('rec-min').title);
   });
-  // Enhance: the voice with the background noise taken out. It needs the microphone, so it is out of reach without it.
-  const micOn = option($('rec-mic'), 'recMic', on => { recEnhance.disabled = !on || document.body.classList.contains('recording'); }, true);
+  // Enhance: the voice with the background noise taken out. It needs the microphone, so it is out of
+  // reach without it; and so is the mic check, whose picture then goes from the bar.
+  const micOn = option($('rec-mic'), 'recMic', on => morph(() => {
+    recEnhance.disabled = !on || document.body.classList.contains('recording');
+    recCheck.disabled = !on;
+  }), true);
   const enhanceOn = option(recEnhance, 'recEnhance');
+  const countOn = option($('rec-count-btn'), 'recCount', undefined, true); // 3, 2, 1 before a recording starts
   // 'idle', 'recording' or 'paused'. The clock counts recorded time only: `done` ms from before the
   // last pause, plus the time since `since` while it runs.
   let state = 'idle', done = 0, since = 0, ticker = 0;
@@ -1199,11 +1205,43 @@ if (shellRecorder) {
   }
 
   // Each button waits for the app's answer: starting asks the user's permission, stopping finishes the file.
-  recBtn.onclick = () => {
+  const ask = () => {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
       ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), wide: document.body.classList.contains('wide') }
       : { action: 'stop' });
+  };
+
+  // The countdown: 3, 2, 1 in the middle of the note, and only then is the app asked to record. So
+  // the video does not begin with a hand leaving the screen, and the countdown is never in it.
+  // Record, which reads Cancel meanwhile, calls it off; so does leaving the note.
+  let counting = 0, left = 0; // the countdown's timer while one runs, and the seconds still to go
+  function endCount() {
+    clearInterval(counting);
+    counting = 0;
+    recCount.hidden = true;
+    morph(() => { $('rec-label').textContent = 'Record'; });
+  }
+  function count() {
+    if (!document.body.classList.contains('editing')) return endCount();
+    if (!left) {
+      endCount();
+      return ask();
+    }
+    // Over the note's window, wherever that is just now (measured: it moves with full screen, 16:9 and the way the iPad is held).
+    const box = scroller.getBoundingClientRect();
+    Object.assign(recCount.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    // A new element each second, so that each numeral comes and goes afresh (style.css).
+    recCount.replaceChildren(Object.assign(document.createElement('span'), { textContent: left-- }));
+    recCount.hidden = false;
+  }
+  recBtn.onclick = () => {
+    if (counting) return endCount();
+    if (state !== 'idle' || !countOn()) return ask();
+    left = 3;
+    morph(() => { $('rec-label').textContent = 'Cancel'; });
+    count();
+    counting = setInterval(count, 1000);
   };
   recPause.onclick = () => {
     recBtn.disabled = recPause.disabled = true;
@@ -1216,6 +1254,76 @@ if (shellRecorder) {
     if (e.detail?.message) notify(e.detail.message);
     if (state === 'idle') askVideos(); // there may be a new one
   });
+
+  // Mic check: a small moving picture, in the bar, of what the microphone hears, as it would be
+  // recorded (through Enhance, if that is on). The app does the listening (Recorder.swift) and
+  // sends 'mic' events: about twenty levels a second, each from 0 (silence) to 1.
+  // It is never remembered: the microphone comes on because the user has just asked, not because
+  // of a setting from another day.
+  const BARS = 12; // each 3px wide and 2px apart: the picture's 58px (style.css)
+  const levels = []; // the last few heard, the newest last
+  function drawWaves() {
+    const c = recWaves.getContext('2d'), k = recWaves.width / 58, h = recWaves.height; // k: the picture's dots to a px
+    c.clearRect(0, 0, recWaves.width, h);
+    c.fillStyle = getComputedStyle(recWaves).color;
+    c.beginPath();
+    for (let i = 0; i < BARS; i++) {
+      const level = levels[levels.length - BARS + i] || 0; // what has not been heard yet is silence
+      const tall = Math.max(3 * k, Math.min(1, level) * h);
+      c.roundRect(i * 5 * k, (h - tall) / 2, 3 * k, tall, 1.5 * k);
+    }
+    c.fill();
+  }
+  function setCheck(on) {
+    recCheck.setAttribute('aria-pressed', on);
+    morph(() => recBar.classList.toggle('check', on));
+  }
+  recCheck.onclick = () => setCheck(recCheck.getAttribute('aria-pressed') !== 'true');
+  // The app listens exactly while the picture is in sight: switched on, the microphone not switched
+  // off, the bar there and not put away. Whatever changes that (or Enhance, which changes what is
+  // heard) shows as a class or a button's state, so those are watched, and the app told of any change.
+  const shellMic = window.webkit.messageHandlers.mic;
+  let asked = '';
+  function askMic() {
+    const on = recWaves.offsetWidth > 0;
+    const want = JSON.stringify(on ? { on, enhance: enhanceOn() } : { on });
+    if (want === asked) return;
+    asked = want;
+    levels.length = 0; // a fresh start: nothing left over from before, or from the other way of listening
+    drawWaves();
+    shellMic?.postMessage(JSON.parse(want));
+  }
+  const watcher = new MutationObserver(askMic);
+  watcher.observe(document.body, { attributeFilter: ['class'] });
+  watcher.observe(recBar, { attributeFilter: ['class', 'aria-pressed', 'disabled'], subtree: true });
+  askMic(); // not listening, to begin with: said, in case the page was loaded again while the app was
+  addEventListener('mic', e => {
+    if (e.detail?.on === false) { // the app cannot listen: the microphone refused, say
+      setCheck(false);
+      if (e.detail.message) notify(e.detail.message);
+    } else if (recWaves.offsetWidth && Array.isArray(e.detail?.levels)) { // out of sight, there is nothing to draw on
+      levels.push(...e.detail.levels.map(Number));
+      levels.splice(0, levels.length - BARS);
+      drawWaves();
+    }
+  });
+
+  // The camera bubble: the front camera's picture, floating over the app, moved and resized with
+  // the fingers. It is the app's own view (CameraBubble.swift; a page here cannot use the camera),
+  // and the app remembers where it is and its shape. The page only asks, and shows what the app
+  // answers in a 'camera' event: on or off (off with a message, if the camera was refused), and the shape.
+  const shellCamera = window.webkit.messageHandlers.camera;
+  const SHAPES = ['circle', 'square', 'wide', 'tall'];
+  recCam.onclick = () => shellCamera?.postMessage({ on: recCam.getAttribute('aria-pressed') !== 'true', shape: recShape.dataset.shape });
+  recShape.onclick = () => shellCamera?.postMessage({ on: true, shape: SHAPES[(SHAPES.indexOf(recShape.dataset.shape) + 1) % SHAPES.length] });
+  addEventListener('camera', e => {
+    const on = e.detail?.on === true;
+    if (SHAPES.includes(e.detail?.shape)) recShape.dataset.shape = e.detail.shape; // also changed by a double tap on the bubble
+    recCam.setAttribute('aria-pressed', on);
+    morph(() => recBar.classList.toggle('cam', on));
+    if (e.detail?.message) notify(e.detail.message);
+  });
+  shellCamera?.postMessage({ on: false }); // off, to begin with; the answer says which shape it has
 }
 
 /* ---------- Keyboard ---------- */

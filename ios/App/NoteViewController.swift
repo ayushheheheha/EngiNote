@@ -15,9 +15,14 @@ import WebKit
 ///    (the 'recorder' message), which is told how it goes (a 'recorder' event on its window).
 ///  - The recordings themselves: the page lists them as a folder, and asks for one to be played,
 ///    shared or deleted (the 'recordings' message; the list goes back as a 'recordings' event).
+///  - The mic check: the page asks to be shown how loud the microphone's sound is (the 'mic'
+///    message) and is sent the levels, or why not, as 'mic' events (Recorder.swift).
+///  - The camera bubble (CameraBubble.swift), switched on and off and given its shape by the page
+///    (the 'camera' message), which is told the outcome (a 'camera' event).
 final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
     private var webView: WKWebView!
     private let recorder = Recorder()
+    private let camera = CameraBubble()
 
     // A note-taking surface: no status bar, the home bar stays out of the way, and a swipe from
     // the bottom edge needs a second swipe, so writing near the edge does not leave the app.
@@ -34,6 +39,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "saveFile")
         configuration.userContentController.add(self, name: "recorder")
         configuration.userContentController.add(self, name: "recordings")
+        configuration.userContentController.add(self, name: "mic")
+        configuration.userContentController.add(self, name: "camera")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -48,14 +55,24 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         view.addSubview(webView)
+        view.addSubview(camera) // over the page; hidden until the page asks for it
 
         let pencil = UIPencilInteraction()
         pencil.delegate = self
         view.addInteraction(pencil)
 
         recorder.onFailure = { [weak self] message in self?.stopRecording(because: message) }
+        recorder.onLevels = { [weak self] levels in self?.send("mic", ["levels": levels]) }
+        recorder.onCheckFailed = { [weak self] reason in self?.send("mic", ["on": false, "message": reason]) }
+        camera.onNews = { [weak self] on, problem in
+            guard let self = self else { return }
+            var news: [String: Any] = ["on": on, "shape": self.camera.shape]
+            if let problem = problem { news["message"] = problem }
+            self.send("camera", news)
+        }
         // iPadOS stops handing over the screen once the app is no longer in front: close the movie properly.
         NotificationCenter.default.addObserver(self, selector: #selector(wentToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(cameBack), name: UIApplication.didBecomeActiveNotification, object: nil)
 
         webView.load(URLRequest(url: WebFiles.home))
     }
@@ -171,6 +188,30 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
 
     @objc private func wentToBackground() {
         if recorder.isActive { stopRecording(because: "the app was no longer on screen") }
+        recorder.leftScreen(true) // a mic check lets go of the microphone
+    }
+
+    // In front again (also after a system question or Control Centre, when there is nothing to do).
+    @objc private func cameBack() {
+        recorder.leftScreen(false)
+        camera.wake()
+    }
+
+    // The iPad turned, or the app's window resized: the camera bubble must still be wholly on screen.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        camera.place()
+    }
+
+    // MARK: The camera bubble
+
+    private func showCamera(_ body: [String: Any]) {
+        if let shape = body["shape"] as? String { camera.reshape(shape) } // a name it does not know changes nothing
+        if body["on"] as? Bool == true {
+            camera.turnOn()
+        } else {
+            camera.turnOff()
+        }
     }
 
     // MARK: The recordings folder
@@ -231,6 +272,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "saveFile": saveFile(body)
         case "recorder": record(body)
         case "recordings": recordings(body)
+        case "mic": recorder.check(on: body["on"] as? Bool ?? false, enhance: body["enhance"] as? Bool ?? false)
+        case "camera": showCamera(body)
         default: break
         }
     }
