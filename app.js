@@ -1116,11 +1116,13 @@ for (const btn of document.querySelectorAll('.theme-btn')) {
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const fullBtn = $('full-btn');
 function setFull(on) {
+  const atStart = pos[1] >= restTop(); // at the note's first line: it stays there, wherever that now is (below the toolbar, or at the top beside the rail)
   document.body.classList.toggle('full', on);
   fullBtn.setAttribute('aria-pressed', on);
   if (on && !isIOS && !document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch(() => {});
   if (!on && document.fullscreenElement) document.exitFullscreen();
   refit();
+  if (current && atStart) place([pos[0], restTop()]);
 }
 const toggleFull = () => setFull(!document.body.classList.contains('full'));
 fullBtn.onclick = toggleFull;
