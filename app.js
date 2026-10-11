@@ -181,7 +181,7 @@ function showVideos() {
 // One recording: tap to play it; save or share it; delete it.
 function makeVideoCard(video) {
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
-  const title = video.name.replace(/\.mov$/i, '');
+  const title = video.name.replace(/\.(mov|mp4)$/i, '');
   const act = action => askVideos({ action, name: video.name });
   const open = card.querySelector('.card-open');
   open.title = `Play "${title}"`;

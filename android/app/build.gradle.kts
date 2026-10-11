@@ -12,7 +12,7 @@ android {
         // and the signing key stay the same, so NEVER change either. (The same goes for the page
         // address in MainActivity.kt.)
         applicationId = "com.engikode.enginote"
-        minSdk = 26
+        minSdk = 29 // MediaStore without storage permissions, and the screen-capture service type
         targetSdk = 34
         versionCode = (System.getenv("BUILD_NUMBER") ?: "1").toInt()
         versionName = "1.0"
@@ -45,4 +45,8 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("androidx.camera:camera-core:1.3.4") // the camera bubble
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
 }
