@@ -58,6 +58,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         // scroll, bounce or inset it.
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = false // the page zooms notes itself; the library must not pinch-scale
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         view.addSubview(webView)
         view.addSubview(camera) // over the page; hidden until the page asks for it
