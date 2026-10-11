@@ -32,6 +32,11 @@ final class Recorder {
 
     /// Called on the main thread, once, if writing fails while recording.
     var onFailure: ((String) -> Void)?
+    /// The mic check. Called on the main thread about twenty times a second while the page is
+    /// showing the sound: how loud each twentieth of a second was, from 0 (silence) to 1.
+    var onLevels: (([Double]) -> Void)?
+    /// Called on the main thread when a mic check that was asked for cannot go on, with the reason.
+    var onCheckFailed: ((String) -> Void)?
 
     // Frames arrive on ReplayKit's own thread; everything below is touched only with the lock held.
     private let lock = NSLock()
@@ -51,6 +56,8 @@ final class Recorder {
     private var offset = CMTime.zero
     private var lastEnd = CMTime.zero
     private var soundPieces = 0 // pieces of sound written so far
+    private var metering = false // the page is showing the sound: see `checking`
+    private var heardAt: TimeInterval = 0 // when the microphone last handed over sound (the device's uptime)
 
     // The voice. The app listens to the microphone itself and writes what it hears into the movie;
     // ReplayKit records the picture only. (ReplayKit can pass on the microphone too, but on the
@@ -62,6 +69,34 @@ final class Recorder {
     // Main thread only:
     private let engine = AVAudioEngine()
     private var listening = false
+    private var enhanced = false // how it is listening, or last was
+    private var resumes = false // a mic check was cut short by the app leaving the screen: see leftScreen
+
+    // The mic check: the page shows how loud the microphone's sound is, before a recording or
+    // during one. It is the same listening, and there is only ever the one: a recording that
+    // starts while a check is on joins it, and one that ends leaves it running for the check.
+    // Nothing here may cost a recording its sound: unless the listening a check left behind is
+    // plainly what the recording wants, and alive, the recording starts its own, as it always did.
+    /// The page wants the levels. (Read where the sound arrives too, hence the lock.)
+    private var checking: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return metering
+        }
+        set {
+            lock.lock()
+            metering = newValue
+            lock.unlock()
+        }
+    }
+    // The level being worked out. Touched only where the sound arrives.
+    private var squares: Float = 0
+    private var counted = 0
+    /// What the page draws as silence and as full height, in decibels below the loudest sound the
+    /// microphone can report: the knobs to turn if the bars sit too low or too high on the real device.
+    private static let quietest: Float = -55
+    private static let loudest: Float = -5
     /// How much later (+) or earlier (-) the voice is written than it was heard: the knob
     /// to turn if voice and picture turn out not to line up on the real device.
     private static let voiceShift = CMTime(value: 0, timescale: 1000) // ms
@@ -121,8 +156,11 @@ final class Recorder {
                 guard let self = self else { return }
                 var note: String?
                 var own = false
-                if allowed {
+                if allowed, self.hears(enhanced: enhance) {
+                    own = true // a mic check is listening already, this very way: the recording joins it
+                } else if allowed {
                     do {
+                        self.stopListening() // a mic check listening some other way, or one gone quiet
                         try self.listen(enhanced: enhance)
                         own = true
                     } catch {
@@ -150,7 +188,7 @@ final class Recorder {
             url = folder.appendingPathComponent("EngiNote \(stamp.string(from: Date())).mov")
             writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         } catch {
-            stopListening()
+            stopListening(unlessChecking: true)
             done(error.localizedDescription, nil)
             return
         }
@@ -177,7 +215,7 @@ final class Recorder {
         }, completionHandler: { [weak self] error in
             if error != nil { self?.forget() }
             DispatchQueue.main.async {
-                if error != nil { self?.stopListening() }
+                if error != nil { self?.stopListening(unlessChecking: true) }
                 done(error?.localizedDescription, error == nil ? note : nil)
             }
         })
@@ -189,6 +227,7 @@ final class Recorder {
     /// heard goes to take(), like ReplayKit's own sound would; until a recording is running it is dropped there.
     private func listen(enhanced: Bool) throws {
         listening = true
+        self.enhanced = enhanced
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try session.setActive(true)
@@ -200,21 +239,112 @@ final class Recorder {
         }
         microphone.removeTap(onBus: 0)
         microphone.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] heard, time in
-            guard let self = self, let piece = Recorder.piece(from: heard, at: time) else { return }
-            self.take(piece, .audioMic)
+            guard let self = self else { return }
+            if let piece = Recorder.piece(from: heard, at: time) { self.take(piece, .audioMic) }
+            self.measure(heard) // for the mic check; after the recording has had its sound
         }
         engine.prepare()
         try engine.start()
     }
 
-    /// Stop listening, if listening. Safe to call at any time.
-    private func stopListening() {
-        guard listening else { return }
+    /// Stop listening, if listening. Safe to call at any time. `unlessChecking`: a recording is
+    /// done with the microphone, but a mic check on the page may still be using it.
+    private func stopListening(unlessChecking: Bool = false) {
+        guard listening, !(unlessChecking && checking) else { return }
         listening = false
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         try? engine.inputNode.setVoiceProcessingEnabled(false)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    // MARK: The mic check
+
+    /// Show the page how loud the microphone's sound is (onLevels), or stop. `enhance`: listen
+    /// through the voice processing, as a recording with Enhance would. During a recording the
+    /// sound is the recording's own, whatever `enhance` says.
+    func check(on: Bool, enhance: Bool) {
+        checking = on
+        guard on else {
+            if !isActive { stopListening() } // a recording still needs it
+            return
+        }
+        guard !isActive else { return } // a recording is listening already
+        AVAudioApplication.requestRecordPermission { [weak self] allowed in
+            DispatchQueue.main.async {
+                // Switched off again meanwhile, or a recording has begun: then there is nothing to start.
+                guard let self = self, self.checking, !self.isActive else { return }
+                guard allowed else {
+                    self.failCheck("EngiNote is not allowed to use the microphone (Settings > EngiNote).")
+                    return
+                }
+                if self.listening, self.enhanced == enhance, self.engine.isRunning { return } // as asked, already
+                do {
+                    self.stopListening() // Enhance was switched: listen the other way
+                    try self.listen(enhanced: enhance)
+                } catch {
+                    self.stopListening()
+                    self.failCheck("The microphone could not be started (\(error.localizedDescription)).")
+                }
+            }
+        }
+    }
+
+    private func failCheck(_ reason: String) {
+        checking = false
+        onCheckFailed?(reason)
+    }
+
+    /// The app has left the screen, where iPadOS does not let it listen (`away`), or is back: a
+    /// mic check lets go of the microphone, and takes it up again.
+    func leftScreen(_ away: Bool) {
+        if away {
+            resumes = listening && checking
+            stopListening()
+            return
+        }
+        let again = resumes
+        resumes = false
+        guard again, checking, !listening, !isActive else { return }
+        do {
+            try listen(enhanced: enhanced)
+        } catch {
+            stopListening()
+            failCheck("The mic check could not go on (\(error.localizedDescription)).")
+        }
+    }
+
+    /// The app is listening already, the way a recording now wants, and sound really is arriving.
+    private func hears(enhanced: Bool) -> Bool {
+        lock.lock()
+        let last = heardAt
+        lock.unlock()
+        return listening && self.enhanced == enhanced && engine.isRunning && ProcessInfo.processInfo.systemUptime - last < 0.5
+    }
+
+    /// Where the sound arrives: note that it did and, for a mic check, work out how loud each
+    /// twentieth of a second of it was and hand that to the main thread.
+    private func measure(_ heard: AVAudioPCMBuffer) {
+        lock.lock()
+        heardAt = ProcessInfo.processInfo.systemUptime
+        let wanted = metering
+        lock.unlock()
+        guard wanted, heard.frameLength > 0, let samples = heard.floatChannelData?[0] else { return }
+        let window = max(1, Int(heard.format.sampleRate / 20))
+        var levels: [Double] = []
+        for i in 0..<Int(heard.frameLength) {
+            squares += samples[i] * samples[i]
+            counted += 1
+            guard counted >= window else { continue }
+            // Loudness as the ear has it (decibels), from `quietest` to `loudest`, as 0 to 1.
+            let decibels = 10 * log10(max(squares / Float(counted), 1e-12))
+            let level = (decibels - Recorder.quietest) / (Recorder.loudest - Recorder.quietest)
+            levels.append(level.isFinite ? Double(min(max(level, 0), 1)) : 0)
+            squares = 0
+            counted = 0
+        }
+        guard !levels.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in self?.onLevels?(levels) }
     }
 
     /// What the microphone heard, as a piece of sound the movie can take, timed on the same clock
@@ -258,7 +388,7 @@ final class Recorder {
     /// Stop and finish the movie. `done` is called on the main thread with the file (nil if there
     /// is nothing to keep) and with what went wrong, if anything did.
     func stop(done: @escaping (URL?, String?) -> Void) {
-        stopListening()
+        stopListening(unlessChecking: true)
         RPScreenRecorder.shared().stopCapture { [weak self] error in
             guard let self = self else { return }
             self.lock.lock()
@@ -269,6 +399,11 @@ final class Recorder {
             let failure = self.failure
             self.writer = nil
             self.lock.unlock()
+            // A mic check switched off while the movie was being closed left the listening on: end
+            // it now. (Never the listening of a new recording: that one would be active by now.)
+            DispatchQueue.main.async {
+                if !self.isActive { self.stopListening(unlessChecking: true) }
+            }
 
             guard let writer = writer, video != nil, writer.status == .writing else {
                 // Nothing was being written, or writing had failed. A failed movie's finished pieces

@@ -55,5 +55,7 @@ targets:
         # the app's Documents folder, where the recordings are kept.
         NSMicrophoneUsageDescription: EngiNote records your voice with the screen when you make a recording.
         NSPhotoLibraryAddUsageDescription: EngiNote saves a recording to Photos when you choose to.
+        # The camera bubble (CameraBubble.swift).
+        NSCameraUsageDescription: EngiNote shows you in a camera bubble over your note when you switch it on.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true

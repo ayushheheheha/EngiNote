@@ -205,15 +205,31 @@
     <output id="rec-time" aria-label="Recorded so far">0:00:00</output>
     <button id="rec-btn" class="icon-btn chip" type="button" aria-pressed="false" title="Record a video: the 16:9 window if it is on, else the whole screen"><span class="rec-dot"></span><span id="rec-label">Record</span></button>
     <button id="rec-pause" class="icon-btn chip" type="button" aria-pressed="false" title="Pause: nothing is recorded until you resume">Pause</button>
+    <button id="rec-count-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Count down 3, 2, 1 before a recording starts" aria-label="Count down before recording">3s</button>
     <button id="rec-mic" class="icon-btn chip" type="button" aria-pressed="true" title="Record your voice with the screen" aria-label="Record the microphone">Mic</button>
     <button id="rec-enhance" class="icon-btn chip" type="button" aria-pressed="false" title="Enhance voice: take the background noise out of your voice" aria-label="Enhance voice">Enhance</button>
+    <!-- Mic check: switched on, the little picture beside it moves with what the microphone hears
+         (as it would be recorded: through Enhance, if that is on). It stays through a recording. -->
+    <button id="rec-check" class="icon-btn" type="button" aria-pressed="false" title="Mic check: show the sound the microphone is picking up" aria-label="Mic check">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/></svg>
+    </button>
+    <canvas id="rec-waves" width="116" height="56" aria-hidden="true"></canvas>
+    <!-- The camera bubble: the front camera's picture, floating over the app (the app draws it, not
+         the page: ios/App/CameraBubble.swift). The second button, there while the bubble is, changes its shape. -->
+    <button id="rec-cam" class="icon-btn" type="button" aria-pressed="false" title="Camera bubble: show yourself in a corner. Drag it to move it, pinch to resize" aria-label="Camera bubble">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>
+    </button>
+    <button id="rec-shape" class="icon-btn" type="button" data-shape="circle" title="Change the shape of the camera bubble" aria-label="Change the shape of the camera bubble"><span></span></button>
     <!-- The values are the names Recorder.swift knows. Sizes are what an hour comes to at most. -->
-    <select id="rec-quality" title="Video quality" aria-label="Video quality">
-      <option value="high">High: 1080p, up to 3.6 GB an hour</option>
-      <option value="standard" selected>Standard: 1080p, up to 1.8 GB an hour</option>
-      <option value="small">Small: 720p, up to 0.9 GB an hour</option>
+    <select id="rec-quality" title="Video quality, and the most an hour of it takes up" aria-label="Video quality">
+      <option value="high">High 1080p · 3.6 GB/h</option>
+      <option value="standard" selected>Standard 1080p · 1.8 GB/h</option>
+      <option value="small">Small 720p · 0.9 GB/h</option>
     </select>
   </div>
+
+  <!-- The countdown before a recording: app.js lays it over the note's window and puts 3, 2, 1 in it. -->
+  <div id="rec-count" role="status" aria-label="Recording starts in" hidden></div>
 
   <p id="message" role="status" hidden></p>
 
