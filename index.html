@@ -38,6 +38,20 @@
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         <input id="folder-name" type="text" title="Rename folder" aria-label="Folder name" autocomplete="off" spellcheck="false">
       </div>
+      <!-- Find a note by its name, and choose the order the notes are shown in. -->
+      <div id="lib-find" class="strip">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <input id="search" type="search" placeholder="Search notes" aria-label="Search notes by name" autocomplete="off" spellcheck="false" enterkeyhint="search">
+        <button id="search-clear" class="icon-btn" type="button" title="Clear the search" aria-label="Clear the search">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+        </button>
+        <span class="sep"></span>
+        <select id="sort" title="Order of the notes" aria-label="Order of the notes">
+          <option value="edited">Last edited</option>
+          <option value="name">Name</option>
+        </select>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10l4 4 4-4"/></svg>
+      </div>
       <div class="lib-actions">
         <button class="icon-btn theme-btn" type="button" title="Light / dark" aria-label="Switch between light and dark">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
@@ -149,6 +163,11 @@
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
         </button>
       </div>
+
+      <!-- The small arrow at the toolbar's edge: it puts the tools away, and brings them back (body.tools-off in style.css). -->
+      <button id="tools-toggle" type="button" aria-pressed="false">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
     </div>
 
     <!-- The window onto the note. It does not scroll: app.js moves #mover inside it and scales #page (see "the view" there). -->
@@ -242,6 +261,9 @@
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9.5 13h5M12.5 11l2 2-2 2"/></svg>
         <select aria-label="Move to a folder"></select>
       </label>
+      <button class="icon-btn card-copy" type="button" title="Duplicate note" aria-label="Duplicate note">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>
+      </button>
     </div>
   </template>
 

@@ -82,26 +82,48 @@ async function showLibrary() {
     empty.hidden = false;
     return;
   }
-  const folders = all.filter(d => d.type === 'folder')
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const notes = all.filter(d => d.type !== 'folder').sort((a, b) => b.updatedAt - a.updatedAt);
+  const folders = all.filter(d => d.type === 'folder').sort(byName);
+  const notes = all.filter(d => d.type !== 'folder').sort(sortBy.value === 'name' ? byName : (a, b) => b.updatedAt - a.updatedAt);
   const home = note => (folders.some(f => f.id === note.folder) ? note.folder : null); // null: the main library
   if (folder) folder = folders.find(f => f.id === folder.id) || null; // fresh copy; null if it was deleted
-  const here = notes.filter(note => home(note) === (folder ? folder.id : null));
+  // A search shows the notes with the typed words in their name and nothing else: no folders, no
+  // import tile. From the main library it looks in every folder too; in a folder, in that folder.
+  // (Read here, after the wait for storage: typing fast, every call then shows the latest words.)
+  const query = search.value.trim().toLowerCase();
+  const here = notes.filter(note => (query && !folder) || home(note) === (folder ? folder.id : null))
+    .filter(note => note.name.toLowerCase().includes(query));
 
   document.body.classList.toggle('in-folder', !!folder);
   folderName.value = folder ? folder.name : '';
   grid.replaceChildren(
-    importTile,
-    ...(folder || !shellVideos ? [] : [videosCard()]),
-    ...(folder ? [] : folders.map(f => makeFolderCard(f, notes.filter(note => home(note) === f.id).length))),
+    ...(query ? [] : [importTile]),
+    ...(folder || query || !shellVideos ? [] : [videosCard()]),
+    ...(folder || query ? [] : folders.map(f => makeFolderCard(f, notes.filter(note => home(note) === f.id).length))),
     ...here.map(note => makeCard(note, folders)),
   );
-  empty.textContent = folder
+  empty.textContent = query ? `No notes ${folder ? 'in this folder ' : ''}match "${search.value.trim()}".` : folder
     ? 'This folder is empty. Import an HTML file here, or move notes into it from the main library.'
     : 'No notes yet. Import an HTML file, or drop one anywhere on this page, to start annotating.';
-  empty.hidden = here.length > 0 || (!folder && (folders.length > 0 || !!shellVideos));
+  empty.hidden = here.length > 0 || (!query && !folder && (folders.length > 0 || !!shellVideos));
 }
+
+// Search and sort (the capsule in the library's bar). Both just show the library again.
+// ponytail: every keystroke makes the cards, and so their pictures, afresh. If typing ever drags in
+// a big library, keep the cards between calls and only hide the ones that do not match.
+const search = $('search'), sortBy = $('sort');
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }); // "Note 2" before "Note 10"
+try { sortBy.value = localStorage.getItem('sort') ?? sortBy.value; } catch { /* storage blocked */ }
+if (sortBy.selectedIndex < 0) sortBy.value = 'edited'; // a saved value this version does not offer
+sortBy.onchange = () => {
+  try { localStorage.setItem('sort', sortBy.value); } catch { /* lasts for this visit only */ }
+  showLibrary();
+};
+search.oninput = () => showLibrary();
+$('search-clear').onclick = () => {
+  search.value = '';
+  search.focus();
+  showLibrary();
+};
 
 /* Recordings (the iPad app only): the videos made with the recorder. The app keeps the files and
    does everything to them (ios/App/NoteViewController.swift); the library shows them as one more
@@ -177,6 +199,7 @@ function makeVideoCard(video) {
   save.innerHTML = SHARE_ICON;
   save.onclick = () => act('share');
   card.querySelector('.card-move').replaceWith(save);
+  card.querySelector('.card-copy').remove(); // a recording is the app's file, not a note
   return card;
 }
 
@@ -242,6 +265,8 @@ new ResizeObserver(() => {
 function makeCard(doc, folders) {
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
   const open = card.querySelector('.card-open');
+  const at = folders.find(f => f.id === doc.folder); // the folder this note is in, if any
+  card.dataset.id = doc.id;
   open.title = doc.name;
   open.onclick = () => openDoc(doc.id);
   const picture = document.createElement('div');
@@ -251,17 +276,19 @@ function makeCard(doc, folders) {
   card.querySelector('.card-thumb').append(picture); // over the blank sheet; a tap on it goes through to the card
   card.classList.add('pictured');
   card.querySelector('.card-name').textContent = doc.name;
-  card.querySelector('.card-date').textContent =
+  // Only a search shows a note outside its folder: the card then says which one it is in.
+  card.querySelector('.card-date').textContent = (at && !folder ? `In ${at.name} · ` : '') +
     new Date(doc.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   card.querySelector('.card-delete').onclick = async () => {
     if (!confirm(`Delete "${doc.name}"? This cannot be undone.`)) return;
     await db.del(doc.id).catch(() => notify('Could not delete the note.'));
     showLibrary();
   };
+  card.querySelector('.card-copy').onclick = () => duplicate(doc);
 
   // Moving is a native <select>, so a tablet shows its own picker: the places this note is not in.
   const move = card.querySelector('.card-move'), select = move.querySelector('select');
-  const places = [...(folder ? [{ id: '', name: 'Main library' }] : []), ...folders.filter(f => f.id !== folder?.id)];
+  const places = [...(at ? [{ id: '', name: 'Main library' }] : []), ...folders.filter(f => f !== at)];
   move.hidden = places.length === 0;
   select.replaceChildren(new Option('Move to…', '', true, true), ...places.map(p => new Option(p.name, p.id)));
   select.options[0].disabled = true;
@@ -273,6 +300,22 @@ function makeCard(doc, folders) {
     showLibrary();
   };
   return card;
+}
+
+// A copy of a note, beside it: all that the note holds, whatever fields those are, under an id and
+// a name of its own ("copy", then "copy 2", ...). The library shows it; it is not opened.
+async function duplicate(doc) {
+  const copy = { ...doc, id: newId(), updatedAt: Date.now() }; // storage writes it out in full, so the two share nothing
+  try {
+    const taken = new Set((await db.all()).map(d => d.name));
+    copy.name = `${doc.name} copy`;
+    for (let n = 2; taken.has(copy.name); n++) copy.name = `${doc.name} copy ${n}`;
+    await db.put(copy);
+  } catch {
+    return notify('Could not duplicate the note.');
+  }
+  await showLibrary();
+  [...grid.children].find(card => card.dataset.id === copy.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function makeFolderCard(f, count) {
@@ -302,6 +345,7 @@ $('new-folder').onclick = async () => {
     return notify('Could not create the folder.');
   }
   folder = made;
+  search.value = ''; // a search would be looking in the new, empty folder
   await showLibrary();
   folderName.focus(); // straight into naming it
   folderName.select();
@@ -426,8 +470,9 @@ async function importFiles(fileList) {
     }
   }
   if (failed.length) notify(`Could not import: ${failed.join(', ')}`);
-  if (files.length === 1 && last) openDoc(last.id);
-  else showLibrary();
+  if (files.length === 1 && last) return openDoc(last.id);
+  search.value = ''; // or a search could hide what was just imported
+  showLibrary();
 }
 
 $('import-btn').onclick = importTile.onclick = () => fileInput.click();
@@ -467,7 +512,7 @@ const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 // (style.css). So the sheet's resting place, at the start of the note, is below the toolbar. In
 // full screen the tools are a rail beside the window, and nothing is in the way.
 const toolbar = $('toolbar');
-const restTop = () => MARGIN + (document.body.classList.contains('full') ? 0 : toolbar.offsetHeight);
+const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const showZoom = (value = zoom) => { $('zoom-label').textContent = Math.round(value * 100) + '%'; };
@@ -1024,6 +1069,23 @@ wideBtn.onclick = () => {
   wideBtn.setAttribute('aria-pressed', document.body.classList.toggle('wide'));
   refit();
 };
+
+// The small arrow at the toolbar's edge puts the tools away and brings them back (body.tools-off in
+// style.css). Only the user does this, and the device remembers it.
+const toolsBtn = $('tools-toggle');
+option(toolsBtn, 'toolsOff', off => {
+  const atStart = pos[1] >= restTop(); // at the note's first line: it stays there, wherever that now is
+  document.body.classList.toggle('tools-off', off);
+  toolsBtn.title = off ? 'Show the toolbar' : 'Hide the toolbar';
+  toolsBtn.setAttribute('aria-label', toolsBtn.title);
+  if (off) { // nothing that hangs from the toolbar stays behind
+    showPanel(false);
+    eraserFly.set(false);
+    addFly.set(false);
+  }
+  refit();
+  if (current && atStart) place([pos[0], restTop()]);
+});
 
 /* ---------- Screen recording (the iPad app only) ---------- */
 
