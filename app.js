@@ -1,5 +1,8 @@
 import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
 import { createLasso } from './lasso.js';
+import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps } from './pages.js';
+import { askNotebook } from './notebook.js';
+import { createSpace } from './space.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -229,7 +232,7 @@ function fillPreview(box, doc) {
   frame.tabIndex = -1;
   frame.title = '';
   frame.onload = () => box.classList.add('ready');
-  frame.srcdoc = doc.html;
+  frame.srcdoc = noteHtml(doc); // the note as it is shown (pages.js): a notebook's pages, a file with its gaps
 
   // The ink: only strokes that begin in the part of the note the card shows, drawn plainly
   // (a glow stroke without its halo). The viewBox is a square as wide as the page, cut to the card
@@ -352,6 +355,21 @@ $('new-folder').onclick = async () => {
   folderName.select();
 };
 
+// A blank note is a notebook: real pages of the paper chosen in the dialog (notebook.js), kept as
+// pages and not as HTML (pages.js). It starts with one page, and is made where the library is.
+$('new-notebook').onclick = async () => {
+  const chosen = await askNotebook();
+  if (!chosen) return;
+  const doc = { id: newId(), name: chosen.name, html: '', strokes: [], updatedAt: Date.now(), pages: [{ h: paperHeight(chosen.paper) }], paper: chosen.paper };
+  if (folder) doc.folder = folder.id;
+  try {
+    await db.put(doc);
+  } catch {
+    return notify('Could not create the notebook.');
+  }
+  openDoc(doc.id);
+};
+
 $('folder-back').onclick = () => {
   folder = null;
   inVideos = false;
@@ -406,6 +424,10 @@ function fromBackup(d) {
   if (typeof d.html !== 'string' || !Array.isArray(d.strokes)) return null;
   const note = { id: d.id, name: d.name, html: d.html, strokes: d.strokes, updatedAt: d.updatedAt };
   if (typeof d.folder === 'string') note.folder = d.folder;
+  // A paged note (pages.js): its pages and paper, and no HTML of its own. Any other may have gaps.
+  const pages = cleanPages(d.pages), gaps = cleanGaps(d.gaps);
+  if (pages) Object.assign(note, { html: '', pages }, d.paper ? { paper: cleanPaper(d.paper) } : {});
+  else if (gaps) note.gaps = gaps;
   return note;
 }
 
@@ -689,8 +711,18 @@ frame.addEventListener('load', () => {
   const doc = frame.contentDocument; // null if the document navigated itself cross-origin (meta refresh)
   if (!current || !doc?.documentElement) return;
   pinViewportUnits(doc);
-  setPageHeight(Math.max(MIN_HEIGHT, doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0));
+  space.loaded(); // the Add space mode (space.js) finds the note's gaps in it
+  measure();
 });
+
+// Make the sheet as tall as the open note is: a paged note, its pages; a file, what is in it. Also
+// called when the note grows or shrinks while it is open (a page added, a gap opened or closed).
+function measure() {
+  if (current.pages) return setPageHeight(pagesHeight(current));
+  const doc = frame.contentDocument;
+  frame.style.height = MIN_HEIGHT + 'px'; // a document never measures less than the frame it is in: so one that got shorter is measured in a short frame
+  setPageHeight(Math.max(MIN_HEIGHT, doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0));
+}
 
 /* ---------- Editor: ink, tools, saving ---------- */
 
@@ -699,6 +731,12 @@ const ink = createInk(svg, {
   scroller: { scrollBy: ({ left = 0, top = 0 }) => panBy(left, top) }, // ink.js scrolls through this; see the view section
   onChange(strokes) {
     current.strokes = strokes;
+    // A notebook always has a blank page ahead: ink on its last page brings the next one (pages.js).
+    if (current.pages && needsPage(current, strokes)) {
+      addPage(current, undefined, frame.contentDocument);
+      measure();
+    }
+    space.refresh(); // what can be removed in the Add space mode depends on where the ink is
     touch();
     refreshHistory();
     lasso.changed(); // undo, redo and the rest let go of what the lasso holds
@@ -719,6 +757,8 @@ const lasso = createLasso(svg, ink, lassoBar, () => {
   const box = scroller.getBoundingClientRect();
   return [box.left, box.top + restTop() - MARGIN, box.right, box.bottom];
 });
+// "Add space": a blank page put into a paged note, a gap opened in a file (space.js).
+const space = createSpace({ button: $('space-btn'), mover, frame, ink, note: () => current, resize: measure });
 
 function refreshHistory() {
   undoBtn.disabled = !ink.canUndo();
@@ -1031,8 +1071,9 @@ async function openDoc(id) {
   current = doc;
   document.body.classList.add('editing'); // must be visible before fitZoom() measures the scroller
   nameInput.value = doc.name;
-  setPageHeight(MIN_HEIGHT);              // reset before load so the last note's height can't inflate the measurement
-  frame.srcdoc = doc.html;
+  space.set(false);
+  setPageHeight(doc.pages ? pagesHeight(doc) : MIN_HEIGHT); // a file: reset before load so the last note's height can't inflate the measurement
+  frame.srcdoc = noteHtml(doc);
   ink.load(doc.strokes || []);
   refreshHistory();
   lastFit = fitZoom();

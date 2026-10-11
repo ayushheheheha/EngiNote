@@ -108,6 +108,9 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `ink.js` | The ink engine: pointer input, palm rejection, strokes, eraser, undo |
 | `shapes.js` | Recognising a hand-drawn line, circle, rectangle or triangle |
 | `lasso.js` | The lasso: selecting ink and moving, resizing, recolouring or deleting it |
+| `pages.js` | Paged notes: the page model and the HTML made from it |
+| `notebook.js` | The "New notebook" dialog |
+| `space.js` | "Add space": a blank page in a paged note, a gap in an HTML note |
 | `perfect-freehand.js` | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) 1.2.3, which shapes the flow pen's strokes |
 | `ink.test.html` | Tests for the ink engine |
 | `sample.html` | A note to try the app with |
