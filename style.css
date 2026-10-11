@@ -187,92 +187,196 @@ body.editing #library { display: none; }
   #zoom-label:hover,
   #note-name:hover,
   #folder-name:hover { background-color: var(--fill); }
-  .card-delete:hover { color: var(--danger); }
-  .card-move:hover { color: var(--accent); }
   .btn-secondary:hover { filter: brightness(1.04); }
-  .card:hover { transform: translateY(-3px); box-shadow: var(--rim), 0 2px 4px rgb(20 25 40 / .08), 0 18px 40px rgb(20 25 40 / .2); }
-  #import-tile:hover { border-color: var(--accent); color: var(--accent); }
+  .side-item:not(.on):hover, #tabs button:not([aria-pressed="true"]):hover { background: var(--fill); }
 }
 
 /* ---------- Library ---------- */
 
-/* Soft coloured light behind the library, for the glass to pick up. */
+/* A notes app's shell: a sidebar of places on the left, the notes on the right, and the notes are
+   the colour. Flat and quiet, no glass: nothing is behind it to blur. */
 #library {
-  min-height: 100vh;
-  min-height: 100dvh;
-  background:
-    radial-gradient(900px 540px at 6% -6%, var(--glow-a), transparent 70%),
-    radial-gradient(760px 480px at 100% 4%, var(--glow-b), transparent 70%),
-    radial-gradient(900px 600px at 70% 110%, var(--glow-c), transparent 70%);
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--canvas);
+  overflow: hidden;
 }
-.lib-bar {
+#side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 268px;
+  padding: 14px 12px 12px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+body.side-hidden #side { display: none; }
+.side-top { display: flex; align-items: center; gap: 2px; padding: 2px 0 8px; }
+.side-top .mark { height: 17px; margin: 0 9px 0 10px; }
+.side-brand { flex: 1; font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+.side-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; }
+#side-folders { display: flex; flex-direction: column; gap: 2px; }
+.side-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
+  width: 100%;
+  height: 46px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 13px;
+  background: none;
+  text-align: left;
+  font-size: 15px;
+  color: var(--text);
+}
+.side-item.sub { height: 42px; padding-left: 14px; }
+.side-item .icon { flex: none; width: 19px; height: 19px; color: var(--muted); }
+.side-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-count { flex: none; font-size: 12px; font-weight: 500; color: var(--muted); }
+.side-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.side-item.on .icon, .side-item.on .side-count { color: var(--accent); }
+.side-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 22px 28px 14px;
+  margin-top: 12px;
+  padding: 0 2px 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
-.lib-bar h1 { display: flex; align-items: center; gap: 13px; margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -.025em; }
-/* The logo mark: a height only, so it always keeps its own proportions. */
-.mark { height: 24px; width: auto; flex: none; fill: currentColor; }
-.lib-actions { display: flex; align-items: center; gap: 10px; }
+.side-foot { padding-top: 8px; border-top: 1px solid var(--border); }
+#backup-wrap { display: block; }
+#backup-wrap .flyout { top: auto; bottom: calc(100% + 8px); left: 6px; --at: translate(0); transform-origin: 0 100%; }
 
-/* A folder is open: its bar (back, name) stands in for the title, and folders cannot be made inside folders. */
-#folder-bar { gap: 4px; padding-right: 8px; }
-#folder-bar > .icon { flex: none; margin-left: 4px; color: var(--muted); }
-body:not(.in-folder) #folder-bar,
-body.in-folder .lib-bar h1,
-body.in-folder #new-folder { display: none; }
+#lib-main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+.lib-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 24px 8px;
+  background: var(--canvas);
+}
+#side-show { display: none; }
+body.side-hidden #side-show { display: grid; margin-left: -8px; }
+/* The title: the folder's name, large; typed over when it is a folder's. */
+#folder-bar { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1; }
+#folder-bar #folder-name { flex: 0 1 auto; width: min(50vw, 420px); min-width: 0; max-width: 100%; height: 44px; padding: 0 10px; font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+@supports (field-sizing: content) { #folder-bar #folder-name { width: auto; field-sizing: content; } }
+#folder-bar #folder-name:read-only { pointer-events: none; }
+body:not(.in-folder) #folder-back, body:not(.in-folder) #folder-delete, body.in-videos #folder-delete { display: none; }
+body:not(.in-folder) #folder-bar #folder-name { padding-left: 0; }
+body.side-hidden:not(.in-folder) #folder-bar #folder-name { padding-left: 4px; }
+.lib-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+#add-note { background: var(--accent); color: #fff; box-shadow: 0 6px 16px rgb(47 111 237 / .35); }
+#add-note-wrap .flyout { top: calc(100% + 8px); left: auto; right: 0; --at: translate(0); transform-origin: 100% 0; }
+body.in-videos #add-note-wrap { display: none; } /* nothing is made in the recordings folder */
 
+/* Search: a capsule that takes what room there is. */
+#lib-find { display: flex; align-items: center; width: min(280px, 34vw); height: var(--hit); padding-left: 12px; border-radius: 999px; background: var(--fill); }
+#lib-find > .icon { flex: none; color: var(--muted); }
+#search {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: var(--hit);
+  padding: 0 8px;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none; /* no search-field look and no arrow of the browser's */
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* under 16px iOS zooms the page on focus */
+}
+/* The button that clears the field is ours, so that every device has one; it is there when there is something to clear. */
+#search::-webkit-search-cancel-button, #search::-webkit-search-decoration { display: none; }
+#search:placeholder-shown + #search-clear { display: none; }
+#search:focus-visible { outline: none; }
+#lib-find:has(#search:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; } /* the whole capsule is the field */
+body.in-videos #lib-find { display: none; } /* recordings are not notes */
+
+/* The tabs, and the order. */
+.lib-tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 24px 6px; }
+#tabs { display: flex; gap: 4px; }
+#tabs button { height: 32px; padding: 0 14px; border: 0; border-radius: 999px; background: none; font-size: 14px; font-weight: 500; color: var(--muted); }
+#tabs button[aria-pressed="true"] { background: var(--fill); color: var(--text); font-weight: 600; }
+body.in-videos .lib-tabs { visibility: hidden; }
+#sort-wrap { display: flex; align-items: center; color: var(--muted); }
+#sort {
+  height: 32px;
+  padding: 0 24px 0 8px;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none; /* the device's own picker still opens */
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* under 16px iOS zooms the page on focus */
+  cursor: pointer;
+}
+#sort + .icon { width: 16px; height: 16px; margin-left: -24px; pointer-events: none; }
+
+/* The notes: portrait pictures, each with its name under it. */
 #grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  gap: 22px;
-  padding: 10px 28px 32px;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 26px 22px;
+  padding: 14px 24px 40px;
 }
-
+/* "Create": the first place in the grid, and a blank page to start on. */
 #import-tile {
   display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 4px;
-  min-height: 196px;
-  border: 1.5px dashed var(--faint);
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, var(--sheen), transparent 60%);
+  align-content: start;
+  justify-items: stretch;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
 }
-#import-tile small { font-weight: 400; }
+.create-plus {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: #fff;
+}
+.create-plus .icon { box-sizing: content-box; width: 22px; height: 22px; padding: 12px; border-radius: 50%; background: var(--accent); stroke-width: 2.2; }
+.create-label { font-size: 13px; text-align: center; }
 
-/* A card is thick glass with no blur of its own: there may be a whole page of them, and nothing passes behind. */
-.card {
-  position: relative;
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, var(--sheen), transparent 55%), var(--glass-thick);
-  box-shadow: var(--rim), var(--float);
-}
+.card { position: relative; }
 .card-open {
   display: block;
   width: 100%;
-  height: 100%;
   padding: 0;
   border: 0;
-  border-radius: inherit;
+  border-radius: 12px;
   background: none;
-  text-align: left;
+  text-align: center;
 }
 .card-thumb {
   position: relative;
   display: grid;
   place-items: center;
-  height: 122px;
-  margin: 7px 7px 0;
+  aspect-ratio: 3 / 4;
   overflow: hidden;
-  border-radius: 16px; /* the card's corner, less the gap around this */
+  border-radius: 12px;
   background: var(--thumb);
-  box-shadow: inset 0 0 0 1px rgb(128 128 128 / .1);
+  box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgb(0 0 0 / .18);
   color: var(--faint);
 }
 .card-thumb .icon { width: 40px; height: 40px; stroke-width: 1.2; }
@@ -287,79 +391,67 @@ body.in-folder #new-folder { display: none; }
   pointer-events: none;
   opacity: 0;
   transition: opacity .3s;
-  box-shadow: inset 0 0 0 1px rgb(128 128 128 / .18);
 }
 .card-preview.ready { opacity: 1; }
 .card-preview iframe {
   display: block;
-  width: 900px; /* PAGE_WIDTH in app.js */
-  height: calc(122px / var(--thumb-scale, .2));
+  width: 900px;  /* PAGE_WIDTH in app.js */
+  height: 1200px; /* and THUMB_H: the card's picture is three to four */
   border: 0;
   background: #fff;
   transform: scale(var(--thumb-scale, .2));
   transform-origin: 0 0;
 }
 .card-preview svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-/* Over a picture the card's two buttons need a ground of their own to be seen on. */
-.card.pictured .card-delete, .card.pictured .card-move, .card.pictured .card-copy {
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: 0 1px 4px rgb(0 0 0 / .18);
+.card-name, .card-date { display: block; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-name { margin-top: 10px; font-size: 13px; font-weight: 500; }
+.card-date { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+
+/* "More": a small button in the picture's corner, and the card's three actions in a bar over its foot. */
+.card-more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  --hit: 30px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / .2);
   color: var(--text);
 }
-.card-name, .card-date { display: block; padding: 0 16px; }
-.card-name {
-  margin-top: 10px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.card-more .icon { width: 18px; height: 18px; stroke-width: 2.4; }
+.card-actions {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  display: none;
+  justify-content: space-around;
+  bottom: 56px; /* over the foot of the picture: the name and date under it are about this tall */
+  padding: 4px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / .3);
 }
-.card-date { margin: 2px 0 14px; font-size: 12px; color: var(--muted); }
-.card-delete { position: absolute; top: 11px; right: 11px; color: var(--muted); }
+.card.acting .card-actions { display: flex; }
+.card-actions .icon-btn { position: relative; color: var(--text); }
+.card-delete:hover { color: var(--danger); }
+.card-delete { color: var(--danger); }
 /* "Move to a folder": an icon with an invisible native <select> stretched over it. */
-.card-move { position: absolute; top: 11px; right: calc(13px + var(--hit)); color: var(--muted); cursor: pointer; }
+.card-move { cursor: pointer; }
 .card-move select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; /* under 16px iOS zooms the page on focus */ }
-.card.folder .card-thumb { color: var(--accent); background: linear-gradient(160deg, rgb(47 111 237 / .2), rgb(47 111 237 / .08)); }
-/* The recordings folder (the iPad app): its own colour, and nothing can be imported or made inside it. */
-.card.videos .card-thumb { color: #ff3b30; background: linear-gradient(160deg, rgb(255 59 48 / .2), rgb(255 59 48 / .07)); }
-body.in-videos #import-btn { display: none; }
+.card-move[hidden] { display: none; }
+/* The recordings: their own colour on the picture's ground. */
+/* The menus over the notes are solid: the notes behind them must not show through the words. */
+#add-note-wrap .flyout, #backup-wrap .flyout { background: var(--surface); }
+.card.video .card-date { white-space: normal; }
+.card.video .card-thumb { color: #ff3b30; background: linear-gradient(160deg, rgb(255 59 48 / .2), rgb(255 59 48 / .07)); }
 
 #empty { margin: 8px 24px 32px; text-align: center; color: var(--muted); }
 
-/* Search and sort: one capsule of glass in the bar, between the title and the buttons. It takes
-   what room there is. On a narrow screen the bar wraps (the buttons go to a row of their own, and
-   on a very narrow one wrap among themselves) rather than run off the edge. */
-#lib-find { flex: 1 1 300px; max-width: 440px; flex-wrap: nowrap; padding-left: 14px; }
-#lib-find > .icon { flex: none; color: var(--muted); }
-.lib-actions { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
-#search, #sort {
-  height: var(--hit);
-  border: 0;
-  border-radius: 999px;
-  -webkit-appearance: none;
-  appearance: none; /* no search-field look and no arrow of the browser's; the device's own picker still opens */
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 16px; /* under 16px iOS zooms the page on focus */
-}
-#search { flex: 1; width: 0; min-width: 0; padding: 0 8px; }
-/* The button that clears the field is ours, so that every device has one; it is there when there is something to clear. */
-#search::-webkit-search-cancel-button, #search::-webkit-search-decoration { display: none; }
-#search:placeholder-shown + #search-clear { display: none; }
-#search:focus-visible { outline: none; }
-#lib-find:has(#search:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; } /* the whole capsule is the field */
-/* The little arrow after the order is a picture laid on the select's own right end: a tap there goes to the select. */
-#sort { flex: none; padding: 0 32px 0 6px; color: var(--muted); cursor: pointer; }
-#sort + .icon { width: 16px; height: 16px; margin: 0 10px 0 -28px; pointer-events: none; }
-body.in-videos #lib-find { display: none; } /* recordings are not notes */
-/* A note found in a folder says so before its date: the line is cut short rather than wrapped. */
-.card-date { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Duplicate: left of "move"; where there is no folder to move to, in its place. */
-.card-copy { position: absolute; top: 11px; right: calc(15px + 2 * var(--hit)); color: var(--muted); }
-.card-move[hidden] + .card-copy { right: calc(13px + var(--hit)); }
-@media (hover: hover) {
-  .card-copy:hover { color: var(--accent); }
+/* Where there is no room for the sidebar beside the notes, it comes over them. */
+@media (max-width: 899px) {
+  #side { position: fixed; inset: 0 auto 0 0; z-index: 20; box-shadow: var(--float); }
+  .lib-bar, .lib-tabs, #grid { padding-left: 16px; padding-right: 16px; }
+  #side-show { display: grid; margin-left: -6px; }
+  #lib-find { width: min(220px, 36vw); }
 }
 
 /* ---------- Editor ---------- */
@@ -829,7 +921,6 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
 @media (prefers-reduced-motion: reduce) {
   #notebook[open] { animation: none; }
 }
-body.in-videos #new-notebook { display: none; } /* nothing is made in the recordings folder */
 
 /* ---------- Add space (space.js) ---------- */
 

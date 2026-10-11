@@ -14,7 +14,7 @@ const $ = id => document.getElementById(id);
 const grid = $('grid'), importTile = $('import-tile'), empty = $('empty'), fileInput = $('file-input');
 const nameInput = $('note-name'), undoBtn = $('undo-btn'), redoBtn = $('redo-btn');
 const scroller = $('scroller'), mover = $('mover'), bar = $('scrollbar'), page = $('page'), frame = $('frame'), svg = $('ink');
-const message = $('message'), cardTemplate = $('card-template'), folderTemplate = $('folder-template'), folderName = $('folder-name');
+const message = $('message'), cardTemplate = $('card-template'), folderName = $('folder-name');
 
 // The Android app (android/) gives the page one doorway, window.AndroidShell, that takes JSON text:
 // { type: 'save', name, text } to keep a file, { type: 'print', name, html } to print or save a PDF.
@@ -77,12 +77,12 @@ let folder = null; // the folder the library is showing, or null for the main li
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2); // not crypto.randomUUID(): that needs a secure context, and a tablet on http://<lan-ip> is not one
 const plural = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : 'Empty');
 
+let tab = 'all'; // which notes the tabs show: all of them, the notebooks made here, or what was imported
+
 async function showLibrary() {
   document.body.classList.remove('editing');
   previews.disconnect(); // the cards are about to be made afresh
   document.body.classList.toggle('in-videos', inVideos);
-  folderName.readOnly = inVideos;
-  if (inVideos) return showVideos();
   let all;
   try {
     all = await db.all();
@@ -95,26 +95,85 @@ async function showLibrary() {
   const notes = all.filter(d => d.type !== 'folder').sort(sortBy.value === 'name' ? byName : (a, b) => b.updatedAt - a.updatedAt);
   const home = note => (folders.some(f => f.id === note.folder) ? note.folder : null); // null: the main library
   if (folder) folder = folders.find(f => f.id === folder.id) || null; // fresh copy; null if it was deleted
-  // A search shows the notes with the typed words in their name and nothing else: no folders, no
-  // import tile. From the main library it looks in every folder too; in a folder, in that folder.
+  drawSide(folders, notes, home);
+  if (inVideos) return showVideos();
+  // A search shows the notes with the typed words in their name and nothing else: no import tile.
+  // From the main library it looks in every folder too; in a folder, in that folder.
   // (Read here, after the wait for storage: typing fast, every call then shows the latest words.)
   const query = search.value.trim().toLowerCase();
   const here = notes.filter(note => (query && !folder) || home(note) === (folder ? folder.id : null))
-    .filter(note => note.name.toLowerCase().includes(query));
+    .filter(note => note.name.toLowerCase().includes(query))
+    .filter(note => tab === 'all' || (tab === 'notebook') === !!note.paper); // a notebook is made here from a paper; the rest came in as files
 
   document.body.classList.toggle('in-folder', !!folder);
-  folderName.value = folder ? folder.name : '';
-  grid.replaceChildren(
-    ...(query ? [] : [importTile]),
-    ...(folder || query || !shellVideos ? [] : [videosCard()]),
-    ...(folder || query ? [] : folders.map(f => makeFolderCard(f, notes.filter(note => home(note) === f.id).length))),
-    ...here.map(note => makeCard(note, folders)),
-  );
-  empty.textContent = query ? `No notes ${folder ? 'in this folder ' : ''}match "${search.value.trim()}".` : folder
-    ? 'This folder is empty. Import an HTML or PDF file here, or move notes into it from the main library.'
-    : 'No notes yet. Import an HTML or PDF file, or drop one anywhere on this page, to start annotating.';
-  empty.hidden = here.length > 0 || (!query && !folder && (folders.length > 0 || !!shellVideos));
+  folderName.value = folder ? folder.name : query ? 'Search' : 'Unfiled';
+  folderName.readOnly = !folder;
+  grid.replaceChildren(...(query ? [] : [importTile]), ...here.map(note => makeCard(note, folders)));
+  empty.textContent = query ? `No notes ${folder ? 'in this folder ' : ''}match "${search.value.trim()}".`
+    : tab !== 'all' ? `No ${tab === 'notebook' ? 'notebooks' : 'imported notes'} here.`
+    : folder ? 'This folder is empty. Tap Create to start a notebook here, or move notes into it from Unfiled.'
+    : 'No notes yet. Tap Create to start a notebook, or import an HTML or PDF file with the + at the top.';
+  empty.hidden = here.length > 0;
 }
+
+// The sidebar: where the notes are kept, with how many each place holds, and where the library now is.
+const sideAll = $('side-all'), sideVideos = $('side-videos'), sideFolders = $('side-folders');
+const FOLDER_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+function drawSide(folders, notes, home) {
+  const count = (item, n) => { item.querySelector('.side-count').textContent = n || ''; };
+  count(sideAll, notes.filter(note => !home(note)).length);
+  sideAll.classList.toggle('on', !folder && !inVideos);
+  sideVideos.hidden = !shellVideos;
+  sideVideos.classList.toggle('on', inVideos);
+  count(sideVideos, videos.length);
+  sideFolders.replaceChildren(...folders.map(f => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'side-item sub';
+    item.classList.toggle('on', !inVideos && folder?.id === f.id);
+    item.innerHTML = `${FOLDER_ICON}<span></span><b class="side-count"></b>`;
+    item.querySelector('span').textContent = f.name;
+    count(item, notes.filter(note => note.folder === f.id).length);
+    item.onclick = () => goTo(f, false);
+    return item;
+  }));
+}
+// Go to a folder (null: Unfiled), or to the recordings. A narrow screen then puts the sidebar away.
+function goTo(where, videosToo) {
+  folder = where;
+  inVideos = videosToo;
+  search.value = ''; // a search would be looking in the wrong place
+  if (videosToo) askVideos();
+  leaveSide();
+  showLibrary();
+}
+sideAll.onclick = () => goTo(null, false);
+sideVideos.onclick = () => goTo(null, true);
+
+// The tabs above the notes.
+const tabs = $('tabs');
+tabs.onclick = e => {
+  const button = e.target.closest('[data-tab]');
+  if (!button) return;
+  tab = button.dataset.tab;
+  for (const b of tabs.children) b.setAttribute('aria-pressed', b === button);
+  showLibrary();
+};
+
+// The sidebar stays beside the notes where there is room; where there is not, it comes over them and
+// goes away again after a choice. Either way it can be hidden, and that is remembered.
+const narrow = matchMedia('(max-width: 899px)');
+function setSide(hidden, remember) {
+  document.body.classList.toggle('side-hidden', hidden);
+  if (remember) try { localStorage.setItem('sideHidden', hidden ? '1' : '0'); } catch { /* lasts for this visit only */ }
+}
+const leaveSide = () => { if (narrow.matches) setSide(true); };
+let savedSide = null;
+try { savedSide = localStorage.getItem('sideHidden'); } catch { /* storage blocked */ }
+setSide(savedSide === null ? narrow.matches : savedSide === '1');
+$('side-hide').onclick = () => setSide(true, true);
+$('side-show').onclick = () => setSide(false, true);
+$('lib-main').addEventListener('pointerdown', leaveSide);
 
 // Search and sort (the capsule in the library's bar). Both just show the library again.
 // ponytail: every keystroke makes the cards, and so their pictures, afresh. If typing ever drags in
@@ -154,25 +213,10 @@ const VIDEO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><re
 const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
 const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
-// The folder itself, in the main library.
-function videosCard() {
-  const card = folderTemplate.content.firstElementChild.cloneNode(true);
-  card.classList.add('videos');
-  card.querySelector('.card-open').onclick = () => {
-    inVideos = true;
-    askVideos();
-    showLibrary();
-  };
-  card.querySelector('.card-thumb').innerHTML = VIDEO_ICON;
-  card.querySelector('.card-name').textContent = 'Recordings';
-  card.querySelector('.card-date').textContent = plural(videos.length, 'video');
-  card.querySelector('.card-delete').remove(); // it is not the user's to delete
-  return card;
-}
-
 function showVideos() {
   document.body.classList.add('in-folder');
   folderName.value = 'Recordings';
+  folderName.readOnly = true;
   grid.replaceChildren(...videos.map(makeVideoCard));
   empty.textContent = 'No recordings yet. Open a note, turn on 16:9 and tap Record.';
   empty.hidden = videos.length > 0;
@@ -184,6 +228,8 @@ function makeVideoCard(video) {
   const title = video.name.replace(/\.(mov|mp4)$/i, '');
   const act = action => askVideos({ action, name: video.name });
   const open = card.querySelector('.card-open');
+  card.classList.add('video');
+  wireMore(card);
   open.title = `Play "${title}"`;
   open.onclick = () => act('play');
   const thumb = card.querySelector('.card-thumb');
@@ -231,6 +277,7 @@ function makeVideoCard(video) {
    drawn picture with each note instead, made when the note is closed. */
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const THUMB_H = PAGE_WIDTH * 4 / 3; // a card's picture is the top of the note, as tall as a page is wide, three to four
 const PREVIEW_STROKES = 400; // more than can be told apart at this size
 const previewOf = new WeakMap(); // the card's picture frame -> its note
 const previews = new IntersectionObserver(entries => {
@@ -251,12 +298,11 @@ function fillPreview(box, doc) {
   frame.srcdoc = noteHtml(doc); // the note as it is shown (pages.js): a notebook's pages, a file with its gaps
 
   // The ink: only strokes that begin in the part of the note the card shows, drawn plainly
-  // (a glow stroke without its halo). The viewBox is a square as wide as the page, cut to the card
-  // from its top left corner, so it lines up with the frame at any card size.
+  // (a glow stroke without its halo). The viewBox is the frame's own size, so it lines up with it at any card size.
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${PAGE_WIDTH} ${PAGE_WIDTH}`);
+  svg.setAttribute('viewBox', `0 0 ${PAGE_WIDTH} ${THUMB_H}`);
   svg.setAttribute('preserveAspectRatio', 'xMinYMin slice');
-  const seen = (Array.isArray(doc.strokes) ? doc.strokes : []).filter(s => s?.points?.[0]?.[1] < PAGE_WIDTH).slice(0, PREVIEW_STROKES);
+  const seen = (Array.isArray(doc.strokes) ? doc.strokes : []).filter(s => s?.points?.[0]?.[1] < THUMB_H).slice(0, PREVIEW_STROKES);
   for (const s of seen) {
     try { // a stroke that cannot be drawn (a note from a damaged backup) is left out, not fatal
       const path = document.createElementNS(SVG_NS, 'path');
@@ -295,10 +341,11 @@ function makeCard(doc, folders) {
   previews.observe(picture);
   card.querySelector('.card-thumb').append(picture); // over the blank sheet; a tap on it goes through to the card
   card.classList.add('pictured');
+  wireMore(card);
   card.querySelector('.card-name').textContent = doc.name;
   // Only a search shows a note outside its folder: the card then says which one it is in.
   card.querySelector('.card-date').textContent = (at && !folder ? `In ${at.name} · ` : '') +
-    new Date(doc.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    new Date(doc.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' });
   card.querySelector('.card-delete').onclick = async () => {
     if (!confirm(`Delete "${doc.name}"? This cannot be undone.`)) return;
     await db.del(doc.id).catch(() => notify('Could not delete the note.'));
@@ -322,6 +369,25 @@ function makeCard(doc, folders) {
   return card;
 }
 
+// A card's duplicate, move and delete are behind its "more" button; a touch anywhere else puts them away.
+function wireMore(card) {
+  const more = card.querySelector('.card-more');
+  more.onclick = () => {
+    const open = !card.classList.contains('acting');
+    closeActions();
+    card.classList.toggle('acting', open);
+    more.setAttribute('aria-expanded', open);
+  };
+}
+function closeActions(except) {
+  for (const card of grid.querySelectorAll('.card.acting')) {
+    if (card === except) continue;
+    card.classList.remove('acting');
+    card.querySelector('.card-more').setAttribute('aria-expanded', false);
+  }
+}
+document.addEventListener('pointerdown', e => closeActions(e.target.closest('.card')));
+
 // A copy of a note, beside it: all that the note holds, whatever fields those are, under an id and
 // a name of its own ("copy", then "copy 2", ...). The library shows it; it is not opened.
 async function duplicate(doc) {
@@ -338,21 +404,15 @@ async function duplicate(doc) {
   [...grid.children].find(card => card.dataset.id === copy.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-function makeFolderCard(f, count) {
-  const card = folderTemplate.content.firstElementChild.cloneNode(true);
-  const open = card.querySelector('.card-open');
-  open.title = f.name;
-  open.onclick = () => { folder = f; showLibrary(); };
-  card.querySelector('.card-name').textContent = f.name;
-  card.querySelector('.card-date').textContent = plural(count, 'note');
-  card.querySelector('.card-delete').onclick = async () => {
-    const kept = count ? ` Its ${plural(count, 'note')} will not be deleted: ${count === 1 ? 'it goes' : 'they go'} back to the main library.` : '';
-    if (!confirm(`Delete the folder "${f.name}"?${kept}`)) return;
-    await db.del(f.id).catch(() => notify('Could not delete the folder.'));
-    showLibrary();
-  };
-  return card;
-}
+$('folder-delete').onclick = async () => {
+  if (!folder) return;
+  const count = (await db.all().catch(() => [])).filter(d => d.type !== 'folder' && d.folder === folder.id).length;
+  const kept = count ? ` Its ${plural(count, 'note')} will not be deleted: ${count === 1 ? 'it goes' : 'they go'} back to Unfiled.` : '';
+  if (!confirm(`Delete the folder "${folder.name}"?${kept}`)) return;
+  await db.del(folder.id).catch(() => notify('Could not delete the folder.'));
+  folder = null;
+  showLibrary();
+};
 
 $('new-folder').onclick = async () => {
   const taken = new Set((await db.all().catch(() => [])).filter(d => d.type === 'folder').map(d => d.name));
@@ -366,10 +426,12 @@ $('new-folder').onclick = async () => {
   }
   folder = made;
   search.value = ''; // a search would be looking in the new, empty folder
+  leaveSide();
   await showLibrary();
   folderName.focus(); // straight into naming it
   folderName.select();
 };
+$('side-new-folder').onclick = $('new-folder').onclick;
 
 // A blank note is a notebook: real pages of the paper chosen in the dialog (notebook.js), kept as
 // pages and not as HTML (pages.js). It starts with one page, and is made where the library is.
@@ -525,7 +587,11 @@ async function importFiles(fileList) {
   showLibrary();
 }
 
-$('import-btn').onclick = importTile.onclick = () => fileInput.click();
+$('import-btn').onclick = () => fileInput.click();
+importTile.onclick = () => $('new-notebook').click(); // "Create" makes a notebook, the usual new note
+const addNoteFly = flyout($('add-note-wrap'), $('add-note'));
+$('add-note').onclick = addNoteFly.toggle;
+for (const item of $('add-note-wrap').querySelectorAll('.flyout button')) item.addEventListener('click', () => addNoteFly.set(false));
 fileInput.onchange = () => {
   importFiles(fileInput.files); // copies the list synchronously, so clearing below is safe
   fileInput.value = '';         // lets the same file be picked again
