@@ -552,15 +552,18 @@ backupInput.onchange = async () => {
 
 // An HTML file becomes a note as it is. A PDF becomes a paged note (pages.js), each of its pages a
 // picture: pdfimport.js, which is only loaded, with the PDF reader behind it, when a PDF comes.
-// What to call a file being imported: asked each time, with the file's own name there already,
-// so that keeping it takes one tap. Resolves to the name, or to null if the file is to be left out.
-const renameDialog = $('rename'), renameInput = $('rn-name');
-function askName(name) {
+// What to call a file being imported, and which folder it goes in: asked each time, with the file's
+// own name and the folder now shown there already, so that keeping them takes one tap. Resolves to
+// { name, folder } (folder: an id, or '' for Unfiled), or to null if the file is to be left out.
+const renameDialog = $('rename'), renameInput = $('rn-name'), renameFolder = $('rn-folder');
+function askName(name, folders, into) {
   renameInput.value = name;
+  renameFolder.replaceChildren(new Option('Unfiled', ''), ...folders.map(f => new Option(f.name, f.id)));
+  renameFolder.value = into;
   renameDialog.returnValue = '';
   renameDialog.showModal();
   return new Promise(resolve => {
-    renameDialog.onclose = () => resolve(renameDialog.returnValue === 'ok' ? renameInput.value.trim() || name : null);
+    renameDialog.onclose = () => resolve(renameDialog.returnValue === 'ok' ? { name: renameInput.value.trim() || name, folder: renameFolder.value } : null);
   });
 }
 $('rn-skip').onclick = () => renameDialog.close();
@@ -569,14 +572,18 @@ renameDialog.addEventListener('click', e => { if (e.target === renameDialog) ren
 async function importFiles(fileList) {
   const files = [...fileList].filter(f => /\.(html?|pdf)$/i.test(f.name));
   if (!files.length) return notify('Only .html and .pdf files can be imported.');
-  const failed = [], into = folder; // the folder shown when the import began: a PDF takes a while
+  const failed = [];
+  let into = folder?.id ?? ''; // the folder shown when the import began (a PDF takes a while), then whichever was last chosen
+  const folders = (await db.all().catch(() => [])).filter(d => d.type === 'folder').sort(byName);
   let last, slow = false;
   for (const file of files) {
     try {
       const pdf = /\.pdf$/i.test(file.name);
       $('rn-skip').textContent = files.length > 1 ? 'Skip' : 'Cancel';
-      const name = await askName(file.name.replace(/\.(html?|pdf)$/i, ''));
-      if (name === null) continue; // left out
+      const asked = await askName(file.name.replace(/\.(html?|pdf)$/i, ''), folders, into);
+      if (asked === null) continue; // left out
+      const { name } = asked;
+      into = asked.folder; // the next file of this import starts from this choice
       const doc = {
         id: newId(),
         name,
@@ -589,7 +596,7 @@ async function importFiles(fileList) {
         const { pdfPages } = await import('./pdfimport.js');
         doc.pages = await pdfPages(file, (n, of) => notify(`Importing ${file.name}: page ${n} of ${of}`));
       }
-      if (into) doc.folder = into.id; // imported inside a folder: it belongs there
+      if (into) doc.folder = into; // imported into a folder: it belongs there
       await db.put(doc); // only now, whole: a PDF that fails part way leaves nothing behind
       last = doc;
     } catch (error) {
@@ -602,6 +609,8 @@ async function importFiles(fileList) {
   if (current) return; // a note was opened meanwhile: what was imported is in the library
   if (files.length === 1 && last) return openDoc(last.id);
   search.value = ''; // or a search could hide what was just imported
+  if (last?.folder && folder?.id !== last.folder) folder = folders.find(f => f.id === last.folder) ?? folder; // show where it went
+  else if (last && !last.folder) folder = null;
   showLibrary();
 }
 

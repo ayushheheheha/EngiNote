@@ -880,6 +880,8 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
 }
 #rename { width: min(460px, calc(100% - 32px)); }
 #rn-name { width: 100%; height: 46px; padding: 0 16px; border: 0; border-radius: 14px; background: var(--fill); color: inherit; font: inherit; font-size: 16px; /* under 16px iOS zooms the page on focus */ user-select: text; -webkit-user-select: text; }
+#rn-where { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--muted); }
+#rn-folder { flex: 1; max-width: 70%; height: 44px; padding: 0 14px; border: 0; border-radius: 14px; background: var(--fill); color: var(--text); font: inherit; font-size: 16px; /* under 16px iOS zooms the page on focus */ }
 #notebook form, #rename form { display: grid; gap: 18px; padding: 22px 24px; }
 #notebook h2, #rename h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
 /* The picture of the page beside the choices; under about 620px, above them. */

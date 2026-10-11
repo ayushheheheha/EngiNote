@@ -202,6 +202,10 @@
     <form method="dialog">
       <h2 id="rn-heading">Name this note</h2>
       <input id="rn-name" type="text" aria-label="Name" maxlength="120" autocomplete="off" spellcheck="false">
+      <!-- Where it goes: Unfiled, or one of the folders. The device's own picker opens. -->
+      <label id="rn-where">Save in
+        <select id="rn-folder" aria-label="Save in"></select>
+      </label>
       <div class="nb-actions">
         <button id="rn-skip" class="btn-secondary" type="button">Skip</button>
         <!-- autofocus: else the name takes the focus as the dialog opens, and a tablet's keyboard comes up over it -->
