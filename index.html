@@ -51,6 +51,7 @@
           </div>
         </div>
         <button id="new-folder" class="btn-secondary" type="button">New folder</button>
+        <button id="new-notebook" class="btn-secondary" type="button">New notebook</button>
         <button id="import-btn" class="btn-primary" type="button">Import HTML</button>
       </div>
     </header>
@@ -67,6 +68,69 @@
     <input id="file-input" type="file" accept=".html,.htm,text/html" multiple hidden>
     <input id="backup-input" type="file" accept=".json,application/json" hidden>
   </div>
+
+  <!-- New notebook: a blank note made of pages. notebook.js fills it in and reads it; a paper is described in pages.js.
+       Each group of choices names the part of the paper it sets (data-key), each choice its value. -->
+  <dialog id="notebook" aria-labelledby="nb-heading">
+    <form method="dialog">
+      <h2 id="nb-heading">New notebook</h2>
+      <div class="nb-body">
+        <!-- A picture of the page as it will be made. -->
+        <div class="nb-picture" aria-hidden="true"><div id="nb-sheet"><div id="nb-page"></div></div></div>
+        <div class="nb-options">
+          <label class="nb-row">Title
+            <input id="nb-title" type="text" placeholder="Untitled notebook" maxlength="120" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="nb-row">Direction
+            <div class="nb-choice" data-key="direction" role="group" aria-label="Direction">
+              <button class="icon-btn chip" type="button" data-value="vertical">Vertical</button>
+              <button class="icon-btn chip" type="button" data-value="horizontal">Horizontal</button>
+            </div>
+          </div>
+          <div class="nb-row">Size
+            <div class="nb-choice" data-key="size" role="group" aria-label="Size">
+              <button class="icon-btn chip" type="button" data-value="A4">A4</button>
+              <button class="icon-btn chip" type="button" data-value="Letter">Letter</button>
+              <button class="icon-btn chip" type="button" data-value="16:9">16:9</button>
+              <button class="icon-btn chip" type="button" data-value="4:3">4:3</button>
+            </div>
+          </div>
+          <div class="nb-row">Template
+            <div class="nb-choice" data-key="template" role="group" aria-label="Template">
+              <button class="nb-tile" type="button" data-value="plain"><span></span>Plain</button>
+              <button class="nb-tile" type="button" data-value="rule"><span></span>Rule</button>
+              <button class="nb-tile" type="button" data-value="grid"><span></span>Grid</button>
+              <button class="nb-tile" type="button" data-value="dot"><span></span>Dot</button>
+            </div>
+          </div>
+          <div class="nb-row">Paper
+            <div class="nb-choice" data-key="color" role="group" aria-label="Paper colour">
+              <button class="icon-btn swatch" type="button" data-value="#ffffff" style="--c:#ffffff" title="White" aria-label="White"></button>
+              <button class="icon-btn swatch" type="button" data-value="#fbf2d8" style="--c:#fbf2d8" title="Cream" aria-label="Cream"></button>
+              <button class="icon-btn swatch" type="button" data-value="#111111" style="--c:#111111" title="Black" aria-label="Black"></button>
+              <label class="icon-btn swatch custom" title="Another colour"><input id="nb-color" type="color" aria-label="Another paper colour"></label>
+            </div>
+          </div>
+          <div class="nb-row">Lines
+            <div class="nb-choice" data-key="line" role="group" aria-label="Line colour">
+              <button class="icon-btn swatch" type="button" data-value="#c8ccd6" style="--c:#c8ccd6" title="Grey" aria-label="Grey"></button>
+              <button class="icon-btn swatch" type="button" data-value="#a8c8f0" style="--c:#a8c8f0" title="Light blue" aria-label="Light blue"></button>
+              <button class="icon-btn swatch" type="button" data-value="#e89a9a" style="--c:#e89a9a" title="Red" aria-label="Red"></button>
+              <label class="icon-btn swatch custom" title="Another colour"><input id="nb-line" type="color" aria-label="Another line colour"></label>
+            </div>
+          </div>
+          <label class="nb-row">Spacing
+            <input id="nb-spacing" type="range" min="1" max="8" step="0.5">
+          </label>
+        </div>
+      </div>
+      <div class="nb-actions">
+        <button id="nb-cancel" class="btn-secondary" type="button">Cancel</button>
+        <!-- autofocus: else the title takes the focus as the dialog opens, and a tablet's keyboard comes up over it -->
+        <button id="nb-create" class="btn-primary" value="create" autofocus>Create</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Editor -->
   <div id="editor">
@@ -128,6 +192,11 @@
           </button>
           <button id="wide-btn" class="icon-btn chip" type="button" aria-pressed="false"
             title="Show the app in a 16:9 window" aria-label="16 by 9 window">16:9</button>
+          <!-- Add space (space.js): marks where a blank page or a gap can be put into the note, and puts it there. -->
+          <button id="space-btn" class="icon-btn" type="button" aria-pressed="false"
+            title="Add space: a blank page, or a gap in the note, with the ink below moving down" aria-label="Add space">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16M4 20h16M12 8v8M8 12h8"/></svg>
+          </button>
           <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
           </button>

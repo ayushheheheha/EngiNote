@@ -608,6 +608,22 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       undoStack.length = redoStack.length = 0;
       render();
     },
+    // The page under the ink grew or shrank at `fromY` (a page or a gap went in, or came out): every
+    // stroke that begins at or below it moves by `dy` to stay on what it was written on. Not an undo
+    // step, and the history moves too: an undo afterwards must not put ink back where it used to be.
+    shift(fromY, dy) {
+      finish();
+      const moved = new Map();   // a stroke is one object in every snapshot it is in, and stays one
+      const move = s => {
+        if (!dy || s.points.some(p => p[1] < fromY)) return s;   // it begins above: it stays
+        if (!moved.has(s)) moved.set(s, { ...s, points: s.points.map(([x, y, ...rest]) => [x, round2(y + dy), ...rest]) });
+        return moved.get(s);
+      };
+      strokes = strokes.map(move);
+      for (const stack of [undoStack, redoStack]) stack.forEach((list, i) => { stack[i] = list.map(move); });
+      render();
+      changed();
+    },
     getStrokes,
   };
 }
