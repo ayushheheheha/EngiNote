@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- App icon: the Engikode icon in white on a black tile. The mark is the designer's file
+  <!-- App icon: the Engikode icon in black on a white tile. The mark is the designer's file
        ("ICON white.svg") unchanged, only placed and scaled in proportion (40 x 26.67 keeps its 457.26 : 304.89). -->
-  <rect width="64" height="64" rx="14"/>
-  <svg x="12" y="18.665" width="40" height="26.67" viewBox="0 0 457.26 304.89" fill="#fff">
+  <rect width="64" height="64" rx="14" fill="#fff"/>
+  <svg x="12" y="18.665" width="40" height="26.67" viewBox="0 0 457.26 304.89" fill="#000">
     <polygon points="457.26 0 378.29 0 197.77 243.9 197.78 304.89 430.53 304.88 330.01 182.91 457.26 0"/>
     <polygon points="197.77 182.93 197.77 121.95 197.77 121.95 0 121.95 0 121.95 0 182.93 0 182.93 197.77 182.93"/>
     <rect y="243.9" width="263.68" height="60.99" rx="0" ry="0"/>
