@@ -182,14 +182,25 @@ function makeVideoCard(video) {
   const open = card.querySelector('.card-open');
   open.title = `Play "${title}"`;
   open.onclick = () => act('play');
-  card.querySelector('.card-thumb').innerHTML = VIDEO_ICON;
-  // The app names a recording by when it began, "EngiNote 2026-10-11 14.03.22", which is too long
-  // for a card: shown as a date, with the time beside the size. A file renamed since keeps its name.
-  const when = /^EngiNote (\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.\d\d$/.exec(title);
-  const began = when && new Date(when[1], when[2] - 1, when[3], when[4], when[5]);
-  card.querySelector('.card-name').textContent = began ? began.toLocaleDateString(undefined, { dateStyle: 'medium' }) : title;
+  const thumb = card.querySelector('.card-thumb');
+  thumb.innerHTML = VIDEO_ICON;
+  if (typeof video.picture === 'string' && video.picture.startsWith('data:image/jpeg;base64,')) {
+    const img = new Image(); // a frame of the video, made by the app; the icon stays under it until it loads
+    img.className = 'card-picture';
+    img.alt = '';
+    img.onload = () => { thumb.append(img); card.classList.add('pictured'); }; // pictured: its buttons get a ground to be seen on
+    img.src = video.picture;
+  }
+  // The app names a recording by its note and when it began, "Thermodynamics 2026-10-11 14.03.22" (older
+  // ones "EngiNote 2026-10-11 14.03.22"). That is too long for a card: the note's name, then the date and
+  // time beside the size. Older ones show the date as the name. A file renamed since keeps its name.
+  const when = /^(.*) (\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.\d\d$/.exec(title);
+  const began = when && new Date(when[2], when[3] - 1, when[4], when[5], when[6]);
+  const stamp = began && `${began.toLocaleDateString(undefined, { dateStyle: 'medium' })}, ${began.toLocaleTimeString(undefined, { timeStyle: 'short' })}`;
+  const noted = when && when[1] !== 'EngiNote'; // named for a note
+  card.querySelector('.card-name').textContent = noted ? when[1] : began ? began.toLocaleDateString(undefined, { dateStyle: 'medium' }) : title;
   card.querySelector('.card-date').textContent =
-    (began ? `${began.toLocaleTimeString(undefined, { timeStyle: 'short' })} · ` : '') + fileSize(video.size);
+    (noted ? `${stamp} · ` : began ? `${began.toLocaleTimeString(undefined, { timeStyle: 'short' })} · ` : '') + fileSize(video.size);
 
   const remove = card.querySelector('.card-delete');
   remove.title = 'Delete recording';
@@ -1292,7 +1303,7 @@ if (shellRecorder) {
   const ask = () => {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
-      ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), wide: document.body.classList.contains('wide') }
+      ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), title: nameInput.value, wide: document.body.classList.contains('wide') }
       : { action: 'stop' });
   };
 

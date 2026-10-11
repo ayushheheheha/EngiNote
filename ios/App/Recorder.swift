@@ -133,12 +133,20 @@ final class Recorder {
         try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     }
 
+    /// A note's name as the start of a file name: no characters a file name cannot hold, not too long, never empty.
+    static func fileSafe(_ title: String) -> String {
+        let bad = CharacterSet(charactersIn: "/\\:*?\"<>|").union(CharacterSet.controlCharacters)
+        let ends = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "."))
+        let clean = title.components(separatedBy: bad).joined(separator: " ").trimmingCharacters(in: ends)
+        return clean.isEmpty ? "EngiNote" : String(clean.prefix(60))
+    }
+
     /// Start recording. `wide`: the page's 16:9 window is on, and the video is to be that window;
     /// otherwise it is the whole screen. `enhance`: record the voice with the background noise taken out.
     /// `done` is called on the main thread: with what went wrong (which includes the user saying
     /// no to the system's question), or nil; and with something the user should know even though
     /// recording did start (the app could not listen to the microphone itself).
-    func start(quality name: String, wide: Bool, microphone: Bool, enhance: Bool, done: @escaping (_ error: String?, _ note: String?) -> Void) {
+    func start(quality name: String, wide: Bool, microphone: Bool, enhance: Bool, title: String, done: @escaping (_ error: String?, _ note: String?) -> Void) {
         lock.lock()
         wholeScreen = !wide
         lock.unlock()
@@ -148,7 +156,7 @@ final class Recorder {
             return
         }
         guard microphone else {
-            capture(quality: name, microphone: false, ownVoice: false, note: nil, done: done)
+            capture(quality: name, microphone: false, ownVoice: false, note: nil, title: title, done: done)
             return
         }
         AVAudioApplication.requestRecordPermission { [weak self] allowed in
@@ -170,13 +178,13 @@ final class Recorder {
                 } else {
                     note = "EngiNote is not allowed to use the microphone (Settings > EngiNote): check that the recording has sound."
                 }
-                self.capture(quality: name, microphone: microphone, ownVoice: own, note: note, done: done)
+                self.capture(quality: name, microphone: microphone, ownVoice: own, note: note, title: title, done: done)
             }
         }
     }
 
     // The recording itself. `ownVoice`: the app is already listening to the microphone, so ReplayKit must not.
-    private func capture(quality name: String, microphone: Bool, ownVoice: Bool, note: String?, done: @escaping (String?, String?) -> Void) {
+    private func capture(quality name: String, microphone: Bool, ownVoice: Bool, note: String?, title: String, done: @escaping (String?, String?) -> Void) {
         let screen = RPScreenRecorder.shared()
         let url: URL
         let writer: AVAssetWriter
@@ -185,7 +193,7 @@ final class Recorder {
             let stamp = DateFormatter()
             stamp.locale = Locale(identifier: "en_US_POSIX")
             stamp.dateFormat = "yyyy-MM-dd HH.mm.ss"
-            url = folder.appendingPathComponent("EngiNote \(stamp.string(from: Date())).mov")
+            url = folder.appendingPathComponent("\(Recorder.fileSafe(title)) \(stamp.string(from: Date())).mov")
             writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         } catch {
             stopListening(unlessChecking: true)

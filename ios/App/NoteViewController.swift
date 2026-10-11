@@ -113,7 +113,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             let microphone = body["microphone"] as? Bool ?? true
             recorder.start(
                 quality: body["quality"] as? String ?? "standard", wide: body["wide"] as? Bool ?? true,
-                microphone: microphone, enhance: body["enhance"] as? Bool ?? false
+                microphone: microphone, enhance: body["enhance"] as? Bool ?? false,
+                title: body["title"] as? String ?? ""
             ) { [weak self] error, note in
                 guard let self = self else { return }
                 if let error = error {
@@ -246,6 +247,9 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 share(file)
             case "delete": // the page has already asked the user if they are sure
                 try? FileManager.default.removeItem(at: file)
+                if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
+                    try? FileManager.default.removeItem(at: caches.appendingPathComponent("RecordingPictures/" + file.lastPathComponent + ".jpg"))
+                }
             default:
                 break
             }
@@ -253,18 +257,41 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
 
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let active = recorder.activeFile?.lastPathComponent
-        var found: [URL] = []
-        if let folder = try? Recorder.folder() {
-            found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
-        }
-        let files: [[String: Any]] = found
-            .filter { $0.pathExtension.lowercased() == "mov" && $0.lastPathComponent != active }
-            .map { url in
-                let values = try? url.resourceValues(forKeys: Set(keys))
-                let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                return ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
+        // Picking a frame from each movie takes a moment the first time: off the main thread.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var found: [URL] = []
+            if let folder = try? Recorder.folder() {
+                found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
             }
-        send("recordings", ["files": files])
+            let files: [[String: Any]] = found
+                .filter { $0.pathExtension.lowercased() == "mov" && $0.lastPathComponent != active }
+                .map { url in
+                    let values = try? url.resourceValues(forKeys: Set(keys))
+                    let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                    var entry: [String: Any] = ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
+                    if let picture = Self.picture(of: url) { entry["picture"] = "data:image/jpeg;base64," + picture.base64EncodedString() }
+                    return entry
+                }
+            DispatchQueue.main.async { self?.send("recordings", ["files": files]) }
+        }
+    }
+
+    /// A small picture of a recording (a frame a second in), made once and kept in the caches
+    /// folder, which the system may empty: then it is simply made again.
+    private static func picture(of movie: URL) -> Data? {
+        guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return nil }
+        let folder = caches.appendingPathComponent("RecordingPictures", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let kept = folder.appendingPathComponent(movie.lastPathComponent + ".jpg")
+        if let data = try? Data(contentsOf: kept) { return data }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: movie))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 480, height: 270)
+        guard let frame = (try? generator.copyCGImage(at: CMTime(seconds: 1, preferredTimescale: 600), actualTime: nil))
+                ?? (try? generator.copyCGImage(at: .zero, actualTime: nil)),
+              let data = UIImage(cgImage: frame).jpegData(compressionQuality: 0.7) else { return nil }
+        try? data.write(to: kept)
+        return data
     }
 
     // MARK: Messages from the page
