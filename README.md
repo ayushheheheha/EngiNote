@@ -52,15 +52,50 @@ Open [enginote.vercel.app](https://enginote.vercel.app) and import an HTML file.
 
 ### On an iPad
 
-The app is not on the App Store; it is installed with [AltStore](https://altstore.io).
+EngiNote is not on the App Store. You install it with [AltStore](https://altstore.io), a free tool that signs apps with your own Apple ID. Allow about 15 minutes the first time.
 
-1. Install AltServer on a PC or Mac, and use it to put AltStore on the iPad.
-2. On the iPad, download the [latest `EngiNote.ipa`](https://github.com/ayushheheheha/EngiNote/releases/latest/download/EngiNote.ipa).
-3. In AltStore, open **My Apps**, tap **+**, and choose the file.
+**You need**
 
-To update, install the new `.ipa` the same way, over the existing app. Do not delete the app first: its notes would go with it.
+- An iPad on **iPadOS 17.5 or later** (Settings › General › About). An Apple Pencil is optional, but the Pencil features need one.
+- A **Windows PC or Mac**, only for the install and for refreshing the app every 7 days.
+- A free **Apple ID**.
+- A USB cable, or the iPad and computer on the same Wi-Fi.
 
-With a free Apple account, AltStore has to refresh the app every 7 days.
+**1. Put AltStore on the iPad (once)**
+
+1. On the computer, download **AltServer** from [altstore.io](https://altstore.io) and install it.
+   - *Windows:* install **iTunes** and **iCloud** from apple.com, not from the Microsoft Store, or AltServer cannot find the iPad.
+2. Connect the iPad to the computer with the cable and tap **Trust** on the iPad.
+3. Open AltServer (Windows: its icon is in the system tray; Mac: the menu bar), choose **Install AltStore**, pick your iPad, and sign in with your Apple ID.
+4. On the iPad, open **Settings › General › VPN & Device Management**, tap your Apple ID under *Developer App*, and tap **Trust**.
+5. On the iPad, turn on **Settings › Privacy & Security › Developer Mode**, then restart when asked.
+
+**2. Install EngiNote**
+
+1. On the iPad, open [this link](https://github.com/ayushheheheha/EngiNote/releases/latest/download/EngiNote.ipa) in Safari to download `EngiNote.ipa`. It is saved in Files › Downloads.
+2. Open **AltStore**, go to **My Apps**, tap **+** at the top left, and choose `EngiNote.ipa`.
+3. Wait for it to install. EngiNote now appears on the Home Screen.
+
+**3. Keep it working**
+
+- A free Apple ID lets an app run for **7 days**, then AltStore must refresh it. Keep AltServer running on the computer, with the iPad on the same Wi-Fi, and AltStore refreshes it in the background. To do it by hand, open AltStore › My Apps › **Refresh All**.
+- A free Apple ID also allows only **3 sideloaded apps** at a time, AltStore included.
+- If the 7 days pass, the app will not open until you refresh it. Your notes are still there.
+
+**Updating**
+
+Download the new `EngiNote.ipa` and install it the same way, **over** the existing app. Do not delete the app first: its notes would go with it. Check the version at [Releases](https://github.com/ayushheheheha/EngiNote/releases).
+
+**If something goes wrong**
+
+| Problem | Fix |
+|---|---|
+| AltServer cannot see the iPad | Reconnect the cable, tap **Trust**, and on Windows check iTunes and iCloud came from apple.com |
+| "Unable to verify app" or the app will not open | Settings › General › VPN & Device Management › Trust your Apple ID; also check Developer Mode is on |
+| The app stopped opening after a week | Refresh it in AltStore › My Apps |
+| Install fails with an app-limit message | Remove one of your other sideloaded apps (a free Apple ID allows 3) |
+
+Want to try it first? The [web version](https://enginote.vercel.app) needs no install, but has no screen recording or Pencil double-tap and squeeze.
 
 ### Keyboard
 
