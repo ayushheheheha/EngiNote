@@ -1,0 +1,77 @@
+# Builds the Android tablet app on a cloud Linux machine and publishes it, so it can be
+# downloaded on the tablet and installed. Nothing here needs Android Studio on our own machine.
+#
+# The app is signed with a key kept in the repository's secrets (ANDROID_KEYSTORE, base64, and
+# ANDROID_KEYSTORE_PASSWORD). An update installs over the old app only if it is signed by the
+# same key, so that key must never be replaced; keep a copy of it.
+name: Android app
+
+on:
+  workflow_dispatch: # run by hand, to ship the web app as it now stands
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write # to publish the release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      # The app carries the web app inside it: exactly the files the website serves.
+      - name: Put the web app inside the Android project
+        run: |
+          mkdir -p android/app/src/main/assets android/app/src/main/res/mipmap-xxxhdpi
+          cp index.html style.css app.js ink.js lasso.js shapes.js pages.js notebook.js space.js export.js pdfimport.js pdfjs.min.js pdfjs.worker.min.js pdfjs.LICENSE.txt perfect-freehand.js icon.svg apple-touch-icon.png android/app/src/main/assets/
+          cp apple-touch-icon.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          ls -l android/app/src/main/assets
+
+      - name: The signing key
+        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > "$RUNNER_TEMP/enginote.jks"
+
+      - name: Build
+        working-directory: android
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          KEYSTORE_FILE: ${{ runner.temp }}/enginote.jks
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: enginote
+        run: gradle --no-daemon assembleRelease
+
+      - name: Check the .apk
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          ls -l "$apk"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk" | head -3
+          "$ANDROID_HOME"/build-tools/*/aapt dump badging "$apk" | head -3
+          cp "$apk" EngiNote.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EngiNote-apk
+          path: EngiNote.apk
+
+      # One release, replaced on every build, never marked "latest" (that one is the iPad app's):
+      # https://github.com/<owner>/<repo>/releases/download/android-latest/EngiNote.apk
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --cleanup-tag --yes || true
+          gh release create android-latest EngiNote.apk --latest=false \
+            --title "EngiNote for Android, build ${{ github.run_number }}" \
+            --notes "Signed build of commit ${{ github.sha }}. Open the .apk on the tablet to install or update."

@@ -11,3 +11,12 @@ ios/Payload/
 
 # Agent worktrees
 .claude/
+
+# Android app: made on the build machine, never committed
+android/app/src/main/assets/
+android/app/src/main/res/mipmap-xxxhdpi/
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+*.jks

@@ -16,6 +16,10 @@ const nameInput = $('note-name'), undoBtn = $('undo-btn'), redoBtn = $('redo-btn
 const scroller = $('scroller'), mover = $('mover'), bar = $('scrollbar'), page = $('page'), frame = $('frame'), svg = $('ink');
 const message = $('message'), cardTemplate = $('card-template'), folderTemplate = $('folder-template'), folderName = $('folder-name');
 
+// The Android app (android/) gives the page one doorway, window.AndroidShell, that takes JSON text:
+// { type: 'save', name, text } to keep a file, { type: 'print', name, html } to print or save a PDF.
+const androidPost = window.AndroidShell && (body => window.AndroidShell.postMessage(JSON.stringify(body)));
+
 let current = null;      // the note open in the editor, or null in the library
 let zoom = 1;
 let pageHeight = MIN_HEIGHT;
@@ -421,6 +425,7 @@ $('backup-save').onclick = async () => {
   // In the iPad app a page cannot save a file by itself: the shell does it (ios/App/NoteViewController.swift).
   const shell = window.webkit?.messageHandlers?.saveFile;
   if (shell) return shell.postMessage({ name, text });
+  if (androidPost) return androidPost({ type: 'save', name, text }); // the Android app, likewise
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   link.download = name;
@@ -1137,6 +1142,9 @@ exportBtn.onclick = async () => {
     if (shellExport) {
       shellExport.postMessage({ name: current.name, html, pages });
       waiting = true; // for the app's answer
+    } else if (androidPost) {
+      androidPost({ type: 'print', name: current.name, html }); // Android's print dialog can save a PDF
+      message.hidden = true;
     } else {
       await printDoc(html);
       message.hidden = true;
