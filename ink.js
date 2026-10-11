@@ -1,6 +1,7 @@
 // ink.js — freehand annotation layer for EngiNote. Plain ES module.
 // The flow pen's shape comes from perfect-freehand, kept beside this file.
 import { getStroke } from './perfect-freehand.js';
+import { recognise, aim } from './shapes.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const HIGHLIGHTER_SCALE = 5;      // highlighter width = size * this
@@ -24,6 +25,15 @@ const CURSORS = { pen: 'crosshair', flow: 'crosshair', glow: 'crosshair', highli
 // pressure 0.5 the line is exactly `size` wide). streamline: how far the line lags the hand to
 // take the shake out. Chosen by eye in a browser: tune on the real device.
 const FLOW = { thinning: 0.6, smoothing: 0.6, streamline: 0.6 };
+// The laser pointer: a tool that draws a glowing line to point with. The line fades once the tip
+// lifts and is never one of the strokes.
+CURSORS.laser = 'crosshair';
+const LASER_FADE = 1500;          // ms the line takes to go
+// Hold the tip still at the end of a stroke and the stroke becomes the shape it was meant to be
+// (shapes.js decides which, if any). Chosen without the hardware to hand: calibrate on the real device.
+const HOLD_MS = 500;              // how long the tip must rest
+const HOLD_SLOP = 4;              // screen px it may stray while it rests
+const MIN_SHAPE = 24;             // screen px: no line shorter than this is straightened (a closed shape must be half as big again)
 
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
 const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothing raw pressure
@@ -173,6 +183,8 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   let lastContact = -Infinity;   // event time of the stylus last touching the page
   const fingers = new Map();   // every finger on the page, palm or not: id -> {x, y, t, solo}, to spot taps
   let lastTap = null;          // {x, y, t} of a finger tap that may become a double tap
+  let smooth = SMOOTH;         // screen px the ink trails the tip by: the pen's "stability", see setStability()
+  let hold = HOLD_MS;          // see setHold()
 
   surface.style.touchAction = svg.style.touchAction = 'none';
   svg.style.cursor = CURSORS[tool];
@@ -185,6 +197,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // The strokes live in their own group, in order; the tip preview sits after it, so above them all.
   const layer = document.createElementNS(NS, 'g');
   svg.appendChild(layer);
+  // Laser lines, drawn and fading, have a group of their own above the strokes: they are not strokes.
+  const beams = document.createElementNS(NS, 'g');
+  svg.appendChild(beams);
 
   // The tip's circle. For a drawing tool it is a preview under a hovering stylus (Apple Pencil hover,
   // S Pen, Surface Pen): the size and colour the line will have. For the eraser it is the area that
@@ -295,13 +310,42 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     return true;
   }
 
+  // Start waiting for the tip to be held still: when it lands, and again each time it leaves the
+  // spot it was resting on. (A wait left over from a stroke that has ended does nothing: see snap.)
+  function rest(a) {
+    clearTimeout(a.timer);
+    a.rested = a.tip;
+    a.timer = setTimeout(snap, hold, a);
+  }
+
+  // Make `points` the stroke being drawn. A flow stroke gets the same pressure all along, so that a shape is evenly wide.
+  function shapeTo(a, points) {
+    a.stroke.points = a.stroke.tool === 'flow' ? points.map(([x, y]) => [x, y, 0.5]) : points;
+    setData(a.path, strokeData(a.stroke));
+  }
+
+  // The tip has rested at the end of stroke `a`: if what it drew is a shape, the stroke becomes that shape.
+  function snap(a) {
+    if (act !== a) return;   // that stroke is over
+    const end = toPoint({ clientX: a.tip[0], clientY: a.tip[1] });
+    if (!end) return;
+    const perPx = svg.viewBox.baseVal.width / svg.getBoundingClientRect().width;   // page units to a screen px
+    const shape = recognise([...a.stroke.points, end], MIN_SHAPE * perPx);
+    if (!shape) return;      // not a shape: it stays as drawn, and may be held again further on
+    a.shape = shape;
+    a.rested = null;         // nothing more to wait for
+    shapeTo(a, shape.points);
+  }
+
   // Commit whatever pen/mouse gesture is in progress. Safe to call any time.
   function finish() {
     const a = act;
     if (!a) return;
     act = null;
-    if (a.path) {
-      toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
+    if (a.laser) {
+      a.path.animate({ opacity: 0 }, { duration: LASER_FADE, easing: 'ease-in', fill: 'forwards' }).onfinish = () => a.path.remove();
+    } else if (a.path) {
+      if (!a.shape) toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
       setData(a.path, strokeData(a.stroke));   // its finished shape
       els.push(a.path);   // the live path becomes the stroke's element
       elOf.set(a.stroke, a.path);
@@ -438,12 +482,14 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
         // The flow pen follows pressure, when the stylus really reports it (0.5 is the "no sensor"
         // value): its points then carry it. Otherwise its width follows the speed of the hand.
         if (tool === 'flow' && isPen && e.pressure > 0 && e.pressure !== 0.5) pt.push(round2(e.pressure));
-        const stroke = { tool, color, size, points: [pt] };
+        const laser = tool === 'laser';   // drawn as a glow stroke, in its own group
+        const stroke = { tool: laser ? 'glow' : tool, color, size, points: [pt] };
         // Kept on the stroke only where it says something, so most strokes stay as small as before.
-        if (opacity < 1 || tool === 'highlighter') stroke.opacity = opacity;
+        if (!laser && (opacity < 1 || tool === 'highlighter')) stroke.opacity = opacity;
         const path = makeEl(stroke, false);
-        layer.appendChild(path);
-        act = { ...base, stroke, path, tip: base.at, soft: base.at, kept: base.at };
+        (laser ? beams : layer).appendChild(path);
+        act = { ...base, stroke, path, laser, tip: base.at, soft: base.at, kept: base.at };
+        if (!laser) rest(act);
       }
     }
     showNib(e);   // the eraser's ring appears where it lands; a drawing tool's preview goes
@@ -485,6 +531,12 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (!act || act.id !== e.pointerId) return;
     const a = act;
     a.at = [e.clientX, e.clientY];
+    if (a.shape) {
+      // Already made into a shape. Only a straight line still moves: its far end follows the tip, to be aimed.
+      const from = a.shape.points[0], to = a.shape.kind === 'line' && toPoint(e);
+      if (to) shapeTo(a, [from, aim(from, to)]);
+      return;
+    }
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     const pts = a.path && a.stroke.points;
     for (const ev of coalesced.length ? coalesced : [e]) {
@@ -498,8 +550,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       // tip at rest pulls nothing after it.
       const moved = Math.hypot(ev.clientX - a.tip[0], ev.clientY - a.tip[1]);
       if (!moved) continue;
-      const share = 1 - Math.exp(-moved / SMOOTH);
+      const share = 1 - Math.exp(-moved / smooth);   // all of it when smooth is 0
       a.tip = [ev.clientX, ev.clientY];
+      if (a.rested && Math.hypot(a.tip[0] - a.rested[0], a.tip[1] - a.rested[1]) > HOLD_SLOP) rest(a);
       a.soft = [a.soft[0] + (a.tip[0] - a.soft[0]) * share, a.soft[1] + (a.tip[1] - a.soft[1]) * share];
       if (Math.hypot(a.soft[0] - a.kept[0], a.soft[1] - a.kept[1]) < MIN_STEP) continue;
       const pt = toPoint({ clientX: a.soft[0], clientY: a.soft[1] });
@@ -589,6 +642,10 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     setColor(cssColor) { if (cssColor) color = String(cssColor); },
     setSize(n) { if (+n > 0) size = +n; },
     setOpacity(n) { if (+n > 0 && +n <= 1) opacity = +n; },
+    // How far the ink trails the tip, in screen px (see SMOOTH): 0 is none, the line goes exactly where the tip went.
+    setStability(n) { if (+n >= 0) smooth = +n; },
+    // How long the tip must rest for a stroke to be made into a shape, in ms. (The checks shorten it.)
+    setHold(ms) { if (+ms > 0) hold = +ms; },
     undo: () => step(undoStack, redoStack),
     redo: () => step(redoStack, undoStack),
     canUndo: () => undoStack.length > 0,
@@ -604,6 +661,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     load(list) {
       if (act && act.path) act.path.remove();   // drop any half-drawn stroke
       act = null;
+      beams.replaceChildren();   // and any laser line still fading
       strokes = normalise(list);
       undoStack.length = redoStack.length = 0;
       render();
