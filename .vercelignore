@@ -11,6 +11,11 @@
 !/pages.js
 !/notebook.js
 !/space.js
+!/export.js
+!/pdfimport.js
+!/pdfjs.min.js
+!/pdfjs.worker.min.js
+!/pdfjs.LICENSE.txt
 !/perfect-freehand.js
 !/ink.test.html
 !/sample.html

@@ -111,6 +111,9 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `pages.js` | Paged notes: the page model and the HTML made from it |
 | `notebook.js` | The "New notebook" dialog |
 | `space.js` | "Add space": a blank page in a paged note, a gap in an HTML note |
+| `pdfimport.js` | PDF import: each page drawn to an image, as a paged note |
+| `pdfjs.min.js`, `pdfjs.worker.min.js` | [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0, see `pdfjs.LICENSE.txt`), which reads PDFs |
+| `export.js` | Export: the note with its ink as one printable document |
 | `perfect-freehand.js` | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) 1.2.3, which shapes the flow pen's strokes |
 | `ink.test.html` | Tests for the ink engine |
 | `sample.html` | A note to try the app with |
