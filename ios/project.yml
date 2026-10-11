@@ -58,4 +58,14 @@ targets:
         # The camera bubble (CameraBubble.swift).
         NSCameraUsageDescription: EngiNote shows you in a camera bubble over your note when you switch it on.
         UIFileSharingEnabled: true
+        # EngiNote appears in the Share sheet and in "Open in..." for web pages and PDFs (NoteViewController.receive).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Web page
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.html]
+          - CFBundleTypeName: PDF document
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
         LSSupportsOpeningDocumentsInPlace: true

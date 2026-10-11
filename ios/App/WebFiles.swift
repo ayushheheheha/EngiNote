@@ -11,6 +11,9 @@ final class WebFiles: NSObject, WKURLSchemeHandler {
     static let scheme = "enginote"
     static let home = URL(string: "enginote://app/index.html")!
 
+    /// Where files shared to the app wait for the page to fetch them (NoteViewController.receive).
+    static let sharedFolder = FileManager.default.temporaryDirectory.appendingPathComponent("shared", isDirectory: true)
+
     private let root: URL = Bundle.main.resourceURL!.appendingPathComponent("web", isDirectory: true).standardizedFileURL
 
     private static let types: [String: String] = [
@@ -19,6 +22,7 @@ final class WebFiles: NSObject, WKURLSchemeHandler {
         "css": "text/css; charset=utf-8",
         "svg": "image/svg+xml",
         "png": "image/png",
+        "pdf": "application/pdf",
     ]
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
@@ -27,10 +31,13 @@ final class WebFiles: NSObject, WKURLSchemeHandler {
             return
         }
         let path = url.path.isEmpty || url.path == "/" ? "/index.html" : url.path
-        let file = root.appendingPathComponent(String(path.dropFirst())).standardizedFileURL
+        // The web folder, or (under /shared/) the files shared to the app.
+        let shared = path.hasPrefix("/shared/")
+        let base = (shared ? WebFiles.sharedFolder : root).standardizedFileURL
+        let file = base.appendingPathComponent(String(path.dropFirst(shared ? "/shared/".count : 1))).standardizedFileURL
 
-        // Only files inside the web folder, whatever the path says.
-        guard file.path.hasPrefix(root.path + "/"), let data = try? Data(contentsOf: file) else {
+        // Only files inside that folder, whatever the path says.
+        guard file.path.hasPrefix(base.path + "/"), let data = try? Data(contentsOf: file) else {
             respond(to: urlSchemeTask, url: url, status: 404, type: "text/plain; charset=utf-8", body: Data("Not found".utf8))
             return
         }

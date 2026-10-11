@@ -197,6 +197,19 @@
     </form>
   </dialog>
 
+  <!-- A file being imported: its own name to keep with one tap, or another to type. -->
+  <dialog id="rename" aria-labelledby="rn-heading">
+    <form method="dialog">
+      <h2 id="rn-heading">Name this note</h2>
+      <input id="rn-name" type="text" aria-label="Name" maxlength="120" autocomplete="off" spellcheck="false">
+      <div class="nb-actions">
+        <button id="rn-skip" class="btn-secondary" type="button">Skip</button>
+        <!-- autofocus: else the name takes the focus as the dialog opens, and a tablet's keyboard comes up over it -->
+        <button class="btn-primary" value="ok" autofocus>Import</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Editor -->
   <div id="editor">
     <div id="toolbar">

@@ -856,7 +856,7 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
 /* A sheet of thick glass in the middle of the screen, with the library dimmed behind it. It is
    sized from the screen it is in by percentages, not by viewport units (those came out wrong in
    the iPad app), and scrolls within itself if a small window cannot hold it. */
-#notebook {
+#notebook, #rename {
   width: min(720px, calc(100% - 32px));
   max-width: none;
   max-height: calc(100% - 32px);
@@ -872,14 +872,16 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
   user-select: none;
   -webkit-user-select: none;
 }
-#notebook::backdrop { background: rgb(12 14 20 / .4); }
+#notebook::backdrop, #rename::backdrop { background: rgb(12 14 20 / .4); }
 /* It is placed by the browser, in the middle, with no transform of its own: so it can grow into place with one. */
-#notebook[open] { animation: nb-in .24s cubic-bezier(.3, 1.25, .5, 1); }
+#notebook[open], #rename[open] { animation: nb-in .24s cubic-bezier(.3, 1.25, .5, 1); }
 @keyframes nb-in {
   from { opacity: 0; transform: scale(.95); }
 }
-#notebook form { display: grid; gap: 18px; padding: 22px 24px; }
-#notebook h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
+#rename { width: min(460px, calc(100% - 32px)); }
+#rn-name { width: 100%; height: 46px; padding: 0 16px; border: 0; border-radius: 14px; background: var(--fill); color: inherit; font: inherit; font-size: 16px; /* under 16px iOS zooms the page on focus */ user-select: text; -webkit-user-select: text; }
+#notebook form, #rename form { display: grid; gap: 18px; padding: 22px 24px; }
+#notebook h2, #rename h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
 /* The picture of the page beside the choices; under about 620px, above them. */
 .nb-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 22px; }
 .nb-picture { display: grid; place-items: center; min-height: 190px; border-radius: 18px; background: var(--fill); }
@@ -919,7 +921,7 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
   .nb-picture { height: 190px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #notebook[open] { animation: none; }
+  #notebook[open], #rename[open] { animation: none; }
 }
 
 /* ---------- Add space (space.js) ---------- */

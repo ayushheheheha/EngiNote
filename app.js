@@ -552,6 +552,20 @@ backupInput.onchange = async () => {
 
 // An HTML file becomes a note as it is. A PDF becomes a paged note (pages.js), each of its pages a
 // picture: pdfimport.js, which is only loaded, with the PDF reader behind it, when a PDF comes.
+// What to call a file being imported: asked each time, with the file's own name there already,
+// so that keeping it takes one tap. Resolves to the name, or to null if the file is to be left out.
+const renameDialog = $('rename'), renameInput = $('rn-name');
+function askName(name) {
+  renameInput.value = name;
+  renameDialog.returnValue = '';
+  renameDialog.showModal();
+  return new Promise(resolve => {
+    renameDialog.onclose = () => resolve(renameDialog.returnValue === 'ok' ? renameInput.value.trim() || name : null);
+  });
+}
+$('rn-skip').onclick = () => renameDialog.close();
+renameDialog.addEventListener('click', e => { if (e.target === renameDialog) renameDialog.close(); }); // a tap outside it
+
 async function importFiles(fileList) {
   const files = [...fileList].filter(f => /\.(html?|pdf)$/i.test(f.name));
   if (!files.length) return notify('Only .html and .pdf files can be imported.');
@@ -560,9 +574,12 @@ async function importFiles(fileList) {
   for (const file of files) {
     try {
       const pdf = /\.pdf$/i.test(file.name);
+      $('rn-skip').textContent = files.length > 1 ? 'Skip' : 'Cancel';
+      const name = await askName(file.name.replace(/\.(html?|pdf)$/i, ''));
+      if (name === null) continue; // left out
       const doc = {
         id: newId(),
-        name: file.name.replace(/\.(html?|pdf)$/i, ''),
+        name,
         html: pdf ? '' : await file.text(), // ponytail: assumes UTF-8; sniff <meta charset> if legacy encodings matter
         strokes: [],
         updatedAt: Date.now(),
@@ -581,6 +598,7 @@ async function importFiles(fileList) {
   }
   if (failed.length) notify(`Could not import: ${failed.join(', ')}`);
   else if (slow) message.hidden = true; // the last "Importing ..."
+  if (!last && !failed.length) return; // every one was left out
   if (current) return; // a note was opened meanwhile: what was imported is in the library
   if (files.length === 1 && last) return openDoc(last.id);
   search.value = ''; // or a search could hide what was just imported
@@ -1523,6 +1541,18 @@ document.addEventListener('keydown', e => {
     place([pos[0], key === 'home' ? Infinity : -Infinity]); // place() brings either back to the note's first or last line
   }
 });
+
+// The iPad app hands over a file shared to it ("Open in EngiNote"): its name, and where to fetch it
+// (ios/App/NoteViewController.swift). It is imported like a file chosen here, name prompt and all.
+addEventListener('shared', async e => {
+  try {
+    if (e.detail.error) throw new Error(e.detail.error);
+    importFiles([new File([await (await fetch(e.detail.url)).blob()], e.detail.name)]);
+  } catch {
+    notify(`Could not open ${e.detail?.name ?? 'that file'}.`);
+  }
+});
+window.webkit?.messageHandlers?.shared?.postMessage({ ready: true }); // ready for any that were shared before the page was up
 
 showLibrary();
 askVideos();

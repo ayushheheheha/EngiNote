@@ -45,6 +45,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "mic")
         configuration.userContentController.add(self, name: "camera")
         configuration.userContentController.add(self, name: "export")
+        configuration.userContentController.add(self, name: "shared")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -306,8 +307,41 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "mic": recorder.check(on: body["on"] as? Bool ?? false, enhance: body["enhance"] as? Bool ?? false)
         case "camera": showCamera(body)
         case "export": export(body)
+        case "shared": pageReady = true; deliverShared() // the page is up: what was shared to the app can go to it
         default: break
         }
+    }
+
+    // MARK: Files shared to the app
+
+    private var pageReady = false
+    private var waiting: [[String: Any]] = []
+
+    /// A web page or PDF the user shared to EngiNote (or opened with it). It is copied to the shared
+    /// folder at once, as the system may take the original back, and handed to the page, which fetches
+    /// it from enginote://app/shared/ and imports it like a file it was given itself.
+    func receive(_ urls: [URL]) {
+        try? FileManager.default.createDirectory(at: WebFiles.sharedFolder, withIntermediateDirectories: true)
+        for url in urls {
+            let opened = url.startAccessingSecurityScopedResource()
+            defer { if opened { url.stopAccessingSecurityScopedResource() } }
+            let type = url.pathExtension.lowercased()
+            guard ["html", "htm", "pdf"].contains(type) else { continue }
+            let kept = UUID().uuidString + "." + type
+            do {
+                try FileManager.default.copyItem(at: url, to: WebFiles.sharedFolder.appendingPathComponent(kept))
+                waiting.append(["name": url.lastPathComponent, "url": "enginote://app/shared/" + kept])
+            } catch {
+                send("shared", ["name": url.lastPathComponent, "error": error.localizedDescription])
+            }
+        }
+        deliverShared()
+    }
+
+    private func deliverShared() {
+        guard pageReady else { return } // the page asks for them as it starts
+        for file in waiting { send("shared", file) }
+        waiting.removeAll()
     }
 
     // MARK: Exporting a note as a PDF

@@ -23,8 +23,17 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = NoteViewController()
+        let notes = NoteViewController()
+        window.rootViewController = notes
         window.makeKeyAndVisible()
         self.window = window
+        // Opened by sharing a file to EngiNote while the app was not running.
+        let urls = connectionOptions.urlContexts.map { $0.url }
+        if !urls.isEmpty { notes.receive(urls) }
+    }
+
+    // Opened by sharing a file to EngiNote while the app was running.
+    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+        (window?.rootViewController as? NoteViewController)?.receive(contexts.map { $0.url })
     }
 }
