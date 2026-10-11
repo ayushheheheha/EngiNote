@@ -104,6 +104,7 @@
             <button class="btn-secondary" type="button" data-add="flow">Flow pen</button>
             <button class="btn-secondary" type="button" data-add="glow">Glow pen</button>
             <button class="btn-secondary" type="button" data-add="highlighter">Highlighter</button>
+            <button class="btn-secondary" type="button" data-add="laser">Laser</button>
           </div>
         </div>
         <span class="sep"></span>
@@ -206,6 +207,10 @@
       </label>
       <label class="panel-row">Opacity <output id="pen-opacity-out"></output>
         <input id="pen-opacity" type="range" min="10" max="100" step="5">
+      </label>
+      <!-- How much the pen steadies the hand: its ink trails the tip by this much. 0: not at all. -->
+      <label class="panel-row" title="Steadies the line: higher is smoother and trails the tip more">Stability <output id="pen-stability-out"></output>
+        <input id="pen-stability" type="range" min="0" max="10" step="1">
       </label>
       <div id="pen-colors" role="group" aria-label="Colour">
         <button class="icon-btn swatch" type="button" data-color="#111111" style="--c:#111111" title="Black" aria-label="Black"></button>

@@ -745,11 +745,15 @@ const PEN_TYPES = {
   flow: { name: 'Flow pen', tool: 'flow', size: 4, opacity: 1 },
   glow: { name: 'Glow pen', tool: 'glow', size: 4, opacity: 1 },
   highlighter: { name: 'Highlighter', tool: 'highlighter', size: 4, opacity: 0.35 },
+  laser: { name: 'Laser', tool: 'laser', size: 4, opacity: 1 }, // for pointing: its line fades and is never part of the note
 };
+const STABILITY = 3; // a new pen's: how far its ink trails the tip to steady the line, 0 (not at all) to 10
 const MAX_PENS = 12; // the full-screen rail has to hold every one of them
 const FIRST_PENS = [['pen', '#111111'], ['pen', '#ffffff'], ['pen', '#ff1744'], ['flow', '#1c7ed6'], ['glow', '#ffea00'], ['highlighter', '#ffea00']];
-const newPen = (type, color) => ({ id: newId(), type, color, size: PEN_TYPES[type].size, opacity: PEN_TYPES[type].opacity });
+const newPen = (type, color) => ({ id: newId(), type, color, size: PEN_TYPES[type].size, opacity: PEN_TYPES[type].opacity, stability: STABILITY });
 const within1 = (n, low, high) => Math.min(high, Math.max(low, n));
+// A saved pen's stability. 0 is a real setting, so this is not `|| STABILITY`; a pen saved before pens had one gets the usual.
+const stabilityOf = p => { const n = Number(p.stability ?? STABILITY); return n >= 0 ? Math.min(10, n) : STABILITY; };
 
 // The saved pens, or the starting set. What comes out of storage is checked: only pens that can be drawn with.
 function readPens() {
@@ -758,7 +762,7 @@ function readPens() {
   const saved = (Array.isArray(list) ? list : [])
     .filter(p => p && PEN_TYPES[p.type] && typeof p.id === 'string' && p.id !== 'eraser' && p.id !== 'hand' && /^#[0-9a-f]{6}$/i.test(p.color))
     .slice(0, MAX_PENS)
-    .map(p => ({ id: p.id, type: p.type, color: p.color, size: within1(+p.size || 3, 1, 12), opacity: within1(+p.opacity || 1, 0.1, 1) }));
+    .map(p => ({ id: p.id, type: p.type, color: p.color, size: within1(+p.size || 3, 1, 12), opacity: within1(+p.opacity || 1, 0.1, 1), stability: stabilityOf(p) }));
   return saved.length ? saved : FIRST_PENS.map(([type, color]) => newPen(type, color));
 }
 
@@ -788,6 +792,8 @@ const PEN_TIPS = {
   glow: '<g class="lit">' + shaded('path d="M12 2.6 17 18H7z"', 'tip') + '</g><path class="spark" d="M4.2 3.4v4M2.2 5.4h4M20.4 8.6v3M18.9 10.1h3"/>',
   // a chisel
   highlighter: shaded('path d="M7 18V8.4l10-5V18z"', 'tip'),
+  // a metal nozzle, and the dot of light it throws
+  laser: '<path d="M7.6 18v-6.4l1.9-2.8h5l1.9 2.8V18z" fill="url(#pen-metal)"/><g class="lit"><circle class="tip" cx="12" cy="4" r="2.7"/></g>',
 };
 function penPicture(type) {
   const wide = type === 'highlighter'; // a highlighter is a stouter pen
@@ -840,6 +846,7 @@ function usePen(pen) {
   ink.setColor(pen.color);
   ink.setSize(pen.size);
   ink.setOpacity(pen.opacity);
+  ink.setStability(pen.stability);
 }
 
 // Make `value` the tool: 'eraser', 'hand', 'lasso' or a pen's id.
@@ -865,6 +872,7 @@ function choose(value) {
 
 const editor = $('editor'), panel = $('pen-panel'), removeBtn = $('pen-remove');
 const sizeRange = $('pen-size'), opacityRange = $('pen-opacity'), customColor = $('pen-custom');
+const stabilityRange = $('pen-stability');
 
 function fillPanel(pen) {
   $('pen-type').textContent = PEN_TYPES[pen.type].name;
@@ -872,6 +880,9 @@ function fillPanel(pen) {
   $('pen-size-out').textContent = pen.size;
   opacityRange.value = Math.round(pen.opacity * 100);
   $('pen-opacity-out').textContent = `${opacityRange.value}%`;
+  opacityRange.parentElement.hidden = pen.type === 'laser'; // a laser's line fades by itself: it has no opacity to set
+  stabilityRange.value = pen.stability;
+  $('pen-stability-out').textContent = pen.stability;
   let listed = false;
   for (const btn of panel.querySelectorAll('[data-color]')) {
     const on = btn.dataset.color === pen.color.toLowerCase();
@@ -914,6 +925,7 @@ function editPen(change) {
 }
 sizeRange.oninput = () => editPen({ size: Number(sizeRange.value) });
 opacityRange.oninput = () => editPen({ opacity: opacityRange.value / 100 });
+stabilityRange.oninput = () => editPen({ stability: Number(stabilityRange.value) });
 customColor.oninput = () => editPen({ color: customColor.value });
 $('pen-colors').addEventListener('click', e => {
   const color = e.target.closest('[data-color]')?.dataset.color;
@@ -936,7 +948,7 @@ addWrap.addEventListener('click', e => {
   const type = e.target.closest('[data-add]')?.dataset.add;
   if (!type || pens.length >= MAX_PENS) return;
   addFly.set(false);
-  const pen = newPen(type, type === 'highlighter' ? '#ffea00' : penOf(tool)?.color ?? '#111111');
+  const pen = newPen(type, { highlighter: '#ffea00', laser: '#ff1744' }[type] ?? penOf(tool)?.color ?? '#111111');
   pens.push(pen);
   renderPens(pen.id);
   choose(pen.id);

@@ -8,6 +8,7 @@
 <script type="module">
 import { createInk, pathData, boxOf, hitStroke, distToSegment, opacityOf } from './ink.js';
 import { createLasso, inLoop, pick, reshape } from './lasso.js';
+import { recognise, aim } from './shapes.js';
 
 const out = document.getElementById('out');
 let passed = 0, failed = 0;
@@ -522,6 +523,263 @@ try {
   check('ink lands under the pointer when an ancestor is scaled with a CSS transform',
     Math.abs(shrunk.width - 400) < 1 && String(scaled[0]) === '100,50' && String(scaled.at(-1)) === '200,60');
   ink.undo();
+
+  // --- shapes.js: what a rough drawing was meant to be ---
+  // Drawings by program: points every 2 units along a path, then shaken (a slow drift of the hand and a tremor).
+  const along = (...corners) => corners.slice(1).flatMap((b, i) => {
+    const a = corners[i], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+    return Array.from({ length: n + (i === corners.length - 2) }, (_, k) => [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+  });
+  // `turns` of the way round an ellipse (backwards if negative), starting at the angle `from`.
+  const oval = (cx, cy, rx, ry = rx, tilt = 0, turns = 1, from = 0) => Array.from({ length: Math.ceil(Math.abs(turns) * rx * 3) + 1 }, (_, i) => {
+    const t = from + i / Math.ceil(Math.abs(turns) * rx * 3) * turns * 2 * Math.PI, x = rx * Math.cos(t), y = ry * Math.sin(t);
+    return [cx + x * Math.cos(tilt) - y * Math.sin(tilt), cy + x * Math.sin(tilt) + y * Math.cos(tilt)];
+  });
+  const shaky = (pts, amp = 2) => pts.map(([x, y], i) => [x + amp * (Math.sin(i / 9) + 0.3 * Math.sin(i * 1.7)), y + amp * (Math.cos(i / 7) + 0.3 * Math.cos(i * 2.3))]);
+  const kind = pts => recognise(pts)?.kind ?? null;
+  // The straight stretches of a clean shape, as [heading, length]: its points taken in turn, a new stretch wherever the heading changes.
+  const sidesOf = pts => pts.slice(1).reduce((runs, p, i) => {
+    const dx = p[0] - pts[i][0], dy = p[1] - pts[i][1], heading = Math.atan2(dy, dx), last = runs.at(-1);
+    if (Math.hypot(dx, dy) < 0.05) return runs;   // a corner is there twice
+    if (last && Math.abs(Math.atan2(Math.sin(heading - last[0]), Math.cos(heading - last[0]))) < 0.02) last[1] += Math.hypot(dx, dy);
+    else runs.push([heading, Math.hypot(dx, dy)]);
+    return runs;
+  }, []);
+  const turnsBy = (sides, angle) => sides.every(([heading], i) => Math.abs(Math.abs(Math.sin(sides[(i + 1) % sides.length][0] - heading)) - Math.sin(angle)) < 0.03);
+  const closed = pts => String(pts[0]) === String(pts.at(-1));
+  // How far the points stray from the one ellipse with this centre, these radii and this tilt.
+  const offEllipse = (pts, cx, cy, rx, ry, tilt = 0) => Math.max(...pts.map(([x, y]) => {
+    const u = (x - cx) * Math.cos(tilt) + (y - cy) * Math.sin(tilt), v = (y - cy) * Math.cos(tilt) - (x - cx) * Math.sin(tilt), r = Math.hypot(u, v);
+    return Math.abs(r - r / Math.hypot(u / rx, v / ry));
+  }));
+
+  const roughLine = shaky(along([100, 100], [300, 160]));
+  const madeLine = recognise(roughLine);
+  check('recognise: a shaky line is a straight line between its two ends, as two points',
+    madeLine.kind === 'line' && madeLine.points.length === 2 && String(madeLine.points[0]) === String(roughLine[0]) && String(madeLine.points[1]) === String(roughLine.at(-1)));
+  check('recognise: a line within 3 degrees of level, upright or 45 degrees is put exactly on it',
+    (level => level.kind === 'line' && level.points[1][1] === level.points[0][1] && Math.abs(level.points[1][0] - 300) < 3)(recognise(shaky(along([100, 100], [300, 106]), 1))) &&
+    String(aim([10, 10], [110, 14])) === '110,10' && String(aim([10, 10], [13, 110])) === '10,110' && String(aim([0, 0], [100, 104])) === '102,102' &&
+    String(aim([0, 0], [-100, 97])) === '-98.5,98.5');
+  check('...and left alone further off than that', String(aim([10, 10], [110, 20])) === '110,20' && String(aim([0, 0], [100, 80])) === '100,80');
+
+  const madeCircle = recognise(shaky(oval(200, 150, 60)));
+  const ring = madeCircle.points, ringBox = boxOf({ tool: 'pen', size: 0, points: ring });
+  const ringR = (ringBox[2] - ringBox[0]) / 2, ringX = (ringBox[0] + ringBox[2]) / 2, ringY = (ringBox[1] + ringBox[3]) / 2;
+  check('recognise: a shaky circle is a circle: every point on one, about where it was drawn',
+    madeCircle.kind === 'ellipse' && closed(ring) && ring.length > 60 && offEllipse(ring, ringX, ringY, ringR, ringR) < 0.02 &&
+    Math.abs(ringR - 60) < 3 && Math.hypot(ringX - 200, ringY - 150) < 4);
+  check('recognise: so is one drawn a little past its start, or stopped a little short of it',
+    kind(shaky(oval(200, 150, 60, 60, 0, 1.12))) === 'ellipse' && kind(shaky(oval(200, 150, 60, 60, 0, 0.95))) === 'ellipse');
+  const madeOval = recognise(shaky(oval(200, 150, 90, 40)));
+  check('recognise: a shaky oval is an upright ellipse', madeOval.kind === 'ellipse' && offEllipse(madeOval.points, 200, 150, 90, 40) < 3 &&
+    offEllipse(madeOval.points, ...(b => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2])(boxOf({ tool: 'pen', size: 0, points: madeOval.points }))) < 0.02);
+  const madeTilted = recognise(shaky(oval(200, 150, 90, 35, 0.6)));
+  check('recognise: a tilted oval is an ellipse at that tilt', madeTilted.kind === 'ellipse' && offEllipse(madeTilted.points, 200, 150, 90, 35, 0.6) < 3);
+
+  const madeRect = recognise(shaky(along([100, 80], [300, 80], [300, 200], [100, 200], [100, 80])));
+  const rectSides = sidesOf(madeRect.points);
+  check('recognise: a shaky rectangle is a rectangle: four straight sides, square corners, level and upright',
+    madeRect.kind === 'rect' && closed(madeRect.points) && rectSides.length === 4 && turnsBy(rectSides, Math.PI / 2) &&
+    Math.abs(Math.sin(rectSides[0][0])) < 0.001 && Math.abs(rectSides[0][1] - 200) < 5 && Math.abs(rectSides[1][1] - 120) < 5);
+  const turned = pts => pts.map(([x, y]) => [200 + (x - 200) * Math.cos(0.5) - (y - 150) * Math.sin(0.5), 150 + (x - 200) * Math.sin(0.5) + (y - 150) * Math.cos(0.5)]);
+  const tiltedSides = sidesOf(recognise(shaky(turned(along([100, 80], [300, 80], [300, 200], [100, 200], [100, 80])))).points);
+  check('recognise: a rectangle drawn at a tilt keeps its tilt, and its square corners',
+    tiltedSides.length === 4 && turnsBy(tiltedSides, Math.PI / 2) && Math.abs(Math.abs(Math.tan(tiltedSides[0][0])) - Math.tan(0.5)) < 0.03);
+  const madeTriangle = recognise(shaky(along([200, 60], [300, 230], [100, 230], [200, 60])));
+  const triSides = sidesOf(madeTriangle.points);
+  check('recognise: a shaky triangle is a triangle: three straight sides, about as long as drawn, its base level',
+    madeTriangle.kind === 'triangle' && closed(madeTriangle.points) && triSides.length === 3 &&
+    triSides.every(([, length]) => Math.abs(length - 200) < 8) && triSides.some(([heading]) => Math.abs(Math.sin(heading)) < 0.001));
+  check('recognise: a shape\'s points are plain [x, y], whatever came in',
+    recognise(roughLine.map(p => [...p, 0.7])).points.every(p => p.length === 2) && recognise(shaky(oval(200, 150, 60)).map(p => [...p, 0.7])).points.every(p => p.length === 2));
+
+  // Not shapes. A wrong shape is worse than none, so each of these must come back as nothing.
+  const none = {
+    'an arc': oval(200, 150, 120, 120, 0, 0.2),
+    'half a circle': oval(200, 150, 80, 80, 0, 0.5),
+    'a wave': Array.from({ length: 120 }, (_, i) => [80 + i * 2, 150 + 20 * Math.sin(i / 12)]),
+    'a zigzag': along([80, 150], [110, 110], [140, 150], [170, 110], [200, 150], [230, 110], [260, 150]),
+    'a scribble over itself': along([120, 100], [240, 110], [125, 125], [238, 140], [120, 155], [242, 170], [124, 185], [240, 200], [130, 190], [120, 100]),
+    'a circle gone round twice': oval(200, 150, 60, 60, 0, 2),
+    'a figure 8': [...oval(200, 110, 40, 40, 0, 1, Math.PI / 2), ...oval(200, 190, 40, 40, 0, -1, -Math.PI / 2)],
+    'the letter L': along([120, 60], [120, 220], [220, 220]),
+    'the letter Z': along([120, 80], [240, 80], [120, 220], [240, 220]),
+    'the letter a (a loop and a tail)': [...oval(200, 150, 40, 45, 0, -1, 0.3), ...along([240, 110], [242, 195], [252, 200])],
+    'the letter b (a stem and a bowl)': [...along([150, 40], [150, 200]), ...oval(190, 160, 40, 40, 0, 1, Math.PI)],
+    'the letter D': [...along([150, 60], [150, 240], [190, 240]), ...oval(190, 150, 90, 90, 0, -0.5, Math.PI / 2), ...along([190, 60], [150, 60])],
+    'a five-sided shape': along(...Array.from({ length: 6 }, (_, i) => [200 + 80 * Math.sin(i * 2 * Math.PI / 5), 150 - 80 * Math.cos(i * 2 * Math.PI / 5)])),
+    'a slanted box': along([140, 80], [320, 80], [260, 200], [80, 200], [140, 80]),
+    'a box with a narrow top': along([150, 80], [250, 80], [320, 200], [80, 200], [150, 80]),
+    'a line gone over twice': along([80, 150], [320, 154], [80, 158], [82, 150]),
+    'an arrow': along([80, 150], [320, 150], [290, 120], [320, 150], [290, 180]),
+    'a dot': [[100, 100], [100.5, 100.2]],
+    'a small o, as in handwriting': oval(200, 150, 8, 10),
+    'a dash too short to matter': along([100, 100], [112, 101]),
+  };
+  for (const [name, pts] of Object.entries(none)) {
+    check(`recognise: ${name} is no shape, clean or shaky`, kind(pts) === null && kind(shaky(pts, 1.5)) === null);
+  }
+
+  // --- stability: how far the ink trails the tip is the pen's own setting ---
+  // A line up the same slope as above, drawn at a given stability through the positions `path` gives.
+  // Returns the stored points, how far they stray from the true line (screen px), and the positions that were reported.
+  const drawnAt = (stability, path) => {
+    ink.load([]);
+    ink.setStability(stability);
+    const seen = new Set([`50,${path(50)}`]);
+    fire('pointerdown', 50, path(50), 'pen', 2, { pressure: 0.5 });
+    for (let x = 50.5; x <= 150; x += 0.5) { fire('pointermove', x, path(x), 'pen', 2, { pressure: 0.5 }); seen.add(`${x},${path(x)}`); }
+    fire('pointerup', 150, path(150), 'pen', 2, { buttons: 0 });
+    const points = ink.getStrokes()[0].points;
+    // (not its two ends: the stroke begins where the stylus landed and ends where it lifted, whatever the smoothing)
+    return { points, seen, stray: Math.max(...points.slice(5, -1).map(([x, y]) => Math.abs(y - (180 + (x - 50) * 0.3)) * 2 * Math.cos(Math.atan(0.3)))) };
+  };
+  const raw = drawnAt(0, slope), usual = drawnAt(3, slope), steady = drawnAt(10, slope);
+  check('stability 0 does not smooth at all: every stored point is a position the stylus reported, stairs and all',
+    raw.points.length > 20 && raw.points.every(p => raw.seen.has(String(p))) && raw.stray > 0.35);
+  check('stability 3 is the smoothing there has always been', usual.stray < 0.3 && usual.stray < raw.stray * 0.7);
+  check('stability 10 smooths the stairs further still', steady.stray < usual.stray * 0.7 && steady.points.length > 20);
+  check('...and its line still ends exactly where the tip left the page', String(steady.points.at(-1)) === `150,${slope(150)}`);
+  // A trembling hand: the tip 1.5 screen px to one side of the line, then to the other, turn about every 6px.
+  const tremble = x => Math.round((180 + (x - 50) * 0.3 + (Math.floor(x / 3) % 2 ? 0.75 : -0.75)) * 100) / 100;
+  const shakes = [0, 3, 10].map(n => drawnAt(n, tremble).stray);
+  check('a tremor of 1.5px is all there at stability 0, somewhat less at 3, and less than a third of it at 10',
+    shakes[0] > 1.4 && shakes[1] < shakes[0] * 0.85 && shakes[2] < shakes[1] * 0.5 && shakes[2] < shakes[0] / 3);
+  ink.setStability(3);
+
+  // --- the laser: a line to point with, that is never one of the strokes ---
+  ink.load([{ tool: 'pen', color: '#000', size: 3, points: [[50, 50], [150, 50]] }]);
+  changes = erases = 0;
+  const [inkGroup, beamGroup] = svg.querySelectorAll(':scope > g');
+  ink.setColor('#ff1744');
+  ink.setTool('laser');
+  fire('pointerdown', 60, 100, 'pen', 2, { pressure: 0.5 });
+  fire('pointermove', 140, 110, 'pen', 2, { pressure: 0.5 });
+  const beam = beamGroup.firstElementChild;
+  check('the laser draws a glowing line while the stylus is down, apart from the strokes',
+    beamGroup.children.length === 1 && beam.tagName === 'g' && beam.children.length === 5 && beam.children[3].getAttribute('stroke') === '#ff1744' &&
+    beam.children[0].getAttribute('d').startsWith('M60 100') && inkGroup.children.length === 1);
+  fire('pointerup', 140, 110, 'pen', 2, { buttons: 0 });
+  check('lifting it adds no stroke, tells nobody, and leaves nothing to undo',
+    ink.getStrokes().length === 1 && changes === 0 && !ink.canUndo() && !ink.canRedo());
+  check('the line is still there, fading by itself', beam.isConnected && beam.getAnimations().length === 1);
+  drag(60, 100, 140, 110, 'pen');
+  check('each laser line fades on its own', beamGroup.children.length === 2 && beamGroup.children[1].getAnimations().length === 1);
+  ink.setTool('eraser');
+  drag(100, 90, 100, 120);   // straight across both laser lines
+  check('the eraser does nothing to a laser line', beamGroup.children.length === 2 && ink.getStrokes().length === 1 && changes === 0 && erases === 0);
+  ink.setTool('laser');
+  drag(60, 120, 140, 120, 'touch');
+  check('a finger does not draw with the laser either: it scrolls', beamGroup.children.length === 2);
+  ink.load(ink.getStrokes());
+  check('opening a note clears away any laser line still fading', beamGroup.children.length === 0 && inkGroup.children.length === 1);
+  ink.setTool('pen');
+
+  // --- hold the tip still at the end of a stroke: it becomes the shape it was meant to be ---
+  // Each drawing gets a sheet and an engine of its own, so that all of them can be held at the same
+  // time: one short real wait for the lot (the hold is half a second in the app, 20ms here).
+  const wait = ms => new Promise(done => setTimeout(done, ms));
+  const sheet = (tool, opacity = 1) => {
+    const el = svg.cloneNode(false), s = { changes: 0 };
+    el.removeAttribute('id');
+    out.before(el);
+    s.ink = createInk(el, { onChange: () => s.changes++ });
+    s.ink.setTool(tool);
+    s.ink.setOpacity(opacity);
+    s.ink.setHold(20);
+    s.fire = (type, [x, y], buttons = 1) => {
+      const at = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent(type, { pointerId: 2, pointerType: 'pen', button: 0, buttons, pressure: 0.6, bubbles: true, cancelable: true, clientX: at.left + x * 2, clientY: at.top + y * 2 }));
+    };
+    // A stylus stroke through the points, the stylus left down at its end.
+    s.trace = pts => pts.forEach((pt, i) => s.fire(i ? 'pointermove' : 'pointerdown', pt));
+    s.lift = pt => s.fire('pointerup', pt, 0);
+    [s.strokes, s.beams] = el.querySelectorAll(':scope > g');
+    s.last = () => s.ink.getStrokes().at(-1);
+    return s;
+  };
+  const drawnLine = shaky(along([60, 60], [260, 120])), drawnCircle = shaky(oval(200, 150, 60));
+  const drawnBox = shaky(along([100, 80], [300, 80], [300, 200], [100, 200], [100, 80])), drawnTriangle = shaky(along([200, 60], [300, 230], [100, 230], [200, 60]));
+  const letter = shaky(none['the letter a (a loop and a tail)'], 1), scrawl = shaky(none['a scribble over itself'], 1);
+
+  const quick = sheet('pen');
+  quick.trace(drawnLine);
+  quick.lift(drawnLine.at(-1));
+  quick.trace(drawnCircle);
+  quick.lift(drawnCircle.at(-1));
+  const holds = {
+    line: [sheet('pen'), drawnLine], circle: [sheet('glow', 0.5), drawnCircle], box: [sheet('flow'), drawnBox], triangle: [sheet('highlighter'), drawnTriangle],
+    letter: [sheet('pen'), letter], scrawl: [sheet('pen'), scrawl], part: [sheet('pen'), drawnCircle.slice(0, 40)], laser: [sheet('laser'), drawnLine],
+  };
+  for (const [s, pts] of Object.values(holds)) s.trace(pts);
+  await wait(40);   // every stylus has now been held still long enough
+  check('a shaky line and a shaky circle that are lifted straight away are kept as drawn',
+    quick.ink.getStrokes().length === 2 && quick.ink.getStrokes()[0].points.length > 20 && offEllipse(quick.last().points, 200, 150, 60, 60) > 1 && quick.changes === 2);
+
+  const [liner] = holds.line;
+  check('a shaky line held still at its end becomes a straight line there and then, before the stylus lifts',
+    /^M[\d.]+ [\d.]+L[\d.]+ [\d.]+$/.test(liner.strokes.lastElementChild.getAttribute('d')) && liner.ink.getStrokes().length === 0 && liner.changes === 0);
+  liner.fire('pointermove', [250, 160]);
+  check('...whose far end then follows the stylus', liner.strokes.lastElementChild.getAttribute('d').endsWith('L250 160'));
+  liner.fire('pointermove', [260, 62]);
+  liner.lift([260, 62]);
+  const straight = liner.last();
+  check('lifted: a two-point stroke from where it began to where the stylus left, put level because it was within 3 degrees of it',
+    straight.points.length === 2 && String(straight.points[0]) === String(quick.ink.getStrokes()[0].points[0]) && String(straight.points[1]) === `260,${straight.points[0][1]}` &&
+    straight.tool === 'pen' && liner.changes === 1);
+  liner.ink.undo();
+  check('the straightened line is one step to undo', liner.ink.getStrokes().length === 0 && !liner.ink.canUndo());
+  liner.ink.redo();
+  liner.ink.setTool('eraser');
+  liner.fire('pointerdown', [160, 40]); liner.fire('pointermove', [160, 80]); liner.lift([160, 80]);
+  check('...and it is erased like any stroke', liner.ink.getStrokes().length === 0 && liner.strokes.children.length === 0);
+
+  const [rounder] = holds.circle;
+  rounder.fire('pointermove', [300, 250]);   // a closed shape does not follow the stylus afterwards
+  rounder.lift([300, 250]);
+  const circled = rounder.last(), circleBox = boxOf({ ...circled, size: 0 }), circleR = (circleBox[2] - circleBox[0]) / 2;
+  check('a shaky circle held is stored as a circle, in the same pen: tool, colour, size and opacity',
+    rounder.ink.getStrokes().length === 1 && offEllipse(circled.points, (circleBox[0] + circleBox[2]) / 2, (circleBox[1] + circleBox[3]) / 2, circleR, circleR) < 0.02 &&
+    Math.abs(circleR - 60) < 3 && circled.tool === 'glow' && circled.color === '#000' && circled.size === 3 && circled.opacity === 0.5 &&
+    rounder.strokes.lastElementChild.tagName === 'g' && rounder.strokes.lastElementChild.getAttribute('opacity') === '0.5');
+  rounder.ink.load(rounder.ink.getStrokes());
+  check('...and it survives save and load', String(rounder.last().points) === String(circled.points) && rounder.last().tool === 'glow' && rounder.last().opacity === 0.5);
+
+  const [boxer] = holds.box;
+  boxer.lift(drawnBox.at(-1));
+  const boxed = boxer.last(), boxSides = sidesOf(boxed.points), boxEl = boxer.strokes.lastElementChild;
+  // How thick the ink is at (x, y), measured across it along (dx, dy).
+  const across = (x, y, dx, dy) => { let n = 0; for (let k = -8; k <= 8; k += 0.1) if (boxEl.isPointInFill(new DOMPoint(x + dx * k, y + dy * k))) n++; return n / 10; };
+  check('a shaky rectangle held with the flow pen is a rectangle of four straight sides and square corners',
+    boxed.tool === 'flow' && boxSides.length === 4 && turnsBy(boxSides, Math.PI / 2) && closed(boxed.points));
+  check('...evenly wide: the same pressure on every point, and as thick across each side as the pen\'s size',
+    boxed.points.every(p => p[2] === 0.5) && [across(200, boxed.points[0][1], 0, 1), across(150, boxed.points[0][1], 0, 1), across(boxed.points[0][0], 140, 1, 0)].every(w => Math.abs(w - 3) < 0.4));
+
+  const [pointer] = holds.triangle;
+  pointer.lift(drawnTriangle.at(-1));
+  check('a shaky triangle held with the highlighter is a triangle of three straight sides',
+    pointer.last().tool === 'highlighter' && sidesOf(pointer.last().points).length === 3 && closed(pointer.last().points));
+
+  holds.letter[0].lift(letter.at(-1));
+  holds.scrawl[0].lift(scrawl.at(-1));
+  check('a letter or a scribble that is held stays exactly as drawn',
+    [holds.letter[0], holds.scrawl[0]].every(s => s.ink.getStrokes().length === 1 && s.last().points.length > 40 && sidesOf(s.last().points).length > 8));
+
+  const [beamer] = holds.laser;
+  check('the laser is never made into a shape', beamer.beams.lastElementChild.firstElementChild.getAttribute('d').includes('Q'));
+  beamer.lift(drawnLine.at(-1));
+
+  // Held part of the way round: no shape yet, so nothing changes, and the hold at the end can still find one.
+  const [later] = holds.part;
+  const partWay = later.strokes.lastElementChild.getAttribute('d');
+  drawnCircle.slice(40).forEach(pt => later.fire('pointermove', pt));
+  await wait(40);
+  later.lift(drawnCircle.at(-1));
+  check('a hold in the middle of a drawing that is no shape yet changes nothing; the hold at its end still makes the shape',
+    partWay.includes('Q') && later.ink.getStrokes().length === 1 && offEllipse(later.last().points, 200, 150, 60, 60) < 3 && closed(later.last().points));
+  document.querySelectorAll('svg:not(#s)').forEach(el => el.remove());
+
 } catch (err) {
   failed++;
   line(`ERROR  ${err && err.stack || err}`, false);
