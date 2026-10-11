@@ -1,0 +1,67 @@
+# Starts the iPad app in an iPad simulator on a cloud Mac and takes a picture of it: does it start,
+# stay up, and show the library? Run by hand. It publishes nothing (the release is ios.yml's).
+# A simulator has no camera and no Pencil, so this is not a test of those: the iPad is.
+name: iPad app, simulator check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  start:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools on this machine
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+
+      # The same files, copied the same way, as in ios.yml.
+      - name: Put the web app inside the iOS project
+        run: |
+          mkdir -p ios/web
+          cp $(grep -m1 '^ *cp index.html' .github/workflows/ios.yml | sed 's/^ *cp //; s| ios/web/$||') ios/web/
+          ls ios/web
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Choose an iPad simulator
+        run: |
+          xcrun simctl list devices available | grep -i ipad || true
+          udid=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          found = [(runtime, d['name'], d['udid']) for runtime, ds in json.load(sys.stdin)['devices'].items() if 'iOS' in runtime for d in ds if 'iPad' in d['name']]
+          print(sorted(found)[-1][2])")
+          echo "UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+
+      - name: Build for the simulator
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project EngiNote.xcodeproj -scheme EngiNote -configuration Debug \
+            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+
+      - name: Start it, wait, and look
+        run: |
+          mkdir out
+          xcrun simctl install "$UDID" ios/build/Build/Products/Debug-iphonesimulator/EngiNote.app
+          xcrun simctl launch "$UDID" com.engikode.enginote
+          sleep 25
+          xcrun simctl io "$UDID" screenshot out/library.png
+          xcrun simctl spawn "$UDID" log show --last 2m --style compact --predicate 'process == "EngiNote"' > out/app.log 2>&1 || true
+          echo "--- faults and errors the app logged:"; grep -E " (F|E) " out/app.log | head -40 || true
+          echo "--- crash reports:"; ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i enginote || echo none
+          echo "--- still running?"
+          xcrun simctl spawn "$UDID" launchctl list | grep -i enginote
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-check
+          path: out
