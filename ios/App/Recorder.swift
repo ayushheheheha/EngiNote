@@ -25,9 +25,11 @@ final class Recorder {
 
     /// The choices offered by the page (index.html, #rec-quality): the names must match.
     static let qualities: [String: Quality] = [
-        "high": Quality(width: 1920, height: 1080, bitRate: 8_000_000),
-        "standard": Quality(width: 1920, height: 1080, bitRate: 4_000_000),
-        "small": Quality(width: 1280, height: 720, bitRate: 2_000_000),
+        // Fine handwriting is the hardest thing to encode: thin strokes smear at a low bit rate. Frames are
+        // asked for at 60 a second (see begin()), which is what makes the pen's line move smoothly.
+        "high": Quality(width: 1920, height: 1080, bitRate: 14_000_000),
+        "standard": Quality(width: 1920, height: 1080, bitRate: 7_000_000),
+        "small": Quality(width: 1280, height: 720, bitRate: 3_000_000),
     ]
 
     /// Called on the main thread, once, if writing fails while recording.
@@ -43,7 +45,7 @@ final class Recorder {
     private var writer: AVAssetWriter?
     private var video: AVAssetWriterInput?
     private var audio: AVAssetWriterInput?
-    private var quality = Quality(width: 1920, height: 1080, bitRate: 4_000_000)
+    private var quality = Quality(width: 1920, height: 1080, bitRate: 7_000_000)
     private var wholeScreen = false // keep all of the screen, not just the 16:9 band across its middle
     private var microphone = true
     private var failure: String?
@@ -58,6 +60,12 @@ final class Recorder {
     private var soundPieces = 0 // pieces of sound written so far
     private var metering = false // the page is showing the sound: see `checking`
     private var heardAt: TimeInterval = 0 // when the microphone last handed over sound (the device's uptime)
+
+    // What Studio needs to know about this recording afterwards (StudioCore.swift, Sidecar): where the pen
+    // wrote, where the camera bubble was, and when. Times are the wall clock in ms, because the page's
+    // clock is the wall clock; the first frame and the pauses are timed on it too, to line the two up.
+    private var sidecar = Sidecar()
+    private var pausedSince: Double?
 
     // The voice. The app listens to the microphone itself and writes what it hears into the movie;
     // ReplayKit records the picture only. (ReplayKit can pass on the microphone too, but on the
@@ -214,6 +222,8 @@ final class Recorder {
         self.offset = .zero
         self.lastEnd = .zero
         self.soundPieces = 0
+        self.sidecar = Sidecar()
+        self.pausedSince = nil
         if let known = Recorder.qualities[name] { self.quality = known }
         lock.unlock()
 
@@ -380,6 +390,7 @@ final class Recorder {
     /// Leave out everything from now until resume(). The movie carries on from there with no gap.
     func pause() {
         lock.lock()
+        if !paused { pausedSince = Sidecar.now() }
         paused = true
         lock.unlock()
     }
@@ -389,8 +400,46 @@ final class Recorder {
         if paused {
             paused = false
             rejoin = true
+            if let since = pausedSince { sidecar.pauses.append([since, Sidecar.now()]) }
+            pausedSince = nil
         }
         lock.unlock()
+    }
+
+    /// The pen's path from the page (app.js, sendTrace), and the part of the screen the video shows.
+    func addTrace(points: [[Double]], window: [Double]?) {
+        lock.lock()
+        sidecar.pen.append(contentsOf: points.filter { $0.count == 4 && $0.allSatisfy(\.isFinite) })
+        if let window = window, window.count == 4, window.allSatisfy(\.isFinite) { sidecar.window = window }
+        lock.unlock()
+    }
+
+    /// Where the camera bubble is now (screen points) and how round its corners are: called about once
+    /// a second while recording, and only a change is kept.
+    func addBubble(_ frame: CGRect, radius: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard writer != nil, sidecar.startedAt > 0 else { return }
+        let entry = [Sidecar.now(), Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height), radius]
+        if let last = sidecar.bubble.last, last[1...] == entry[1...] { return }
+        sidecar.bubble.append(entry)
+    }
+
+    /// The camera bubble was switched off: from now on there is none in the picture.
+    func bubbleGone() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard writer != nil, sidecar.startedAt > 0, let last = sidecar.bubble.last, last[3] > 0 else { return }
+        sidecar.bubble.append([Sidecar.now(), 0, 0, 0, 0, 0])
+    }
+
+    /// Write what Studio needs beside the movie. Not being able to is no reason to lose the recording.
+    private func saveSidecar(for movie: URL?) {
+        lock.lock()
+        let data = sidecar
+        lock.unlock()
+        guard let movie = movie, data.startedAt > 0 else { return }
+        data.save(for: movie)
     }
 
     /// Stop and finish the movie. `done` is called on the main thread with the file (nil if there
@@ -413,6 +462,7 @@ final class Recorder {
                 if !self.isActive { self.stopListening(unlessChecking: true) }
             }
 
+            self.saveSidecar(for: file)
             guard let writer = writer, video != nil, writer.status == .writing else {
                 // Nothing was being written, or writing had failed. A failed movie's finished pieces
                 // may still be on disk, and those are worth keeping.
@@ -578,5 +628,6 @@ final class Recorder {
             return
         }
         writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(buffer))
+        sidecar.startedAt = Sidecar.now()
     }
 }

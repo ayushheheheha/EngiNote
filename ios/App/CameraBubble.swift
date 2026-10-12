@@ -148,7 +148,15 @@ final class CameraBubble: UIView, UIGestureRecognizerDelegate {
             // audio either. The recorder's listening must stay exactly as it is.
             session.automaticallyConfiguresApplicationAudioSession = false
             session.addInput(input)
-            if session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 } // plenty for a bubble, and light work
+            // 1080p: the bubble is drawn at the screen's own sharpness and then shrunk into the video, so a bigger picture comes out cleaner.
+            if session.canSetSessionPreset(.hd1920x1080) { session.sessionPreset = .hd1920x1080 }
+            else if session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 }
+            // Center Stage: the picture follows the face, so the speaker stays framed while moving about. It is the
+            // system's own and the user can still turn it off in Control Centre.
+            if camera.activeFormat.isCenterStageSupported {
+                AVCaptureDevice.centerStageControlMode = .cooperative
+                AVCaptureDevice.isCenterStageEnabled = true
+            }
             // iPadOS may show the app in a window beside others, where the camera is otherwise taken away.
             if session.isMultitaskingCameraAccessSupported { session.isMultitaskingCameraAccessEnabled = true }
             session.commitConfiguration()

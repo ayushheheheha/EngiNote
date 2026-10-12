@@ -121,9 +121,9 @@ A recording bar sits at the bottom of the screen whenever a note is open.
 
 | Quality | Resolution | Size per hour, at most |
 |---|---|---|
-| High | 1080p | 3.6 GB |
-| Standard | 1080p | 1.8 GB |
-| Small | 720p | 0.9 GB |
+| High | 1080p, 60 frames a second | 6.3 GB |
+| Standard | 1080p, 60 frames a second | 3.2 GB |
+| Small | 720p, 60 frames a second | 1.4 GB |
 
 ## Things to know
 

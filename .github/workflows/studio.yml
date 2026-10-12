@@ -1,0 +1,29 @@
+# Tries Studio's video work (zoom, short, voice polish) on a cloud Mac with a made-up recording, and keeps
+# the pictures it makes. The iPad is the only real test, but this one catches what can be caught without it.
+name: Studio test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/App/Studio*.swift'
+      - 'ios/StudioTests/**'
+      - '.github/workflows/studio.yml'
+
+jobs:
+  studio:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the test
+        run: |
+          xcodebuild -version
+          swiftc -O -swift-version 5 ios/App/StudioCore.swift ios/App/StudioAudio.swift ios/App/StudioCompositor.swift ios/App/StudioRender.swift ios/StudioTests/main.swift -o studiotest
+      - name: Run it
+        run: ./studiotest studio-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-pictures
+          path: studio-out

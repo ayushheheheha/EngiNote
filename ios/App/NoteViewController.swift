@@ -171,6 +171,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     return
                 }
                 UIApplication.shared.isIdleTimerDisabled = true // the screen must not lock in the middle of a lecture
+                self.watchBubble()
                 var news: [String: Any] = ["state": "recording"]
                 if let note = note { news["message"] = note }
                 self.send("recorder", news)
@@ -181,6 +182,13 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     self.send("recorder", ["state": "recording", "message": "Warning: no sound is being recorded. Stop and start again; if it stays silent, switch Enhance the other way."])
                 }
             }
+        case "trace": // where the pen is writing, for Studio's auto-zoom (app.js, sendTrace)
+            var window: [Double]?
+            if let box = body["window"] as? [String: Any], let x = box["x"] as? Double, let y = box["y"] as? Double,
+               let w = box["w"] as? Double, let h = box["h"] as? Double {
+                window = [x, y, w, h]
+            }
+            recorder.addTrace(points: body["points"] as? [[Double]] ?? [], window: window)
         case "pause" where recorder.isActive:
             recorder.pause()
             send("recorder", ["state": "paused"])
@@ -195,8 +203,24 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         }
     }
 
+    // The camera bubble is part of the picture; Studio needs to know where it was (to keep it still when it
+    // zooms), so while recording its place is noted once a second.
+    private var bubbleTimer: Timer?
+
+    private func watchBubble() {
+        bubbleTimer?.invalidate()
+        sampleBubble()
+        bubbleTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.sampleBubble() }
+    }
+
+    private func sampleBubble() {
+        if camera.isHidden { recorder.bubbleGone() } else { recorder.addBubble(camera.frame, radius: Double(camera.layer.cornerRadius)) }
+    }
+
     /// Stop, finish the movie and tell the page. `problem`: why, if it was not the user's choice.
     private func stopRecording(because problem: String?) {
+        bubbleTimer?.invalidate()
+        bubbleTimer = nil
         guard recorder.isActive else {
             send("recorder", ["state": "idle"])
             return

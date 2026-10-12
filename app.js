@@ -1809,8 +1809,34 @@ if (shellRecorder) {
     showTime();
   }
 
+  // Where the pen writes, kept with the recording so that Studio (ios/App/Studio*.swift) can zoom in on the
+  // writing afterwards, if the user wants it: [time, u, v, touching], the time in epoch ms (the app lines it
+  // up with the video) and u, v as fractions across the picture the video has (0..1). A sample at most every
+  // 50 ms: about 20 numbers a second while writing, nothing otherwise. Sent to the app every few seconds, so
+  // that a recording that ends badly still has it.
+  let penTrace = [];
+  let lastPen = 0;
+  addEventListener('pointermove', e => {
+    if (state !== 'recording' || e.pointerType !== 'pen' || e.timeStamp - lastPen < 50) return;
+    const box = recordedBox();
+    if (!box.width || !box.height) return;
+    lastPen = e.timeStamp;
+    const u = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)), v = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
+    penTrace.push([Math.round(performance.timeOrigin + e.timeStamp), Math.round(u * 1000) / 1000, Math.round(v * 1000) / 1000, e.buttons & 1 ? 1 : 0]);
+  }, { capture: true, passive: true });
+  // The part of the screen the video is a picture of: the 16:9 window if it is on, else the whole screen.
+  const recordedBox = () => (document.body.classList.contains('wide') ? $('editor').getBoundingClientRect() : new DOMRect(0, 0, innerWidth, innerHeight));
+  function sendTrace() {
+    if (!penTrace.length && state === 'idle') return;
+    const box = recordedBox();
+    shellRecorder.postMessage({ action: 'trace', points: penTrace, window: { x: box.left, y: box.top, w: box.width, h: box.height } });
+    penTrace = [];
+  }
+  setInterval(() => { if (state !== 'idle') sendTrace(); }, 4000);
+
   // Each button waits for the app's answer: starting asks the user's permission, stopping finishes the file.
   const ask = () => {
+    if (state !== 'idle') sendTrace(); // the last of the pen's path goes before the stop
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
       ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), title: nameInput.value, wide: document.body.classList.contains('wide') }
