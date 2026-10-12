@@ -73,8 +73,14 @@ struct LoudnessMeter {
     /// nil: nothing loud enough to measure.
     func integrated() -> Double? {
         guard hops.count >= 4 else { return nil }
-        let blocks = (0...(hops.count - 4)).map { (hops[$0] + hops[$0 + 1] + hops[$0 + 2] + hops[$0 + 3]) / 4 }
-        let loud = { (power: Double) in -0.691 + 10 * log10(power) }
+        var blocks: [Double] = []
+        blocks.reserveCapacity(hops.count)
+        for i in 0...(hops.count - 4) {
+            var power = 0.0
+            for k in 0..<4 { power += hops[i + k] }
+            blocks.append(power / 4)
+        }
+        let loud = { (power: Double) -> Double in -0.691 + 10 * log10(power) }
         let audible = blocks.filter { loud($0) > -70 }
         guard !audible.isEmpty else { return nil }
         let gate = loud(audible.reduce(0, +) / Double(audible.count)) - 10
