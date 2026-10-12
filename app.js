@@ -919,13 +919,33 @@ function refreshHistory() {
 
 // A flyout: a panel that opens beside its button (`wrap` holds both) and is put away by a touch
 // anywhere outside it, the page included.
+// One that hangs from the toolbar is not shown there: the toolbar's strip slides sideways and would
+// cut it off. It is moved into its own layer (#flyouts) and put beside its button by hand: under it,
+// or in the full-screen rail to its left; kept on the screen either way.
 function flyout(wrap, button) {
+  const el = wrap.querySelector('.flyout');
+  const hung = !!wrap.closest('#toolbar');
+  if (hung) $('flyouts').append(el);
+  function place() {
+    const b = button.getBoundingClientRect(), rail = document.body.classList.contains('full');
+    el.style.setProperty('--at', 'translate(0)');
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const left = within1(rail ? b.left - 12 - w : b.left + b.width / 2 - w / 2, 8, innerWidth - w - 8);
+    const top = within1(rail ? b.top + b.height / 2 - h / 2 : b.bottom + 10, 8, innerHeight - h - 8);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.transformOrigin = rail ? `100% ${b.top + b.height / 2 - top}px` : `${b.left + b.width / 2 - left}px 0`; // it grows out of its button
+  }
   const set = open => {
     wrap.classList.toggle('open', open);
+    if (hung) {
+      el.classList.toggle('show', open);
+      if (open) place();
+    }
     button.setAttribute('aria-expanded', open);
   };
-  document.addEventListener('pointerdown', e => { if (!wrap.contains(e.target)) set(false); });
-  return { set, toggle: () => set(!wrap.classList.contains('open')) };
+  document.addEventListener('pointerdown', e => { if (!wrap.contains(e.target) && !el.contains(e.target)) set(false); });
+  return { set, el, toggle: () => set(!wrap.classList.contains('open')) };
 }
 
 /* ---------- Pens ---------- */
@@ -1081,6 +1101,21 @@ function usePen(pen) {
 
 let inkPen = ''; // the pen last used: text takes its colour
 let previousTool = ''; // the tool before this one, for the Pencil's "last tool"
+// Sliding the toolbar puts its flyouts away: they would be left where the buttons were.
+const closeFlyouts = () => { eraserFly.set(false); textFly.set(false); addFly.set(false); settingsFly.set(false); };
+toolbar.addEventListener('scroll', () => closeFlyouts(), true);
+
+// Bring the tool just chosen into view in the toolbar, which slides: with the keyboard, the Pencil's
+// double-tap or a new pen it may be out of sight. (Not scrollIntoView: that would try the page too.)
+function revealTool(btn) {
+  const strip = btn?.closest('.strip');
+  if (!strip || (strip.scrollWidth <= strip.clientWidth && strip.scrollHeight <= strip.clientHeight)) return;
+  const s = strip.getBoundingClientRect(), b = btn.getBoundingClientRect(), edge = 10;
+  const side = b.left < s.left + edge ? b.left - s.left - edge : b.right > s.right - edge ? b.right - s.right + edge : 0;
+  const down = b.top < s.top + edge ? b.top - s.top - edge : b.bottom > s.bottom - edge ? b.bottom - s.bottom + edge : 0;
+  strip.scrollBy({ left: side, top: down, behavior: 'smooth' });
+}
+
 // Make `value` the tool: 'eraser', 'hand', 'lasso', 'text' or a pen's id.
 function choose(value) {
   const pen = penOf(value);
@@ -1101,6 +1136,7 @@ function choose(value) {
     ink.setTool(value);
   }
   for (const btn of document.querySelectorAll('[data-tool]')) btn.setAttribute('aria-pressed', btn.dataset.tool === value);
+  revealTool(document.querySelector(`[data-tool="${CSS.escape(value)}"]`));
 }
 
 /* The settings of the pen in use: one panel, filled in for that pen and put beside its button. */
@@ -1203,7 +1239,7 @@ removeBtn.onclick = () => {
 // "+": a new pen of the chosen kind, in the colour of the pen in use, with its settings open.
 const addFly = flyout(addWrap, $('add-pen'));
 $('add-pen').onclick = addFly.toggle;
-addWrap.addEventListener('click', e => {
+addFly.el.addEventListener('click', e => {
   const type = e.target.closest('[data-add]')?.dataset.add;
   if (!type || pens.length >= MAX_PENS) return;
   addFly.set(false);
@@ -1577,8 +1613,7 @@ option(toolsBtn, 'toolsOff', off => {
   toolsBtn.setAttribute('aria-label', toolsBtn.title);
   if (off) { // nothing that hangs from the toolbar stays behind
     showPanel(false);
-    eraserFly.set(false);
-    addFly.set(false);
+    closeFlyouts();
   }
   refit();
   if (current && atStart) place([pos[0], restTop()]);

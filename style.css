@@ -106,10 +106,10 @@ body {
   .flyout, #pen-panel, #message { transition: opacity .16s ease, transform .26s cubic-bezier(.3, 1.35, .5, 1), display .2s allow-discrete; }
 }
 .flyout, #pen-panel { transform-origin: 50% 0; }
-.tool-wrap:not(.open) .flyout, #pen-panel[hidden] { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
+.tool-wrap:not(.open) .flyout, #flyouts .flyout:not(.show), #pen-panel[hidden] { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
 #message[hidden] { opacity: 0; transform: var(--at, translate(0)) translateY(10px); }
 @starting-style {
-  .tool-wrap.open .flyout, #pen-panel:not([hidden]) { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
+  .tool-wrap.open .flyout, .flyout.show, #pen-panel:not([hidden]) { opacity: 0; transform: var(--at, translate(0)) scale(.92); }
   #message:not([hidden]) { opacity: 0; transform: var(--at, translate(0)) translateY(10px); }
 }
 
@@ -510,7 +510,11 @@ body.in-videos .lib-tabs { visibility: hidden; }
   padding: 6px 14px 6px 8px;
   border-radius: var(--radius);
 }
-.tool-wrap.open .flyout { display: flex; }
+.tool-wrap.open .flyout, .flyout.show { display: flex; }
+/* The toolbar's flyouts live in a layer of their own over the screen, and are put beside their buttons by app.js. */
+#flyouts { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+#flyouts .flyout { pointer-events: auto; }
+#flyouts .flyout { background: linear-gradient(180deg, var(--sheen), transparent 40%), color-mix(in srgb, var(--surface) 94%, transparent); }
 /* A flyout that is a short menu: its buttons stacked, each as wide as the menu. */
 .flyout.menu { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px; white-space: nowrap; }
 /* A line of a menu: plain, lighting up under the finger. Not glass on glass. */
@@ -533,6 +537,22 @@ body.in-videos .lib-tabs { visibility: hidden; }
 #eraser-range, #text-range { width: 150px; height: var(--hit); margin: 0; accent-color: var(--accent); touch-action: none; /* a finger drags the slider, not the page */ }
 .dot-box { display: grid; place-items: center; flex: none; width: 46px; height: 46px; }
 #eraser-dot { border-radius: 50%; border: 1.5px solid var(--muted); background: rgb(128 128 128 / .15); }
+
+/* The tools stay in one line: when there are more than fit, the strip slides sideways under the finger
+   (in the full-screen rail, up and down; see there). Its flyouts are not inside it: see #flyouts. */
+#toolbar .strip:nth-child(2) {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+#toolbar .strip:nth-child(2)::-webkit-scrollbar { display: none; }
+#toolbar .strip:nth-child(2) .group { flex-wrap: nowrap; }
+#toolbar .strip:nth-child(2) > *, #toolbar .strip:nth-child(2) .group > * { flex: none; }
+.sep { flex: none; }
 
 /* Until the window is wide enough for all three strips side by side (about 1500px): name and zoom
    share the first row, the tools get their own row, centred. */
@@ -793,16 +813,19 @@ body.full #toolbar .strip:nth-child(2) {
   margin: auto 0;
   min-height: 0;
   max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto; /* more tools than the screen is tall: the rail slides up and down */
+  touch-action: pan-y;
 }
 /* Every rule here names #toolbar: the rail's sizes are for the rail, not for the other buttons on the
    screen (the pen's settings, the recording bar). */
 body.full #toolbar .group { display: contents; } /* every button is a row of the rail itself */
-body.full #toolbar .icon-btn { flex: 0 1 36px; height: auto; min-height: 22px; }
+body.full #toolbar .icon-btn { flex: none; height: 36px; }
 body.full #toolbar .chip { width: var(--hit); padding: 0; font-size: 11px; }
 body.full #toolbar .sep { flex: none; width: 22px; height: 1px; margin: 3px 0; }
 
 /* Pens in the rail lie on their side, tip towards the note; the one in use reaches further out. */
-body.full #toolbar .pen { flex: 0 1 30px; width: var(--hit); height: auto; min-height: 17px; }
+body.full #toolbar .pen { flex: none; width: var(--hit); height: 30px; }
 body.full #toolbar .pen svg { left: 50%; top: 50%; margin: -29.33px 0 0 -11px; transform: translateX(21px) rotate(-90deg); }
 body.full #toolbar .pen[aria-pressed="true"] svg { transform: translateX(12px) rotate(-90deg); }
 body.full #toolbar .pen:not([aria-pressed="true"]):hover svg { transform: translateX(17px) rotate(-90deg); }
@@ -814,7 +837,7 @@ body.full #toolbar .pen.new { animation-name: pen-in-rail; }
 
 /* A tool with a flyout of its own (the eraser and its size, "+" and its menu). In the rail the pair
    is one row; the button grows along a column to fill it (WebKit does not stretch a button across a flex row). */
-body.full #toolbar .tool-wrap { flex-direction: column; flex: 0 1 36px; min-height: 22px; }
+body.full #toolbar .tool-wrap { flex-direction: column; flex: none; height: 36px; }
 body.full #toolbar .tool-wrap > .icon-btn { flex: 1 1 0; min-height: 0; }
 body.full #toolbar .flyout { top: 50%; left: auto; right: calc(100% + 12px); --at: translateY(-50%); transform-origin: 100% 50%; }
 

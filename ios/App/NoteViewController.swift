@@ -7,6 +7,9 @@ import WebKit
 /// What this adds to the web app:
 ///  - Apple Pencil double-tap and squeeze. A web page is never told about them, so they are
 ///    passed on as a 'pencil' event on the page's window (see app.js).
+///  - Apple Pencil hover. A web page is only told where a hovering Pencil is and which way it leans, if
+///    that; its roll (the Pencil Pro's barrel roll) and its height above the screen it never gets. They are
+///    passed on as 'pencilhover' events (see ghost.js), which draw the pen's shadow from them.
 ///  - The dialogs behind confirm() and alert(), which a bare web view simply does not show
 ///    (confirm() would answer "no" by itself, so nothing could ever be deleted).
 ///  - Saving a file. A page in a web view cannot download anything, so the page hands over the
@@ -67,6 +70,11 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         pencil.delegate = self
         view.addInteraction(pencil)
 
+        // The Pencil hovering over the screen (iPads with the hover sensor). It only watches: touches go on to the page.
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(pencilHovered(_:)))
+        hover.cancelsTouchesInView = false
+        view.addGestureRecognizer(hover)
+
         recorder.onFailure = { [weak self] message in self?.stopRecording(because: message) }
         recorder.onLevels = { [weak self] levels in self?.send("mic", ["levels": levels]) }
         recorder.onCheckFailed = { [weak self] reason in self?.send("mic", ["on": false, "message": reason]) }
@@ -94,6 +102,44 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
         guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
         tellPage("squeeze")
+    }
+
+    // MARK: Apple Pencil hover
+
+    private var hoverBusy = false       // a report is on its way to the page
+    private var hoverNext: String?      // the latest one made meanwhile: only that is sent next, so reports never queue up
+
+    @objc private func pencilHovered(_ hover: UIHoverGestureRecognizer) {
+        switch hover.state {
+        case .began, .changed:
+            let at = hover.location(in: webView)
+            let azimuth = hover.azimuthAngle(in: webView), altitude = hover.altitudeAngle, roll = hover.rollAngle, height = hover.zOffset
+            // A mouse or trackpad pointer hovers too, and says nothing of a pen: that is no Pencil.
+            if height == 0 && azimuth == 0 && roll == 0 && abs(altitude - .pi / 2) < 0.001 { return }
+            let detail = String(format: "{x:%.1f,y:%.1f,az:%.4f,alt:%.4f,roll:%.4f,z:%.4f}", at.x, at.y, azimuth, altitude, roll, height)
+            sendHover("window.dispatchEvent(new CustomEvent('pencilhover',{detail:\(detail)}))")
+        case .ended, .cancelled, .failed:
+            sendHover("window.dispatchEvent(new CustomEvent('pencilhover',{detail:{end:true}}))")
+        default:
+            break
+        }
+    }
+
+    /// Reports come up to 120 times a second: one is on its way at a time, and only the newest waits behind it.
+    private func sendHover(_ script: String) {
+        if hoverBusy {
+            hoverNext = script
+            return
+        }
+        hoverBusy = true
+        webView.evaluateJavaScript(script) { [weak self] _, _ in
+            guard let self = self else { return }
+            self.hoverBusy = false
+            if let next = self.hoverNext {
+                self.hoverNext = nil
+                self.sendHover(next)
+            }
+        }
     }
 
     private func tellPage(_ gesture: String) {
