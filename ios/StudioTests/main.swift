@@ -128,6 +128,10 @@ func makeVoice(_ url: URL, length: Double) throws {
     file = nil
 }
 
+extension URL {
+    func createdFolder() -> URL { try? FileManager.default.createDirectory(at: self, withIntermediateDirectories: true); return self }
+}
+
 func png(_ asset: AVAsset, at seconds: Double, to name: String) throws -> CGSize {
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
@@ -243,6 +247,23 @@ if finished.files.count == 2 {
     check(abs(after - AudioPolish.target) < 1.5, "the voice comes out at about \(AudioPolish.target) LUFS (\(after))")
     let fileSize = (try? FileManager.default.attributesOfItem(atPath: finished.files[0].path)[.size] as? Int) ?? 0
     print("video file:", fileSize / 1000, "KB")
+}
+
+// The real intro and outro, as the app carries them: they must read, fit and play after the recording.
+let realIntro = URL(fileURLWithPath: "ios/App/studio-intro.mp4"), realOutro = URL(fileURLWithPath: "ios/App/studio-outro.mp4")
+if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.fileExists(atPath: realOutro.path) {
+    var plain = StudioOptions()
+    plain.autoZoom = false
+    plain.polish = false
+    let real = try await StudioRender.run(movie: movie, options: plain, intro: realIntro, outro: realOutro, folder: out.appendingPathComponent("real", isDirectory: true).createdFolder(), cancel: StudioCancel()) { _, _ in }
+    check(real.files.count == 1, "the real intro and outro are put around the recording")
+    if let file = real.files.first {
+        let asset = AVURLAsset(url: file)
+        let length = try await asset.load(.duration).seconds
+        print(String(format: "with the real clips: %.2f s", length))
+        check(abs(length - (seconds + 14 + 6)) < 0.4, "intro (14 s) + recording + outro (6 s)")
+        for (name, at) in [("real-intro.png", 3.0), ("real-first-scene.png", 7.0), ("real-recording.png", 14.0 + 2.5), ("real-outro.png", 14.0 + seconds + 3.2)] { _ = try png(asset, at: at, to: name) }
+    }
 }
 
 try? FileManager.default.removeItem(at: work)

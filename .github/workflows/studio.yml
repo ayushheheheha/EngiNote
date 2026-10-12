@@ -9,6 +9,7 @@ on:
     paths:
       - 'ios/App/Studio*.swift'
       - 'ios/StudioTests/**'
+      - 'ios/App/studio-*.mp4'
       - '.github/workflows/studio.yml'
 
 jobs:

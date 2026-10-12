@@ -1355,8 +1355,8 @@ function replayCover() {
   void root.offsetWidth; // let the page see it without the class, or adding it again would change nothing
   root.classList.add('live');
 }
-let promoNew = true;
-try { promoNew = localStorage.getItem('promo') !== '0'; } catch { /* storage blocked */ }
+let promoNew = false; // the intro video (Studio) is the title now; the cover is there for whoever wants it in the note itself
+try { promoNew = localStorage.getItem('promo') === '1'; } catch { /* storage blocked */ }
 const promo = () => promoNew;
 promoBtn.onclick = () => {
   if (!current) return;
