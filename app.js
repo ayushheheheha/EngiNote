@@ -768,9 +768,14 @@ const MAGNET = 0.07;      // how close counts: 7% either side of the fit-width z
 const MAGNET_PULL = 150;  // ms the sheet takes to be drawn in to the magnet, or to spring off it
 
 function pinchMove(factor, x, y, hold) {
-  pinch ??= { raw: zoom, held: false, since: -Infinity };
+  pinch ??= { raw: zoom, held: false, since: -Infinity, armed: false };
   pinch.raw = clampZoom(pinch.raw * factor);
-  const fit = clampZoom(fitZoom()), held = Math.abs(Math.log(pinch.raw / fit)) < MAGNET;
+  const fit = clampZoom(fitZoom()), near = Math.abs(Math.log(pinch.raw / fit)) < MAGNET;
+  // A note opens at fit-width, so a pinch that starts there is inside the magnet: held, it would do
+  // nothing until the fingers had gone 7% (a small pinch, the commonest, seemed to be ignored). The magnet
+  // takes hold only once the fingers have been clear of it, i.e. when they come back to fit-width.
+  if (!near) pinch.armed = true;
+  const held = near && pinch.armed;
   if (held !== pinch.held) pinch.since = performance.now();
   pinch.held = held;
   pinch.zoom = held ? fit : pinch.raw;
