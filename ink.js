@@ -310,9 +310,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   }
 
   // Add the tip's own position to the stroke being drawn, as its last point, unless it is there already.
-  function toTip(a) {
+  function toTip(a, box) {
     const pts = a.stroke.points, last = pts[pts.length - 1];
-    const pt = toPoint({ clientX: a.tip[0], clientY: a.tip[1] });
+    const pt = toPoint({ clientX: a.tip[0], clientY: a.tip[1] }, box);
     if (!pt || (pt[0] === last[0] && pt[1] === last[1])) return false;
     if (last.length > 2) pt.push(last[2]);
     pts.push(pt);
@@ -369,8 +369,10 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // Pointer position in viewBox units, from where the svg really is on screen (read fresh every
   // time: zoom, scroll and viewBox change). Not getScreenCTM(): Safari's ignores a CSS transform on
   // an ancestor (WebKit bug 209220), and the app zooms the page with one, so ink landed off the tip.
-  function toPoint(e) {
-    const box = svg.getBoundingClientRect(), view = svg.viewBox.baseVal;
+  // `box`: where the svg is, when the caller has just asked: each ask makes the browser lay the page
+  // out again, and a move event may carry a handful of positions.
+  function toPoint(e, box = svg.getBoundingClientRect()) {
+    const view = svg.viewBox.baseVal;
     if (!box.width || !box.height || !view.width) return null;
     return [
       round2(view.x + (e.clientX - box.left) / box.width * view.width),
@@ -561,10 +563,11 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       return;
     }
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    const box = svg.getBoundingClientRect();
     const pts = a.path && a.stroke.points;
     for (const ev of coalesced.length ? coalesced : [e]) {
       if (!a.path) {
-        const pt = toPoint(ev);
+        const pt = toPoint(ev, box);
         if (pt) eraseAlong(a, pt);
         continue;
       }
@@ -578,7 +581,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (a.rested && Math.hypot(a.tip[0] - a.rested[0], a.tip[1] - a.rested[1]) > HOLD_SLOP) rest(a);
       a.soft = [a.soft[0] + (a.tip[0] - a.soft[0]) * share, a.soft[1] + (a.tip[1] - a.soft[1]) * share];
       if (Math.hypot(a.soft[0] - a.kept[0], a.soft[1] - a.kept[1]) < MIN_STEP) continue;
-      const pt = toPoint({ clientX: a.soft[0], clientY: a.soft[1] });
+      const pt = toPoint({ clientX: a.soft[0], clientY: a.soft[1] }, box);
       if (!pt) continue;
       a.kept = a.soft;
       const last = pts[pts.length - 1];
@@ -588,7 +591,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (a.path) {
       // Drawn right up to the tip, so no gap shows between it and the trailing ink. That last
       // stretch is only for show until the smoothed point has passed over it.
-      const reached = toTip(a);
+      const reached = toTip(a, box);
       // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
       // build it incrementally if strokes of several thousand points ever lag.
       setData(a.path, strokeData(a.stroke, false));
@@ -721,5 +724,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       changed();
     },
     getStrokes,
+    /** A stroke or an erase is being made right now. */
+    busy: () => penDown || !!act,
   };
 }

@@ -1049,10 +1049,8 @@ body.paused #rec-time { color: var(--muted); }
 #rec-min .rec-dot, #rec-bar.min #rec-min .icon { opacity: 0; scale: .3; }
 #rec-bar.min #rec-min .icon { rotate: 180deg; }
 #rec-bar.min #rec-min .rec-dot { opacity: 1; scale: 1; }
-body.recording:not(.paused) #rec-bar.min #rec-min .rec-dot { animation: rec-beat 1.6s ease-in-out infinite; }
-@keyframes rec-beat {
-  50% { opacity: .35; scale: .8; }
-}
+/* No pulsing dot while recording: an animation that never ends changes the screen every frame, so the
+   recorder and its encoder would never rest between strokes. The clock beside the dot ticks instead. */
 @media (prefers-reduced-motion: reduce) {
   .flyout, #pen-panel, #message, #rec-min > * { transition: none; }
   .pen.new, #rec-min .rec-dot, #rec-bar.moving > * { animation: none !important; }

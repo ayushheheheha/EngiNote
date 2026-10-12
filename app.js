@@ -1173,11 +1173,19 @@ try { lastPen = localStorage.getItem('pen'); } catch { /* storage blocked */ }
 renderPens();
 choose(penOf(lastPen) ? lastPen : pens[0].id);
 
-// Mark the open note as changed and save it shortly.
+// Mark the open note as changed and save it once the writing has paused. A save writes the whole
+// note, every page picture of a PDF with it, and the page stops while that is copied: so it waits
+// for a pause, never lands under a stroke being drawn, and is made sure of when the app is left.
+const SAVE_AFTER = 2000;
 function touch() {
   current.updatedAt = Date.now();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, 400);
+  saveTimer = setTimeout(autosave, SAVE_AFTER);
+}
+
+function autosave() {
+  if (ink.busy()) saveTimer = setTimeout(autosave, SAVE_AFTER);
+  else save();
 }
 
 function save() {
@@ -1189,6 +1197,7 @@ function save() {
 // Save now if a save is pending.
 const flush = () => (saveTimer ? save() : undefined);
 addEventListener('pagehide', flush);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); }); // the app went to the background
 
 async function openDoc(id) {
   const doc = await db.get(id).catch(() => null);
