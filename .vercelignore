@@ -12,6 +12,7 @@
 !/notebook.js
 !/space.js
 !/export.js
+!/thumbs.js
 !/pdfimport.js
 !/pdfjs.min.js
 !/pdfjs.worker.min.js

@@ -920,6 +920,15 @@ body.full.tools-off #toolbar #tools-toggle .icon { transform: rotate(-90deg); }
 .nb-tile[data-value="rule"] span { background-image: linear-gradient(transparent 8px, var(--line) 8px); background-size: 100% 9px; }
 .nb-tile[data-value="grid"] span { background-image: linear-gradient(transparent 8px, var(--line) 8px), linear-gradient(90deg, transparent 8px, var(--line) 8px); background-size: 9px 9px; background-position: center; }
 .nb-tile[data-value="dot"] span { background-image: radial-gradient(circle, var(--line) 1.2px, transparent 1.7px); background-size: 9px 9px; background-position: center; }
+.nb-tile[data-value="cornell"] span {
+  background-image: linear-gradient(transparent 8px, var(--line) 8px), linear-gradient(90deg, transparent 12px, var(--line) 12px, var(--line) 13px, transparent 13px), linear-gradient(transparent 36px, var(--line) 36px, var(--line) 37px, transparent 37px);
+  background-size: 100% 9px, 100% 100%, 100% 100%;
+  background-repeat: repeat, no-repeat, no-repeat;
+}
+.nb-tile[data-value="planner"] span {
+  background-image: linear-gradient(transparent 10px, var(--line) 10px), linear-gradient(90deg, transparent 21px, var(--line) 21px);
+  background-size: 100% 11px, 22px 100%;
+}
 .nb-actions { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 620px) {
   .nb-body { grid-template-columns: minmax(0, 1fr); }
@@ -1141,3 +1150,65 @@ body.wide.editing #message {
 
 /* The frame a browser prints a note from: there, so that it can be printed, and out of sight. */
 #print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; visibility: hidden; }
+
+/* ---------- Pages (thumbs.js) ---------- */
+
+/* A column of glass over the note's left edge. app.js sets its top (below the toolbar). */
+#pages-panel {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  width: 152px;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--sheen), transparent 40%), var(--glass-thick);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--rim), var(--float);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+#pages-list { display: flex; flex-direction: column; gap: 14px; height: 100%; padding: 6px 4px 8px; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; }
+.thumb { position: relative; flex: none; display: grid; justify-items: center; gap: 4px; }
+.thumb-sheet {
+  position: relative;
+  width: 120px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--border), 0 3px 10px rgb(0 0 0 / .18);
+  transition: box-shadow .2s, transform .2s;
+}
+.thumb.on .thumb-sheet { box-shadow: 0 0 0 2.5px var(--accent), 0 3px 10px rgb(0 0 0 / .18); }
+.thumb.lifted .thumb-sheet { transform: scale(1.06); box-shadow: 0 0 0 2.5px var(--accent), 0 10px 24px rgb(0 0 0 / .35); }
+.thumb-paper { position: absolute; left: 0; top: 0; width: 900px; transform-origin: 0 0; }
+.thumb-paper img { display: block; width: 100%; height: 100%; }
+.thumb-n { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.thumb.on .thumb-n { color: var(--accent); font-weight: 600; }
+.thumb-more { position: absolute; right: 2px; bottom: 0; --hit: 28px; color: var(--muted); }
+.thumb-more .icon { width: 16px; height: 16px; stroke-width: 2.4; }
+.thumb-line { position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+
+/* The menu of a page: solid, beside the column. */
+#page-menu {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 232px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--rim), var(--float);
+  user-select: none;
+  -webkit-user-select: none;
+}
+#page-menu .btn-secondary { height: 40px; padding: 0 14px; border-radius: 14px; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; text-align: left; font-weight: 500; }
+#page-menu .btn-secondary:active { background: var(--fill); }
+#page-menu .btn-secondary.danger { color: var(--danger); }
+.menu-head { margin: 8px 6px 2px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.menu-swatches { display: flex; flex-wrap: wrap; gap: 2px; }
+.menu-swatches .chip[aria-pressed="true"] { color: var(--accent); }

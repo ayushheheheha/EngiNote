@@ -1,7 +1,7 @@
 // export.js — a note with its ink as one document, to be made into a PDF: the iPad app makes the
 // file from it; a browser prints it, and its print dialog can save a PDF. Plain ES module.
 import { makeEl, boxOf } from './ink.js';
-import { noteHtml, pageTops, inkedPages, paperCss, PAGE_WIDTH } from './pages.js';
+import { noteHtml, pageTops, inkedPages, paperCss, pageStyle, PAGE_WIDTH } from './pages.js';
 
 const attr = text => text.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 
@@ -34,7 +34,7 @@ function pagedDoc(doc, strokes) {
   // A notebook keeps a blank page ready at its end: blank pages nobody wrote on are left off the end.
   let count = doc.pages.length;
   while (count > 1 && !doc.pages[count - 1].img && !inked[count - 1]) count--;
-  const pages = doc.pages.slice(0, count).map(p => ({ h: Number(p.h), img: p.img }));
+  const pages = doc.pages.slice(0, count).map(p => ({ ...p, h: Number(p.h) }));
   const sizes = [...new Set(pages.map(p => p.h))]; // a kind of printed page for each height there is
   return {
     pages: pages.map(p => p.h),
@@ -45,7 +45,7 @@ function pagedDoc(doc, strokes) {
       '.page+.page{break-before:page}' +
       '.page img{display:block;width:100%;height:100%}' +
       '</style></head><body>' +
-      pages.map((p, i) => `<div class="page" style="height:${p.h}px;page:s${sizes.indexOf(p.h)}">` +
+      pages.map((p, i) => `<div class="page" style="${pageStyle(p, doc.paper)};page:s${sizes.indexOf(p.h)}">` +
         `${p.img ? `<img src="${attr(p.img)}" alt="">` : ''}${inkSvg(strokes, tops[i], p.h, 'left:0;top:0;width:100%;height:100%')}</div>`).join('') +
       '</body></html>',
   };

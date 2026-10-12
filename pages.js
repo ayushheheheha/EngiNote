@@ -9,7 +9,8 @@
 //   pages: [{ h }, { h, img }, ...]   One entry per page, top to bottom. `h` is the page's height in
 //                                     page px (every page is PAGE_WIDTH wide). `img`, if there, is a
 //                                     data:image/ URL drawn to fill the page; a page without one
-//                                     shows the paper.
+//                                     shows the paper. `bg` and `tpl`, if there, are that page's own
+//                                     colour and template, over the notebook's (pagePaper).
 //   paper: { size, direction, template, color, line, spacing }   What a blank page looks like.
 //   html:  ''                         Its document is made from the pages whenever it is wanted
 //                                     (pagesHtml). Keeping it too would store every page's picture twice.
@@ -28,7 +29,7 @@ export const PAGE_WIDTH = 900; // the width every note is laid out at; the same 
 
 // Paper sizes: the long side over the short one. At a fixed width only the proportion matters.
 export const SIZES = { A4: 297 / 210, Letter: 11 / 8.5, '16:9': 16 / 9, '4:3': 4 / 3 };
-export const TEMPLATES = ['plain', 'rule', 'grid', 'dot'];
+export const TEMPLATES = ['plain', 'rule', 'grid', 'dot', 'cornell', 'planner'];
 export const PAPER = { size: 'A4', direction: 'vertical', template: 'plain', color: '#ffffff', line: '#c8ccd6', spacing: 3 };
 export const SPACING = [1, 8]; // the least and the most `spacing` may be
 const spacingPx = spacing => Math.round(8 * (spacing + 1)); // 16 to 72 page px between lines; 3 is 32, about 7.5 mm on A4
@@ -54,7 +55,10 @@ export function cleanPages(list) {
   const pages = [];
   for (const p of list) {
     if (!p || !Number.isFinite(p.h) || p.h <= 0) return null;
-    pages.push(typeof p.img === 'string' && p.img.startsWith('data:image/') ? { h: p.h, img: p.img } : { h: p.h });
+    const page = typeof p.img === 'string' && p.img.startsWith('data:image/') ? { h: p.h, img: p.img } : { h: p.h };
+    if (colour(p.bg, '')) page.bg = colour(p.bg, '');
+    if (TEMPLATES.includes(p.tpl)) page.tpl = p.tpl;
+    pages.push(page);
   }
   return pages;
 }
@@ -82,21 +86,33 @@ export function paperCss(paper, thick = 1) {
   const { template, color, line, spacing } = cleanPaper(paper), s = spacingPx(spacing);
   const across = `linear-gradient(to bottom,transparent ${s - thick}px,${line} ${s - thick}px)`; // a line at the foot of every `s`
   const down = `linear-gradient(to right,transparent ${s - thick}px,${line} ${s - thick}px)`;
+  // A line `thick` wide ending at `at` (a percentage of the page), across it or down it.
+  const rule = (to, at) => `linear-gradient(${to},transparent calc(${at} - ${thick}px),${line} calc(${at} - ${thick}px),${line} ${at},transparent ${at})`;
   const drawn = {
-    plain: '',
+    plain: 'background-image:none;', // none, so that a page of this template over a notebook of another shows no lines
     rule: `background-image:${across};background-size:100% ${s}px;`,
     // Squares and dots are centred across the page, so the part-squares at its two edges match.
     grid: `background-image:${across},${down};background-size:${s}px ${s}px;background-position:center top;`,
     dot: `background-image:radial-gradient(circle,${line} ${1.5 * thick}px,transparent ${2 * thick}px);background-size:${s}px ${s}px;background-position:center top;`,
+    // Cornell: ruled, with a column for cues down the left and a box for the summary along the foot.
+    cornell: `background-image:${across},${rule('to right', '28%')},${rule('to bottom', '86%')};background-size:100% ${s}px,100% 100%,100% 100%;background-repeat:repeat,no-repeat,no-repeat;`,
+    // Planner: a week, in two columns of four cells (the last for notes).
+    planner: `background-image:${rule('to bottom', '100%')},${rule('to right', '100%')};background-size:100% 25%,50% 100%;background-repeat:repeat;`,
   };
   return `background-color:${color};${drawn[template]}`;
 }
 
+/** A page's own paper: the notebook's, with the page's colour and template over it where it has them. */
+export const pagePaper = (paper, page) => cleanPaper({ ...cleanPaper(paper), ...(page.bg ? { color: page.bg } : {}), ...(page.tpl ? { template: page.tpl } : {}) });
+
+/** A page's style: its height, and its own paper if it is not the notebook's. */
+export const pageStyle = (page, paper) => `height:${Number(page.h)}px` + (page.bg || page.tpl ? `;${paperCss(pagePaper(paper, page))}` : '');
+
 const attr = text => text.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 
 /** One page as markup. */
-export function pageHtml(page) {
-  return `<div class="page" style="height:${Number(page.h)}px">${page.img ? `<img src="${attr(page.img)}" alt="">` : ''}</div>`;
+export function pageHtml(page, paper) {
+  return `<div class="page" style="${pageStyle(page, paper)}">${page.img ? `<img src="${attr(page.img)}" alt="">` : ''}</div>`;
 }
 
 /** A paged note as a document: its pages one under the other with nothing between them but a thin
@@ -109,7 +125,7 @@ export function pagesHtml(doc) {
     '.page img{display:block;width:100%;height:100%}' +
     // Where one page ends and the next begins. A middle grey: it shows on white paper and on black.
     '.page+.page::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:#7f8696}' +
-    '</style></head><body>' + doc.pages.map(pageHtml).join('') + '</body></html>';
+    '</style></head><body>' + doc.pages.map(p => pageHtml(p, doc.paper)).join('') + '</body></html>';
 }
 
 /** Put a blank page into a note, before page `index` (left out: at the end). It is the size of the
@@ -121,8 +137,8 @@ export function addPage(doc, index = doc.pages.length, shown) {
   const page = { h: above?.img ? above.h : paperHeight(doc.paper) };
   doc.pages.splice(index, 0, page);
   const before = shown?.body?.children[index];
-  if (before) before.insertAdjacentHTML('beforebegin', pageHtml(page));
-  else shown?.body?.insertAdjacentHTML('beforeend', pageHtml(page));
+  if (before) before.insertAdjacentHTML('beforebegin', pageHtml(page, doc.paper));
+  else shown?.body?.insertAdjacentHTML('beforeend', pageHtml(page, doc.paper));
   return page;
 }
 
@@ -131,6 +147,30 @@ export function removePage(doc, index, shown) {
   const [page] = doc.pages.splice(index, 1);
   shown?.body?.children[index]?.remove();
   return page;
+}
+
+/** The note with its pages in another order, or some of them gone or doubled. `order` lists, for each
+    page of the result, the page of `doc` it is: [2, 0, 1] turns the last page first; [0, 2] drops the
+    middle one; [0, 1, 1, 2] doubles the second. What is on a page (a stroke that begins on it, an
+    item whose top is on it) goes with it; what was on a page that is left out goes too. Nothing
+    is changed: { pages, strokes, items } is new, and holds the very objects it can (so their pictures are kept),
+    and copies for a page shown twice. */
+export function rearrange(doc, strokes, items, order) {
+  const tops = pageTops(doc), n = doc.pages.length, round = v => Math.round(v * 100) / 100;
+  const owner = y => { let i = 0; while (i < n - 1 && y >= tops[i + 1]) i++; return i; };
+  const bucket = (list, yOf) => { const by = doc.pages.map(() => []); for (const o of list) by[owner(yOf(o))].push(o); return by; };
+  const mine = bucket(strokes, s => s.points[0][1]), held = bucket(items, it => it.y);
+  const pages = order.map(p => ({ ...doc.pages[p] })), at = [0];
+  for (const page of pages) at.push(at[at.length - 1] + page.h);
+  const seen = new Set(), outStrokes = [], outItems = [];
+  order.forEach((p, j) => {
+    const dy = at[j] - tops[p], copy = seen.has(p);
+    seen.add(p);
+    const moved = !dy && !copy;
+    for (const s of mine[p]) outStrokes.push(moved ? s : { ...s, points: s.points.map(([x, y, ...rest]) => [x, round(y + dy), ...rest]) });
+    for (const it of held[p]) outItems.push(moved ? it : { ...it, y: round(it.y + dy) });
+  });
+  return { pages, strokes: outStrokes, items: outItems };
 }
 
 /** For each page, whether any of `strokes` is on it. A stroke is on every page from its highest

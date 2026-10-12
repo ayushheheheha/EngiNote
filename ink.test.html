@@ -9,6 +9,7 @@
 import { createInk, pathData, boxOf, hitStroke, distToSegment, opacityOf } from './ink.js';
 import { createLasso, inLoop, pick, reshape } from './lasso.js';
 import { recognise, aim } from './shapes.js';
+import { rearrange } from './pages.js';
 
 const out = document.getElementById('out');
 let passed = 0, failed = 0;
@@ -25,6 +26,17 @@ function check(name, ok) {
 }
 
 try {
+  // --- pages: reordering, doubling and dropping carry the ink with them ---
+  {
+    const doc = { pages: [{ h: 100 }, { h: 100 }, { h: 100 }] };
+    const a = { tool: 'pen', color: 'a', size: 1, points: [[0, 10]] }, b = { ...a, color: 'b', points: [[0, 110]] }, c = { ...a, color: 'c', points: [[0, 210]] };
+    const y = r => r.strokes.map(s => s.color + s.points[0][1]).join(' ');
+    check('rearrange: a page moved takes its ink along', y(rearrange(doc, [a, b, c], [], [2, 0, 1])) === 'c10 a110 b210');
+    check('rearrange: a page left out takes its ink away and the rest close up', y(rearrange(doc, [a, b, c], [], [0, 2])) === 'a10 c110');
+    check('rearrange: a page doubled is inked twice, the first copy the very stroke', (r => y(r) === 'a10 b110 b210 c310' && r.strokes[0] === a && r.pages.length === 4)(rearrange(doc, [a, b, c], [], [0, 1, 1, 2])));
+    check('rearrange: items go with their page too', rearrange(doc, [], [{ y: 150, h: 10 }], [1, 1]).items.map(i => i.y).join() === '50,150');
+  }
+
   // --- geometry ---
   const clean = d => !/NaN|undefined|null/.test(d);
   const d1 = pathData([[10, 20]]);

@@ -1,9 +1,10 @@
 import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
 import { createLasso } from './lasso.js';
-import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps } from './pages.js';
+import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages } from './pages.js';
 import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
 import { exportDoc, printDoc, pinUnits } from './export.js';
+import { createThumbs } from './thumbs.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -694,6 +695,7 @@ function place(at = pos, glide = false) {
   bar.hidden = h <= vh;
   bar.style.height = length + 'px';
   bar.style.transform = `translateY(${(top - pos[1]) / (h - vh) * (vh - length)}px)`;
+  if (pagesOpen) thumbs.setCurrent(pageAt());
 }
 
 // Move the view by a scroll amount: positive goes right / down the note.
@@ -783,6 +785,7 @@ const fitZoom = () => (scroller.clientWidth - GUTTER) / PAGE_WIDTH;
 // The room for the sheet changed (tablet rotated, window resized, full screen toggled).
 let lastFit = Infinity;
 function refit() {
+  layoutPages();
   if (!current) return;
   const fit = fitZoom();
   if (zoom === Math.min(1, lastFit)) setZoom(Math.min(1, fit)); // still at the opening zoom: follow it
@@ -843,7 +846,10 @@ frame.addEventListener('load', () => {
 // Make the sheet as tall as the open note is: a paged note, its pages; a file, what is in it. Also
 // called when the note grows or shrinks while it is open (a page added, a gap opened or closed).
 function measure() {
-  if (current.pages) return setPageHeight(pagesHeight(current));
+  if (current.pages) {
+    setPageHeight(pagesHeight(current));
+    return syncPages();
+  }
   const doc = frame.contentDocument;
   frame.style.height = MIN_HEIGHT + 'px'; // a document never measures less than the frame it is in: so one that got shorter is measured in a short frame
   setPageHeight(Math.max(MIN_HEIGHT, doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0));
@@ -862,6 +868,7 @@ const ink = createInk(svg, {
       measure();
     }
     space.refresh(); // what can be removed in the Add space mode depends on where the ink is
+    if (pagesOpen) thumbs.refresh();
     touch();
     refreshHistory();
     lasso.changed(); // undo, redo and the rest let go of what the lasso holds
@@ -1203,6 +1210,7 @@ async function openDoc(id) {
   const doc = await db.get(id).catch(() => null);
   if (!doc) return notify('That note could not be opened.');
   current = doc;
+  pagesStale = true;
   document.body.classList.add('editing'); // must be visible before fitZoom() measures the scroller
   nameInput.value = doc.name;
   space.set(false);
@@ -1212,6 +1220,7 @@ async function openDoc(id) {
   refreshHistory();
   lastFit = fitZoom();
   resetZoom(Math.min(1, lastFit));
+  showPages();
 }
 
 async function closeDoc() {
@@ -1219,6 +1228,7 @@ async function closeDoc() {
   lasso.clear();
   current = null;
   frame.srcdoc = ''; // drop the document; also guarantees a reload if the same note is reopened
+  showPages();
   showLibrary();
 }
 $('back-btn').onclick = closeDoc;
@@ -1232,6 +1242,101 @@ nameInput.addEventListener('change', () => {
 nameInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') nameInput.blur();
 });
+
+/* ---------- Pages ---------- */
+
+// The column of pages (thumbs.js) beside a notebook or a PDF; an imported HTML file has no pages.
+// What it asks for is done here, since it changes the note, its ink and the frame.
+const pagesBtn = $('pages-btn'), pagesPanel = $('pages-panel');
+let pagesOpen = false;   // the column is showing
+let pagesStale = true;   // its pictures are of another note, or of pages that have changed
+const thumbs = createThumbs({
+  panel: pagesPanel, list: $('pages-list'), menu: $('page-menu'),
+  note: () => current,
+  strokes: () => current?.strokes ?? [],
+  items: () => current?.items ?? [],
+  go: i => place([pos[0], restTop() - pageTops(current)[i] * zoom], true),
+  act: pageAct,
+});
+let pagesWanted = false; // the button is on
+option(pagesBtn, 'pagesOpen', on => { pagesWanted = on; showPages(); });
+
+// The page in the middle of what can be seen.
+function pageAt() {
+  const tops = pageTops(current), y = ((scroller.clientHeight + restTop()) / 2 - pos[1]) / zoom;
+  let i = 0;
+  while (i < tops.length - 2 && y >= tops[i + 1]) i++;
+  return i;
+}
+// Below the toolbar, or at the top where the toolbar is a rail or put away.
+function layoutPages() {
+  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? 10 : toolbar.offsetHeight + 8}px`;
+}
+function showPages() {
+  const paged = !!current?.pages;
+  pagesBtn.hidden = !paged;
+  pagesOpen = paged && pagesWanted;
+  pagesPanel.hidden = !pagesOpen;
+  if (!pagesOpen) return thumbs.closeMenu();
+  layoutPages();
+  syncPages();
+  thumbs.setCurrent(pageAt());
+}
+// The column shows the note's pages as they are: made again when it is opened, or the pages are not the ones it has.
+function syncPages() {
+  if (!current?.pages || !pagesOpen) return;
+  if (pagesStale || thumbs.count() !== current.pages.length) {
+    pagesStale = false;
+    thumbs.build();
+    thumbs.setCurrent(pageAt());
+  }
+}
+
+function pageAct(what, i, extra) {
+  const n = current.pages.length, order = [...Array(n).keys()];
+  if (what === 'paper') {
+    const page = current.pages[i];
+    for (const [key, value] of Object.entries(extra)) { if (value) page[key] = value; else delete page[key]; }
+    frame.contentDocument.body.children[i].setAttribute('style', pageStyle(page, current.paper));
+    touch();
+    return thumbs.refresh();
+  }
+  if (what === 'add') {
+    const top = pageTops(current)[i + 1], page = addPage(current, i + 1, frame.contentDocument);
+    ink.shift(top, page.h); // the ink below moves down with what it was written on; also saves
+    measure();
+    space.refresh();
+    return thumbs.refresh();
+  }
+  if (what === 'duplicate') order.splice(i + 1, 0, i);
+  else if (what === 'move') order.splice(extra, 0, order.splice(i, 1)[0]);
+  else if (what === 'remove') {
+    const page = current.pages[i];
+    if ((page.img || inkedPages(current, ink.getStrokes())[i]) && !confirm(`Delete page ${i + 1}? Its ink goes with it, and undo cannot bring it back.`)) return;
+    order.splice(i, 1);
+  }
+  restructure(order);
+}
+
+// The pages in a new order, doubled or fewer (pages.js, rearrange). The note's ink moves with them.
+// The undo history is dropped: it is of pages that are no longer where they were.
+function restructure(order) {
+  const r = rearrange(current, ink.getStrokes(), ink.getItems(), order);
+  const body = frame.contentDocument.body, shown = [...body.children];
+  current.pages = r.pages;
+  body.replaceChildren(...order.map((p, j) => (order.indexOf(p) === j ? shown[p] : shown[p].cloneNode(true))));
+  lasso.clear();
+  ink.load(r.strokes, r.items);
+  current.strokes = ink.getStrokes();
+  if (current.items || r.items.length) current.items = ink.getItems();
+  if (needsPage(current, current.strokes)) addPage(current, undefined, frame.contentDocument); // a notebook keeps a blank page ahead
+  refreshHistory();
+  measure();
+  space.refresh();
+  touch();
+  thumbs.build();
+  thumbs.setCurrent(pageAt());
+}
 
 /* ---------- Export ---------- */
 

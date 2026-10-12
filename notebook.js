@@ -24,7 +24,7 @@ function show() {
     own.parentElement.style.setProperty('--c', paper[key]);
   }
   spacing.value = paper.spacing;
-  spacing.disabled = paper.template === 'plain'; // nothing to space
+  spacing.disabled = paper.template === 'plain' || paper.template === 'planner'; // nothing to space
   dialog.style.setProperty('--paper', paper.color); // the template tiles are drawn in the chosen colours (style.css)
   dialog.style.setProperty('--line', paper.line);
   // The picture is a page as it will be made: the same size and the same paper (paperCss), shrunk

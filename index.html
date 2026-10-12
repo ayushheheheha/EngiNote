@@ -166,6 +166,8 @@
               <button class="nb-tile" type="button" data-value="rule"><span></span>Rule</button>
               <button class="nb-tile" type="button" data-value="grid"><span></span>Grid</button>
               <button class="nb-tile" type="button" data-value="dot"><span></span>Dot</button>
+              <button class="nb-tile" type="button" data-value="cornell"><span></span>Cornell</button>
+              <button class="nb-tile" type="button" data-value="planner"><span></span>Planner</button>
             </div>
           </div>
           <div class="nb-row">Paper
@@ -283,6 +285,11 @@
             title="Add space: a blank page, or a gap in the note, with the ink below moving down" aria-label="Add space">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16M4 20h16M12 8v8M8 12h8"/></svg>
           </button>
+          <!-- Pages (thumbs.js): a column of small pictures of the pages of a notebook or a PDF, to jump between them, move them and change them. -->
+          <button id="pages-btn" class="icon-btn" type="button" aria-pressed="false" hidden
+            title="Pages: see them all, jump to one, move, copy or delete them" aria-label="Pages">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="12" height="14" rx="2"/><path d="M5 7v11a3 3 0 0 0 3 3h9"/></svg>
+          </button>
           <!-- Export (export.js): the note with its ink, as a PDF. -->
           <button id="export-btn" class="icon-btn" type="button" title="Export the note, with its ink, as a PDF" aria-label="Export as PDF">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
@@ -326,6 +333,12 @@
       </div>
       <div id="scrollbar" hidden></div>
     </div>
+
+    <!-- The pages of the open notebook or PDF (thumbs.js). It floats over the note's left edge. -->
+    <aside id="pages-panel" aria-label="Pages" hidden>
+      <div id="pages-list" role="list"></div>
+    </aside>
+    <div id="page-menu" role="menu" hidden></div>
 
     <!-- What can be done with the ink the lasso holds: a new colour, or the bin. app.js puts the pen
          panel's colours in before the bin; lasso.js keeps the bar by the selection. -->
