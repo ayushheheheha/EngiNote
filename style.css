@@ -1243,3 +1243,46 @@ body.wide.editing #message {
 #text-sample { display: grid; place-items: center; flex: none; width: 46px; height: 46px; font-weight: 600; line-height: 1; }
 /* A card's picture of the note shows its items too: a layer the size of the page, shrunk like the frame. */
 .card-preview .card-items { position: absolute; left: 0; top: 0; width: 900px; height: 1200px; overflow: hidden; transform: scale(var(--thumb-scale, .2)); transform-origin: 0 0; }
+
+/* ---------- The pen's shadow (ghost.js) and settings ---------- */
+
+/* Placed by ghost.js with one transform: the tip is where the pen is, the shadow lies back from it. */
+#pen-ghost {
+  position: fixed;
+  left: 0;
+  top: -13px;
+  z-index: 3;
+  width: 190px;
+  height: 26px;
+  margin: 0;
+  color: #000;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 50%;
+  filter: blur(1.1px);
+  transition: opacity .14s;
+  will-change: transform;
+}
+#pen-ghost[data-dark="1"] { color: #fff; }
+body:not(.editing) #pen-ghost { display: none; }
+
+/* A flyout of settings: a row each, its name and its choice. */
+.flyout.settings { flex-direction: column; align-items: stretch; gap: 2px; width: 340px; padding: 8px 12px; }
+.set-row span { white-space: nowrap; }
+#settings-wrap .flyout { left: auto; right: -6px; --at: translate(0); transform-origin: 100% 0; }
+/* In the rail the button is near the foot of the screen: the flyout rises from it instead of being centred on it. */
+body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(100% + 12px); --at: translate(0); transform-origin: 100% 100%; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 14px; }
+.set-row select {
+  height: 36px;
+  max-width: 172px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  -webkit-appearance: none;
+  appearance: none; /* the device's own picker still opens; only the closed look is ours */
+  background: var(--fill);
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* under 16px iOS zooms the page on focus */
+}

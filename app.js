@@ -5,6 +5,7 @@ import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
 import { exportDoc, printDoc, pinUnits } from './export.js';
 import { createThumbs } from './thumbs.js';
+import { createGhost } from './ghost.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -906,6 +907,8 @@ const lasso = createLasso(svg, ink, lassoBar, () => {
   const box = scroller.getBoundingClientRect();
   return [box.left, box.top + restTop() - MARGIN, box.right, box.bottom];
 }, itemsView);
+// The faint shadow of the Apple Pencil while it hovers (ghost.js); the settings flyout turns it off.
+const ghost = createGhost(scroller);
 // "Add space": a blank page put into a paged note, a gap opened in a file (space.js).
 const space = createSpace({ button: $('space-btn'), mover, frame, ink, note: () => current, resize: measure });
 
@@ -1077,12 +1080,14 @@ function usePen(pen) {
 }
 
 let inkPen = ''; // the pen last used: text takes its colour
+let previousTool = ''; // the tool before this one, for the Pencil's "last tool"
 // Make `value` the tool: 'eraser', 'hand', 'lasso', 'text' or a pen's id.
 function choose(value) {
   const pen = penOf(value);
   if (!pen && !['eraser', 'hand', 'lasso', 'text'].includes(value)) return;
   if (value !== 'lasso') lasso.clear(); // what the lasso held is let go with it
   if (value === 'eraser' && tool !== 'eraser') beforeEraser = tool;
+  if (value !== tool && tool) previousTool = tool;
   if (value !== tool) showPanel(false);
   tool = value;
   autoBtn.hidden = value !== 'eraser';
@@ -1157,6 +1162,30 @@ sizeRange.oninput = () => editPen({ size: Number(sizeRange.value) });
 opacityRange.oninput = () => editPen({ opacity: opacityRange.value / 100 });
 stabilityRange.oninput = () => editPen({ stability: Number(stabilityRange.value) });
 customColor.oninput = () => editPen({ color: customColor.value });
+// The colours chosen with the colour picker, the latest first: they come back as swatches after it.
+const RECENT = 5;
+let recent = [];
+try { recent = JSON.parse(localStorage.getItem('recentColors')).filter(c => /^#[0-9a-f]{6}$/i.test(c)).slice(0, RECENT); } catch { /* none yet, or storage blocked */ }
+function showRecent() {
+  for (const old of panel.querySelectorAll('.recent')) old.remove();
+  $('pen-colors').append(...recent.map(color => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'icon-btn swatch recent';
+    btn.dataset.color = color;
+    btn.style.setProperty('--c', color);
+    btn.title = btn.ariaLabel = `Recent colour ${color}`;
+    return btn;
+  }));
+}
+customColor.onchange = () => { // the picker was closed: this is a colour to keep
+  const color = customColor.value.toLowerCase();
+  recent = [color, ...recent.filter(c => c !== color)].slice(0, RECENT);
+  try { localStorage.setItem('recentColors', JSON.stringify(recent)); } catch { /* lasts for this visit only */ }
+  showRecent();
+  fillPanel(penOf(tool));
+};
+showRecent();
 $('pen-colors').addEventListener('click', e => {
   const color = e.target.closest('[data-color]')?.dataset.color;
   if (color) editPen({ color });
@@ -1203,11 +1232,37 @@ const toggleEraser = () => choose(tool === 'eraser' ? beforeEraser : 'eraser');
 
 // The iPad app (ios/) passes on what a web page is never told: a double-tap or a squeeze on the
 // Apple Pencil itself. It arrives as a 'pencil' event on the window; in a browser it never fires.
+// What each does is the user's choice (the settings flyout); the choices are kept on this device.
+const PENCIL_ACTIONS = { eraser: 'Switch to the eraser', undo: 'Undo', redo: 'Redo', previous: 'Go back to the last tool', lasso: 'Lasso', hand: 'Hand', none: 'Nothing' };
+const pencilChoice = { tap: 'eraser', squeeze: 'undo' }; // as it comes out of the box
+for (const [which, select] of [['tap', $('pencil-tap')], ['squeeze', $('pencil-squeeze')]]) {
+  select.replaceChildren(...Object.entries(PENCIL_ACTIONS).map(([value, name]) => new Option(name, value)));
+  try { pencilChoice[which] = localStorage.getItem(`pencil-${which}`) ?? pencilChoice[which]; } catch { /* storage blocked */ }
+  if (!(pencilChoice[which] in PENCIL_ACTIONS)) pencilChoice[which] = which === 'tap' ? 'eraser' : 'undo'; // a saved choice this version does not offer
+  select.value = pencilChoice[which];
+  select.onchange = () => {
+    pencilChoice[which] = select.value;
+    try { localStorage.setItem(`pencil-${which}`, select.value); } catch { /* lasts for this visit only */ }
+  };
+}
+// A tool that is chosen again goes back: lasso, hand and the eraser each come and go.
+const toggleTool = name => choose(tool === name ? (previousTool && previousTool !== name ? previousTool : pens[0].id) : name);
+function pencilDo(action) {
+  if (action === 'eraser') toggleEraser();
+  else if (action === 'undo') ink.undo();
+  else if (action === 'redo') ink.redo();
+  else if (action === 'previous') { if (previousTool) choose(previousTool); }
+  else if (action === 'lasso' || action === 'hand') toggleTool(action);
+}
 addEventListener('pencil', e => {
-  if (!current) return;
-  if (e.detail === 'tap') toggleEraser();
-  else if (e.detail === 'squeeze') ink.undo();
+  if (current && (e.detail === 'tap' || e.detail === 'squeeze')) pencilDo(pencilChoice[e.detail]);
 });
+option($('ghost-btn'), 'penShadow', on => {
+  ghost.enable(on);
+  $('ghost-btn').textContent = on ? 'On' : 'Off';
+}, true);
+const settingsFly = flyout($('settings-wrap'), $('settings-btn'));
+$('settings-btn').onclick = settingsFly.toggle;
 
 // A toolbar button that switches an option on and off and remembers it on this device.
 // Returns a function that reads the current state.
@@ -1278,6 +1333,8 @@ async function openDoc(id) {
   space.set(false);
   setPageHeight(doc.pages ? pagesHeight(doc) : MIN_HEIGHT); // a file: reset before load so the last note's height can't inflate the measurement
   frame.srcdoc = noteHtml(doc);
+  const paper = doc.pages && cleanPaper(doc.paper).color, dark = paper && (parseInt(paper.slice(1, 3), 16) * 0.3 + parseInt(paper.slice(3, 5), 16) * 0.59 + parseInt(paper.slice(5, 7), 16) * 0.11) < 110;
+  ghost.dark(!!dark); // a shadow on black paper is a light one
   const items = cleanItems(doc.items);
   ink.load(doc.strokes || [], items);
   itemsView.render(items);

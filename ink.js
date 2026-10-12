@@ -38,6 +38,7 @@ const MIN_SHAPE = 24;             // screen px: no line shorter than this is str
 // Stylus and palm tuning. Chosen without the hardware to hand: calibrate on the real device.
 const PRESSURE_SMOOTH = 0.6;      // weight of the previous sample when smoothing raw pressure
 const PALM_AFTER_PEN = 300;       // ms after the stylus leaves the page: a touch landing this soon is taken for the palm
+const PALM_SIZE = 90;             // CSS px: a touch whose contact is wider and taller than this is a palm, whatever else is going on
 const PAN_SLOP = 8;               // screen px a finger must travel before it starts to scroll or zoom
 const TAP_MS = 250;               // longest a finger may stay down and still count as a tap
 const DOUBLE_TAP_MS = 400;        // longest gap between the two taps of a double tap
@@ -549,6 +550,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const rubber = e.button === 5;   // the eraser end of a stylus
     if (e.button !== 0 && !rubber) return;   // otherwise primary button / pen tip / finger only
     const isTouch = e.pointerType === 'touch', isPen = e.pointerType === 'pen';
+    if (isTouch && e.width > PALM_SIZE && e.height > PALM_SIZE) return;   // a flat hand: it joins nothing, and its later events are ignored
     if (isTouch) {
       for (const f of fingers.values()) f.solo = false;
       fingers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, solo: fingers.size === 0 });

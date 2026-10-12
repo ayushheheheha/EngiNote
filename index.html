@@ -307,6 +307,17 @@
           <button id="export-btn" class="icon-btn" type="button" title="Export the note, with its ink, as a PDF" aria-label="Export as PDF">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
           </button>
+          <!-- Settings: the pen's shadow, and what the Apple Pencil's double-tap and squeeze do. -->
+          <div id="settings-wrap" class="tool-wrap">
+            <button id="settings-btn" class="icon-btn" type="button" title="Settings: the pen's shadow and the Apple Pencil's shortcuts" aria-label="Settings" aria-haspopup="true" aria-expanded="false">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg>
+            </button>
+            <div class="flyout settings">
+              <div class="set-row"><span>Pen shadow</span><button id="ghost-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Show a faint shadow of the Apple Pencil while it hovers over the page">On</button></div>
+              <label class="set-row"><span>Pencil double-tap</span><select id="pencil-tap" aria-label="Apple Pencil double-tap"></select></label>
+              <label class="set-row"><span>Pencil squeeze</span><select id="pencil-squeeze" aria-label="Apple Pencil squeeze"></select></label>
+            </div>
+          </div>
           <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M20 4v16M8 12h8M8 12l3-3M8 12l3 3M16 12l-3-3M16 12l-3 3"/></svg>
           </button>
