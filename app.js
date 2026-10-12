@@ -242,7 +242,12 @@ function makeVideoCard(video) {
     const img = new Image(); // a frame of the video, made by the app; the icon stays under it until it loads
     img.className = 'card-picture';
     img.alt = '';
-    img.onload = () => { thumb.append(img); card.classList.add('pictured'); }; // pictured: its buttons get a ground to be seen on
+    // pictured: its buttons get a ground to be seen on. The picture is a frame of the video, so the card takes the video's own shape (16:9, or whatever the screen was).
+    img.onload = () => {
+      if (img.naturalWidth && img.naturalHeight) thumb.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+      thumb.append(img);
+      card.classList.add('pictured');
+    };
     img.src = video.picture;
   }
   // The app names a recording by its note and when it began, "Thermodynamics 2026-10-11 14.03.22" (older
@@ -1522,6 +1527,28 @@ async function addImage(file) {
   choose('lasso');
   lasso.selectItems([item]);
 }
+// The paste button. In the iPad app the app reads the clipboard (a web page may not, without a prompt that
+// a web view does not always show) and answers with a 'pasted' event; in a browser the page asks for it.
+const shellPaste = window.webkit?.messageHandlers?.paste;
+const noPicture = 'There is no picture on the clipboard. Copy one first.';
+$('paste-btn').onclick = async () => {
+  if (!current) return;
+  if (shellPaste) return shellPaste.postMessage({});
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) return addImage(new File([await item.getType(type)], 'pasted', { type }));
+    }
+    notify(noPicture);
+  } catch {
+    notify('The picture could not be pasted. Copy it again and tap Paste, or use the picture button.');
+  }
+};
+addEventListener('pasted', e => {
+  const { base64, mime, message: problem } = e.detail ?? {};
+  if (!base64) return notify(problem ?? noPicture);
+  addImage(new File([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], 'pasted', { type: mime }));
+});
 document.addEventListener('paste', e => {
   if (!current || e.target.closest?.('input, textarea')) return;
   const file = [...(e.clipboardData?.files ?? [])].find(f => f.type.startsWith('image/'));

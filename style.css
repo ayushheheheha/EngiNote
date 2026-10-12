@@ -442,6 +442,9 @@ body.in-videos .lib-tabs { visibility: hidden; }
 /* The menus over the notes are solid: the notes behind them must not show through the words. */
 #add-note-wrap .flyout, #backup-wrap .flyout { background: var(--surface); }
 .card.video .card-date { white-space: normal; }
+/* A recording's picture has the video's own shape (set from the picture, app.js; 16:9 until it is there), and the card is wide enough for that to be seen. */
+.card.video { grid-column: span 2; align-self: start; }
+.card.video .card-thumb { aspect-ratio: 16 / 9; }
 .card.video .card-thumb { color: #ff3b30; background: linear-gradient(160deg, rgb(255 59 48 / .2), rgb(255 59 48 / .07)); }
 
 #empty { margin: 8px 24px 32px; text-align: center; color: var(--muted); }

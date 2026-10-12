@@ -48,6 +48,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "mic")
         configuration.userContentController.add(self, name: "camera")
         configuration.userContentController.add(self, name: "export")
+        configuration.userContentController.add(self, name: "paste")
         configuration.userContentController.add(self, name: "shared")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
@@ -348,6 +349,29 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         return data
     }
 
+    // MARK: Pasting a picture
+
+    /// The picture on the clipboard, as the page's 'pasted' event: the picture as it was copied (a JPEG stays one),
+    /// else a PNG; one over 8 MB is first made smaller. (hasImages does not make iPadOS ask whether to allow the paste.)
+    private func pastePicture() {
+        let board = UIPasteboard.general
+        guard board.hasImages else { return send("pasted", ["message": "There is no picture on the clipboard. Copy one first."]) }
+        var mime = "image/jpeg"
+        var data = board.data(forPasteboardType: "public.jpeg")
+        if data == nil {
+            mime = "image/png"
+            data = board.data(forPasteboardType: "public.png") ?? board.image?.pngData()
+        }
+        guard var bytes = data else { return send("pasted", ["message": "That picture could not be read."]) }
+        if bytes.count > 8_000_000, let image = board.image {
+            let scale = min(1, 2000 / max(image.size.width, image.size.height))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            bytes = UIGraphicsImageRenderer(size: size).jpegData(withCompressionQuality: 0.85) { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+            mime = "image/jpeg"
+        }
+        send("pasted", ["mime": mime, "base64": bytes.base64EncodedString()])
+    }
+
     // MARK: Messages from the page
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -360,6 +384,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "mic": recorder.check(on: body["on"] as? Bool ?? false, enhance: body["enhance"] as? Bool ?? false)
         case "camera": showCamera(body)
         case "export": export(body)
+        case "paste": pastePicture()
         case "shared": pageReady = true; deliverShared() // the page is up: what was shared to the app can go to it
         default: break
         }
