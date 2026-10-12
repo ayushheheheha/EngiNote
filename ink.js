@@ -265,7 +265,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   nib.setAttribute('vector-effect', 'non-scaling-stroke');   // the ring stays 1.5px on screen at any zoom
   nib.style.pointerEvents = 'none';
   nib.style.display = 'none';
-  svg.appendChild(nib);
+  (live.isConnected ? live : svg).appendChild(nib); // on the live layer too: moving the ring must not redraw the ink
   let eraserRadius = ERASER_RADIUS;
 
   function showNib(e) {
