@@ -41,6 +41,7 @@ const PALM_AFTER_PEN = 300;       // ms after the stylus leaves the page: a touc
 const PALM_SIZE = 90;             // CSS px: a touch whose contact is wider and taller than this is a palm, whatever else is going on
 const PAN_SLOP = 8;               // screen px a finger must travel before it starts to scroll or zoom
 const TAP_MS = 250;               // longest a finger may stay down and still count as a tap
+const LONG_PRESS_MS = 550;        // how long one finger must stay put to be a long press
 const DOUBLE_TAP_MS = 400;        // longest gap between the two taps of a double tap
 const DOUBLE_TAP_DIST = 40;       // screen px the two taps may be apart
 
@@ -213,6 +214,7 @@ export function makeEl(s, done = true) {
 // onZoom(factor, x, y, hold) is called as two fingers move: zoom by `factor` and keep page point
 // `hold` (viewBox units) at screen position (x, y). onZoomEnd() follows once, when that gesture is over.
 // onErase() is called after an erasing gesture that removed at least one stroke.
+// onLongPress(point, x, y) is called when one finger is held still on the page for a moment: the page point, and the screen position.
 // onTap(point) is called when a finger taps the page (a short, still touch; page units), for a tool used by tapping (text).
 // The note's items (text boxes and pictures: items.js) are kept here with the strokes, so that undo and redo
 // take both back together; this file does not draw them or look inside them beyond where they are:
@@ -220,7 +222,7 @@ export function makeEl(s, done = true) {
 // `surface` is the element whose pointer events are handled: the svg itself, or something around
 // it (the app passes the whole note window, so fingers can pan and pinch on the margin too).
 // Strokes and erasing still only start on the svg.
-export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZoomEnd, onDoubleTap, onErase, onTap } = {}) {
+export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZoomEnd, onDoubleTap, onErase, onTap, onLongPress } = {}) {
   let tool = 'pen', color = '#000', size = 3, opacity = 1;
   // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
   // 'pen', 'flow', 'highlighter' or 'glow'.
@@ -251,6 +253,8 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   let lastContact = -Infinity;   // event time of the stylus last touching the page
   const fingers = new Map();   // every finger on the page, palm or not: id -> {x, y, t, solo}, to spot taps
   let lastTap = null;          // {x, y, t} of a finger tap that may become a double tap
+  let press = 0;               // the timer of a finger that may turn out to be a long press
+  const noPress = () => { clearTimeout(press); press = 0; };
   let smooth = SMOOTH;         // screen px the ink trails the tip by: the pen's "stability", see setStability()
   let hold = HOLD_MS;          // see setHold()
 
@@ -519,6 +523,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // (A hovering stylus changes nothing: people scroll with a finger while holding it close.)
   function dropPalms() {
     for (const [id, p] of pans) if (p.touch) pans.delete(id);
+    noPress();
     endZoom();
     if (act && act.touch) discard();
     vel = null;
@@ -570,9 +575,19 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     }
     cancelAnimationFrame(glide);
     vel = null;
+    noPress(); // a second touch is not a long press
     if (tool === 'hand' || (isTouch && (!fingerDraw || pans.size))) {
       // `live`: has travelled PAN_SLOP from where it landed (ox, oy). A resting touch must not nudge the page.
       pans.set(e.pointerId, { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, touch: isTouch, live: !isTouch });
+      if (isTouch && onLongPress && fingers.size === 1 && !penDown) {
+        const id = e.pointerId;
+        press = setTimeout(() => {
+          const p = pans.get(id);
+          if (!p || p.live || pans.size !== 1 || act || penDown) return;
+          const pt = toPoint({ clientX: p.x, clientY: p.y });
+          if (pt) onLongPress(pt, p.x, p.y);
+        }, LONG_PRESS_MS);
+      }
       if (tool === 'hand') svg.style.cursor = 'grabbing';
     } else if (handlers[tool] && !rubber) {
       // Anywhere in the window, the margin included: a loop round ink at the sheet's edge starts off it.
@@ -617,7 +632,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     showNib(e);
     const p = pans.get(e.pointerId);
     if (p) {
-      if (!p.live && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) >= PAN_SLOP) p.live = true;
+      if (!p.live && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) >= PAN_SLOP) { p.live = true; noPress(); }
       const from = grip();
       p.x = e.clientX;
       p.y = e.clientY;
@@ -703,6 +718,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       penDown = false;
       lastContact = e.timeStamp;
     }
+    noPress();
     const f = fingers.get(e.pointerId);
     if (f) {
       fingers.delete(e.pointerId);

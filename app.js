@@ -891,6 +891,7 @@ const ink = createInk(svg, {
   onZoom: pinchMove, // two-finger pinch and pan
   onZoomEnd: pinchEnd,
   onDoubleTap: () => toggleEraser(),
+  onLongPress: (pt, x, y) => showPastePill(pt, x, y),
   onTap: pt => { if (tool === 'text') textAt(pt); else if (tool === 'lasso') lasso.tapAt(pt); }, // a finger's tap
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
     if (autoDeselect() && tool === 'eraser') choose(beforeEraser);
@@ -1512,7 +1513,7 @@ imageInput.onchange = () => {
   imageInput.value = ''; // lets the same picture be picked again
   if (file) addImage(file);
 };
-async function addImage(file) {
+async function addImage(file, at) { // `at`: the page point to put it at (the middle of its picture), else the middle of what can be seen
   if (!current) return;
   let made;
   try {
@@ -1520,34 +1521,55 @@ async function addImage(file) {
   } catch {
     return notify('That picture could not be opened.');
   }
-  const x = within1((scroller.clientWidth / 2 - pos[0]) / zoom - made.w / 2, 0, Math.max(0, PAGE_WIDTH - made.w));
-  const y = within1(((scroller.clientHeight + restTop()) / 2 - pos[1]) / zoom - made.h / 2, 0, Math.max(0, pageHeight - made.h));
+  const middle = at ?? [(scroller.clientWidth / 2 - pos[0]) / zoom, ((scroller.clientHeight + restTop()) / 2 - pos[1]) / zoom];
+  const x = within1(middle[0] - made.w / 2, 0, Math.max(0, PAGE_WIDTH - made.w));
+  const y = within1(middle[1] - made.h / 2, 0, Math.max(0, pageHeight - made.h));
   const item = { type: 'image', x: Math.round(x), y: Math.round(y), w: made.w, h: made.h, src: made.src };
   ink.replace(ink.getStrokes(), [...ink.getItems(), item]);
   choose('lasso');
   lasso.selectItems([item]);
 }
-// The paste button. In the iPad app the app reads the clipboard (a web page may not, without a prompt that
-// a web view does not always show) and answers with a 'pasted' event; in a browser the page asks for it.
+// Pasting a picture that was copied somewhere else: hold a finger still on the page and "Paste picture"
+// appears over it; tapping that puts the picture there. In the iPad app the app reads the clipboard (a
+// web page may not, without a prompt that a web view does not always show) and answers with a 'pasted'
+// event; in a browser the page asks for it.
 const shellPaste = window.webkit?.messageHandlers?.paste;
 const noPicture = 'There is no picture on the clipboard. Copy one first.';
-$('paste-btn').onclick = async () => {
+const pastePill = $('paste-pill');
+let pasteAt = null, pillTimer = 0;
+function hidePastePill() {
+  clearTimeout(pillTimer);
+  pastePill.hidden = true;
+}
+function showPastePill(pt, x, y) {
+  if (!current) return;
+  pasteAt = pt;
+  pastePill.hidden = false;
+  // Over the finger, which is still down, and kept on the screen.
+  pastePill.style.left = `${within1(x - pastePill.offsetWidth / 2, 8, innerWidth - pastePill.offsetWidth - 8)}px`;
+  pastePill.style.top = `${within1(y - pastePill.offsetHeight - 28, 8, innerHeight - pastePill.offsetHeight - 8)}px`;
+  clearTimeout(pillTimer);
+  pillTimer = setTimeout(hidePastePill, 6000);
+}
+document.addEventListener('pointerdown', e => { if (!pastePill.contains(e.target)) hidePastePill(); }, true);
+pastePill.onclick = async () => {
+  hidePastePill();
   if (!current) return;
   if (shellPaste) return shellPaste.postMessage({});
   try {
     for (const item of await navigator.clipboard.read()) {
       const type = item.types.find(t => t.startsWith('image/'));
-      if (type) return addImage(new File([await item.getType(type)], 'pasted', { type }));
+      if (type) return addImage(new File([await item.getType(type)], 'pasted', { type }), pasteAt);
     }
     notify(noPicture);
   } catch {
-    notify('The picture could not be pasted. Copy it again and tap Paste, or use the picture button.');
+    notify('The picture could not be pasted. Copy it again and try again, or use the picture button.');
   }
 };
 addEventListener('pasted', e => {
   const { base64, mime, message: problem } = e.detail ?? {};
   if (!base64) return notify(problem ?? noPicture);
-  addImage(new File([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], 'pasted', { type: mime }));
+  addImage(new File([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], 'pasted', { type: mime }), pasteAt);
 });
 document.addEventListener('paste', e => {
   if (!current || e.target.closest?.('input, textarea')) return;

@@ -557,11 +557,11 @@ body.in-videos .lib-tabs { visibility: hidden; }
 #toolbar .strip:nth-child(2) > *, #toolbar .strip:nth-child(2) .group > * { flex: none; }
 .sep { flex: none; }
 
-/* Until the window is wide enough for all three strips side by side (about 1500px): name and zoom
-   share the first row, the tools get their own row, centred. */
-@media (max-width: 1500px) {
-  #toolbar .strip:nth-child(2) { order: 1; margin: 0 auto; }
-}
+/* One line, always: the name, the tools and the zoom. The name and the zoom keep their size; the tools
+   are centred between them, and slide sideways where they do not all fit (see above). */
+#toolbar { flex-wrap: nowrap; }
+#toolbar .strip:nth-child(1), #toolbar .strip:nth-child(3) { flex: none; }
+#toolbar .strip:nth-child(2) { margin: 0 auto; min-width: 0; }
 
 #note-name, #folder-name {
   width: 190px;
@@ -1312,3 +1312,9 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
   font: inherit;
   font-size: 16px; /* under 16px iOS zooms the page on focus */
 }
+
+/* The name gives way before the tools do. */
+#note-name { width: clamp(90px, 15vw, 190px); }
+
+/* "Paste picture", which a long press with a finger brings up where the finger is (app.js). */
+#paste-pill { position: fixed; z-index: 8; padding: 0 22px; white-space: nowrap; color: var(--accent); user-select: none; -webkit-user-select: none; }
