@@ -120,7 +120,8 @@ export function distToSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const len2 = dx * dx + dy * dy;
   const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  const ex = px - (ax + t * dx), ey = py - (ay + t * dy);
+  return Math.sqrt(ex * ex + ey * ey); // not Math.hypot: that is many times slower in Safari, and this runs for every segment near the eraser
 }
 
 /** True if (x, y) is within `radius` of the stroke's inked area. */
@@ -131,6 +132,25 @@ export function hitStroke(stroke, x, y, radius = ERASER_RADIUS) {
   for (let i = 0; i < Math.max(1, pts.length - 1); i++) {
     const a = pts[i], b = pts[i + 1] || a;
     if (distToSegment(x, y, a[0], a[1], b[0], b[1]) <= reach) return true;
+  }
+  return false;
+}
+
+/** True if any of the `steps` points along the sweep (x0, y0) to (x1, y1) is within `radius` of the stroke's
+    inked area: hitStroke for each of them at once. A segment too far from the whole sweep to be reached is
+    passed over with a few comparisons, which matters for a long stroke the eraser is only beside. */
+function hitSweep(stroke, x0, y0, x1, y1, steps, radius) {
+  const pts = stroke.points;
+  if (!pts.length) return false;
+  const reach = radius + strokeWidth(stroke) / 2;
+  const left = Math.min(x0, x1) - reach, right = Math.max(x0, x1) + reach;
+  const top = Math.min(y0, y1) - reach, bottom = Math.max(y0, y1) + reach;
+  for (let i = 0; i < Math.max(1, pts.length - 1); i++) {
+    const a = pts[i], b = pts[i + 1] || a;
+    if (a[0] < left && b[0] < left || a[0] > right && b[0] > right || a[1] < top && b[1] < top || a[1] > bottom && b[1] > bottom) continue;
+    for (let k = 1; k <= steps; k++) {
+      if (distToSegment(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, a[0], a[1], b[0], b[1]) <= reach) return true;
+    }
   }
   return false;
 }
@@ -200,7 +220,6 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // Committed strokes; the array is replaced, never mutated. A stroke's `tool` is how it is drawn:
   // 'pen', 'flow', 'highlighter' or 'glow'.
   let strokes = [];
-  let els = [];       // one element per stroke, same order
   const undoStack = [], redoStack = [];   // snapshots of `strokes`
   // Gesture in progress: draw {id, touch, at, stroke, path, tip, soft, kept} or erase {id, touch, at, before, last}.
   // `at` is the pointer's last screen position; `touch` marks a finger (it may turn out to be a pinch or a palm).
@@ -239,6 +258,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
 
   // The strokes live in their own group, in order; the tip preview sits after it, so above them all.
   const layer = document.createElementNS(NS, 'g');
+  layer.style.pointerEvents = 'none';   // a stroke is never what a pointer lands on: the browser need not test its shape on every move near it
   svg.appendChild(layer);
   // The stroke being drawn goes on an svg of its own over the page, which the browser keeps as a layer
   // of its own: each step of the stroke then redraws that one stroke, not all the ink under it (which
@@ -307,11 +327,11 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
 
   // Make the page show exactly the current strokes, in order, touching only the elements that differ.
   function render() {
-    els = strokes.map(pathOf);
-    const keep = new Set(els);
+    const wanted = strokes.map(pathOf);
+    const keep = new Set(wanted);
     for (const el of [...layer.children]) if (!keep.has(el)) el.remove();
     // What is left is in the right relative order (strokes never reorder), so only the gaps need filling.
-    els.forEach((el, i) => { if (layer.children[i] !== el) layer.insertBefore(el, layer.children[i] || null); });
+    wanted.forEach((el, i) => { if (layer.children[i] !== el) layer.insertBefore(el, layer.children[i] || null); });
   }
 
   function commit(next, prev = strokes) {
@@ -365,13 +385,13 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (!a) return;
     act = null;
     if (a.own) return lasso.up();
+    if (a.pending) flushErased(a);
     if (a.laser) {
       a.path.animate({ opacity: 0 }, { duration: LASER_FADE, easing: 'ease-in', fill: 'forwards' }).onfinish = () => a.path.remove();
     } else if (a.path) {
       if (!a.shape) toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
       setData(a.path, strokeData(a.stroke));   // its finished shape
       if (a.path.parentNode !== layer) layer.appendChild(a.path);   // off its own layer, in among the strokes
-      els.push(a.path);   // the live path becomes the stroke's element
       elOf.set(a.stroke, a.path);
       commit([...strokes, a.stroke]);
     } else if (strokes !== a.before) {
@@ -416,17 +436,34 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (a.gone.has(s)) continue;
       const box = boxOf(s);
       if (box[0] > right || box[2] < left || box[1] > bottom || box[3] < top) continue;
-      for (let k = 1; k <= steps; k++) {
-        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, eraserRadius)) { gone.add(s); break; }
-      }
+      if (hitSweep(s, x0, y0, x1, y1, steps, eraserRadius)) gone.add(s);
     }
     if (!gone.size) return;
     for (const s of gone) {
-      elOf.get(s)?.remove();
       a.gone.add(s);
+      a.pending.push(s);
     }
     strokes = strokes.filter(s => !gone.has(s));
-    els = strokes.map(pathOf);
+  }
+
+  // Erased strokes leave the page in batches, a few times a second, and not on every move: each
+  // one that goes makes the browser redraw the ink and the note behind it where it was, and a sweep
+  // across writing takes out dozens, mostly in the same place, which a batch redraws once.
+  // The strokes are gone at once as far as the engine goes (undo, saving, hitting); only the
+  // drawing of that waits, for the length of ERASE_BATCH at most.
+  const ERASE_BATCH = 70; // ms
+  function flushErased(a) {
+    clearTimeout(a.flush);
+    a.flush = 0;
+    a.flushedAt = performance.now();
+    for (const s of a.pending) elOf.get(s)?.remove();
+    a.pending.length = 0;
+  }
+  function eraseSoon(a) {
+    if (!a.pending.length || a.flush) return;
+    const wait = ERASE_BATCH - (performance.now() - a.flushedAt);
+    if (wait <= 0) flushErased(a);
+    else a.flush = setTimeout(flushErased, wait, a);
   }
 
   // Which strokes are where, so that an erasing gesture looks only at the strokes near the eraser and
@@ -456,6 +493,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const a = act;
     act = null;
     if (a.own) return lasso.cancel();
+    if (a.pending) flushErased(a);
     if (a.path) a.path.remove();
     else if (strokes !== a.before) { strokes = a.before; render(); }
   }
@@ -545,8 +583,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (tool === 'eraser' || rubber) {
         // The sheet stays where it is for the whole gesture, so it is measured once: asking again after
         // each stroke has gone would make the browser lay the whole note out again every time.
-        act = { ...base, before: strokes, last: pt, box: svg.getBoundingClientRect(), gone: new Set(), ...indexStrokes(strokes) };
+        act = { ...base, before: strokes, last: pt, box: svg.getBoundingClientRect(), gone: new Set(), pending: [], flush: 0, flushedAt: 0, ...indexStrokes(strokes) };
         eraseAlong(act, pt);
+        eraseSoon(act);
       } else {
         // The flow pen follows pressure, when the stylus really reports it (0.5 is the "no sensor"
         // value): its points then carry it. Otherwise its width follows the speed of the hand.
@@ -637,6 +676,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (last.length > 2) pt.push(round2(last[2] * PRESSURE_SMOOTH + ev.pressure * (1 - PRESSURE_SMOOTH)));
       pts.push(pt);
     }
+    if (a.pending) eraseSoon(a);
     if (a.path) {
       // Drawn right up to the tip, so no gap shows between it and the trailing ink. That last
       // stretch is only for show until the smoothed point has passed over it.
