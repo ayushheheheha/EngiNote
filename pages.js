@@ -173,11 +173,11 @@ export function rearrange(doc, strokes, items, order) {
   return { pages, strokes: outStrokes, items: outItems };
 }
 
-/** For each page, whether any of `strokes` is on it. A stroke is on every page from its highest
-    point to its lowest.
+/** For each page, whether any of `strokes` or `items` is on it. A stroke is on every page from its highest
+    point to its lowest, an item from its top to its foot.
     ponytail: reads every point of every stroke each time; keep a top and bottom with each stroke if
     a notebook of thousands of strokes ever makes this show. */
-export function inkedPages(doc, strokes) {
+export function inkedPages(doc, strokes, items = []) {
   const tops = pageTops(doc), inked = doc.pages.map(() => false);
   for (const s of strokes) {
     let high = Infinity, low = -Infinity;
@@ -187,13 +187,16 @@ export function inkedPages(doc, strokes) {
     }
     for (let i = 0; i < inked.length; i++) if (low >= tops[i] && high < tops[i + 1]) inked[i] = true;
   }
+  for (const it of items) {
+    for (let i = 0; i < inked.length; i++) if (it.y + it.h >= tops[i] && it.y < tops[i + 1]) inked[i] = true;
+  }
   return inked;
 }
 
 /** A notebook always has a blank page ahead: true when its last page is a blank one that has been
     written on. (A last page that is a picture, the end of an imported file, is the end.) */
-export function needsPage(doc, strokes) {
-  return !doc.pages[doc.pages.length - 1].img && inkedPages(doc, strokes)[doc.pages.length - 1];
+export function needsPage(doc, strokes, items = []) {
+  return !doc.pages[doc.pages.length - 1].img && inkedPages(doc, strokes, items)[doc.pages.length - 1];
 }
 
 /* ---------- Gaps in an HTML note ---------- */

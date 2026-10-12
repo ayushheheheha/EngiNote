@@ -1,7 +1,8 @@
 // lasso.js — the lasso tool for EngiNote: circle some ink, then move it, resize it, recolour it or
-// delete it. Plain ES module. ink.js carries the pointer (which pointer may use a tool, palm
+// delete it. Plain ES module. It takes the page's items (text boxes, pictures: items.js) as it takes ink. ink.js carries the pointer (which pointer may use a tool, palm
 // rejection) and keeps the strokes; this file is what the lasso does with them.
 import { boxOf, pathData } from './ink.js';
+import { itemBox, reshapeItem } from './items.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const GRIP = 18;        // screen px around a corner that take hold of its handle: a 36px target
@@ -40,6 +41,15 @@ export function pick(strokes, loop) {
   });
 }
 
+/** The items a loop takes: those whose middle is inside it. */
+export function pickItems(items, loop) {
+  if (loop.length < 3) return [];
+  return items.filter(it => {
+    const [left, top, right, bottom] = itemBox(it);
+    return inLoop(loop, (left + right) / 2, (top + bottom) / 2);
+  });
+}
+
 /** A copy of a stroke scaled by k and then moved by (tx, ty): where it is and how thick it is, together. */
 export function reshape(stroke, k, tx, ty) {
   return {
@@ -51,11 +61,16 @@ export function reshape(stroke, k, tx, ty) {
 
 // ---------- the tool ----------
 
+const TAP = 14;   // screen px: a loop that travels less than this is a tap, which takes the item under it
+
 // `svg` is the ink's own svg and `ink` its engine. `bar` is the element holding the colour buttons
 // ([data-color]) and the delete button; it is shown and placed here, by `left` and `top` inside its
 // offset parent. room() gives the part of the screen the bar may sit in: [left, top, right, bottom].
-export function createLasso(svg, ink, bar, room) {
+// `view` shows the items: view.preview(item, k, tx, ty) draws one as it would be, view.hit(items, point)
+// finds the top-most one at a point.
+export function createLasso(svg, ink, bar, room, view = { preview() {}, hit() {} }) {
   let chosen = [];   // the selected strokes, in the order they are drawn
+  let chosenItems = [];   // and the selected items
   let box = null;    // [left, top, right, bottom] of their ink in page px, or null with nothing selected
   let shown = null;  // the same as it is drawn right now: mid-gesture, where the selection has been taken to
   // Gesture in progress. A loop being drawn: {loop: [points]}. A move or a resize of the selection:
@@ -139,12 +154,12 @@ export function createLasso(svg, ink, bar, room) {
     placeBar(page);
   }
 
-  // Make `list` the selection (none: an empty list).
-  function select(list) {
+  // Make `list` and `itemList` the selection (none: empty lists).
+  function select(list, itemList = []) {
     chosen = list;
+    chosenItems = itemList;
     box = null;
-    for (const s of list) {
-      const b = boxOf(s);
+    for (const b of [...list.map(boxOf), ...itemList.map(itemBox)]) {
       box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b.slice();
     }
     rect.style.display = box ? '' : 'none';
@@ -161,17 +176,26 @@ export function createLasso(svg, ink, bar, room) {
   function preview(k, tx, ty) {
     const t = k === 1 && !tx && !ty ? null : `matrix(${k} 0 0 ${k} ${tx} ${ty})`;
     for (const s of chosen) t ? ink.elementOf(s).setAttribute('transform', t) : ink.elementOf(s).removeAttribute('transform');
+    for (const it of chosenItems) view.preview(it, k, tx, ty);
     draw([box[0] * k + tx, box[1] * k + ty, box[2] * k + tx, box[3] * k + ty]);
   }
 
-  // Put a changed copy in place of every selected stroke (or nothing, where `change` gives none):
-  // one undo step. The copies are then the selection.
-  function replace(change) {
-    const made = new Map(chosen.map(s => [s, change(s)]));
+  // Put a changed copy in place of every selected stroke and item (or nothing, where `change` gives
+  // none): one undo step. The copies are then the selection.
+  function replace(change, changeItem = it => it) {
+    const made = new Map(chosen.map(s => [s, change(s)])), madeItems = new Map(chosenItems.map(it => [it, changeItem(it)]));
     mine = true;
-    ink.replace(ink.getStrokes().map(s => (made.has(s) ? made.get(s) : s)).filter(Boolean));
+    ink.replace(ink.getStrokes().map(s => (made.has(s) ? made.get(s) : s)).filter(Boolean),
+      ink.getItems().map(it => (madeItems.has(it) ? madeItems.get(it) : it)).filter(Boolean));
     mine = false;
-    select([...made.values()].filter(Boolean));
+    select([...made.values()].filter(Boolean), [...madeItems.values()].filter(Boolean));
+  }
+
+  // A tap at page point `pt`: the top-most item there is the selection; where there is none, nothing is.
+  function tapAt(pt) {
+    if (box && pt[0] >= box[0] && pt[0] <= box[2] && pt[1] >= box[1] && pt[1] <= box[3]) return; // on what is held already
+    const it = view.hit(ink.getItems(), pt);
+    select([], it ? [it] : []);
   }
 
   // Drop the gesture in progress, leaving the ink as it was.
@@ -233,11 +257,14 @@ export function createLasso(svg, ink, bar, room) {
       if (!done) return;
       if (done.loop) {
         line.removeAttribute('d');
-        select(pick(ink.getStrokes(), done.loop));
+        let way = 0;   // how far the loop went
+        for (let i = 1; i < done.loop.length; i++) way += Math.hypot(done.loop[i][0] - done.loop[i - 1][0], done.loop[i][1] - done.loop[i - 1][1]);
+        if (way * scale < TAP) return tapAt(done.loop[0]);
+        select(pick(ink.getStrokes(), done.loop), pickItems(ink.getItems(), done.loop));
         return;
       }
       preview(1, 0, 0);   // the elements shown moved belong to the old strokes, which undo brings back as they were
-      if (done.k !== 1 || done.tx || done.ty) replace(s => reshape(s, done.k, done.tx, done.ty));
+      if (done.k !== 1 || done.tx || done.ty) replace(s => reshape(s, done.k, done.tx, done.ty), it => reshapeItem(it, done.k, done.tx, done.ty));
     },
     cancel,
   });
@@ -246,8 +273,10 @@ export function createLasso(svg, ink, bar, room) {
     const button = e.target.closest('button');
     if (!button || !box) return;
     const color = button.dataset.color;
-    if (!color) replace(() => null);   // the only other button: delete
-    else if (chosen.some(s => s.color !== color)) replace(s => ({ ...s, color }));
+    if (!color) replace(() => null, () => null);   // the only other button: delete
+    else if (chosen.some(s => s.color !== color) || chosenItems.some(it => it.type === 'text' && it.color !== color)) {
+      replace(s => ({ ...s, color }), it => (it.type === 'text' ? { ...it, color } : it)); // a picture has no colour
+    }
   });
 
   // Let go of the selection, and of any gesture in progress.
@@ -259,6 +288,9 @@ export function createLasso(svg, ink, bar, room) {
   select([]);
   return {
     clear,
+    tapAt,
+    /** Take hold of these items (a picture just put in, say), and nothing else. */
+    selectItems: itemList => select([], itemList),
     /** For the engine's onChange: strokes changed by anything but the lasso (undo, redo, the eraser end of a stylus) are no longer its selection. */
     changed() { if (!mine) clear(); },
   };

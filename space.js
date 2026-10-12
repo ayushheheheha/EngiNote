@@ -99,7 +99,7 @@ export function createSpace({ button, mover, frame, ink, note, resize }) {
     };
 
     if (doc.pages) {
-      const tops = pageTops(doc), inked = inkedPages(doc, ink.getStrokes()), n = doc.pages.length;
+      const tops = pageTops(doc), inked = inkedPages(doc, ink.getStrokes(), ink.getItems()), n = doc.pages.length;
       for (let i = 1; i <= n; i++) plus(tops[i], i < n ? 'Add a page here' : 'Add a page at the end', () => insertPage(i));
       doc.pages.forEach((page, i) => {
         // A blank page nobody has written on can go. Not the last one while the page before it has

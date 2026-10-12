@@ -2,6 +2,7 @@
 // file from it; a browser prints it, and its print dialog can save a PDF. Plain ES module.
 import { makeEl, boxOf } from './ink.js';
 import { noteHtml, pageTops, inkedPages, paperCss, pageStyle, PAGE_WIDTH } from './pages.js';
+import { itemHtml } from './items.js';
 
 const attr = text => text.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 
@@ -28,9 +29,12 @@ function inkSvg(strokes, top, height, style) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 ${top} ${PAGE_WIDTH} ${height}" style="position:absolute;overflow:hidden;${style}">${drawn}</svg>`;
 }
 
+// The text boxes and pictures that are on the stretch of the note between `top` and `top + height`, placed as they are there.
+const itemsOn = (items = [], top, height) => items.filter(it => it.y < top + height && it.y + it.h > top).map(it => itemHtml(it, top)).join('');
+
 // A paged note: a PDF page for each of its pages, each the page's own size, its ink over it.
 function pagedDoc(doc, strokes) {
-  const tops = pageTops(doc), inked = inkedPages(doc, strokes);
+  const tops = pageTops(doc), inked = inkedPages(doc, strokes, doc.items);
   // A notebook keeps a blank page ready at its end: blank pages nobody wrote on are left off the end.
   let count = doc.pages.length;
   while (count > 1 && !doc.pages[count - 1].img && !inked[count - 1]) count--;
@@ -46,7 +50,7 @@ function pagedDoc(doc, strokes) {
       '.page img{display:block;width:100%;height:100%}' +
       '</style></head><body>' +
       pages.map((p, i) => `<div class="page" style="${pageStyle(p, doc.paper)};page:s${sizes.indexOf(p.h)}">` +
-        `${p.img ? `<img src="${attr(p.img)}" alt="">` : ''}${inkSvg(strokes, tops[i], p.h, 'left:0;top:0;width:100%;height:100%')}</div>`).join('') +
+        `${p.img ? `<img src="${attr(p.img)}" alt="">` : ''}${itemsOn(doc.items, tops[i], p.h)}${inkSvg(strokes, tops[i], p.h, 'left:0;top:0;width:100%;height:100%')}</div>`).join('') +
       '</body></html>',
   };
 }
@@ -85,6 +89,7 @@ function fileDoc(doc, strokes, height, shown) {
   const holder = live && [live, live.parentElement].find(el => getComputedStyle(el).position !== 'static');
   const box = holder?.getBoundingClientRect(), x = box ? box.left + holder.clientLeft : 0, y = box ? box.top + holder.clientTop : 0;
   file.body.insertAdjacentHTML('beforeend',
+    `<div style="position:absolute;left:${-x}px;top:${-y}px;width:${PAGE_WIDTH}px;height:${height}px;overflow:hidden;pointer-events:none">${itemsOn(doc.items, 0, height)}</div>` +
     inkSvg(strokes, 0, height, `left:${-x}px;top:${-y}px;width:${PAGE_WIDTH}px;height:${height}px;margin:0;pointer-events:none`));
   return { pages: [height], html: '<!doctype html>' + file.documentElement.outerHTML };
 }

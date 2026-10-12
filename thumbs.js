@@ -41,6 +41,7 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
     paper.style.cssText = `height:${page.h}px;transform:scale(${K});${paperCss(pagePaper(doc.paper, page), 0.8 / K)}`;
     if (page.img) {
       const img = new Image();
+      img.className = 'thumb-bg';
       img.alt = '';
       img.src = page.img;
       paper.append(img);
@@ -57,6 +58,7 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
       el.style.left = it.x + 'px';
       el.style.top = it.y - top + 'px';
       el.style.width = it.w + 'px';
+      el.style.height = it.type === 'image' ? it.h + 'px' : 'auto';
       paper.append(el);
     }
     const svg = document.createElementNS(NS, 'svg');

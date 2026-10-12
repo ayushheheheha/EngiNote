@@ -5,6 +5,7 @@ import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
 import { exportDoc, printDoc, pinUnits } from './export.js';
 import { createThumbs } from './thumbs.js';
+import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
 const MIN_HEIGHT = 1200;
@@ -325,7 +326,11 @@ function fillPreview(box, doc) {
       svg.appendChild(path);
     } catch { /* skip it */ }
   }
-  box.replaceChildren(frame, svg);
+  // Text boxes and pictures, in a layer as big as the page and shrunk like the frame.
+  const things = document.createElement('div');
+  things.className = 'card-items';
+  for (const it of cleanItems(doc.items)) if (it.y < THUMB_H) things.insertAdjacentHTML('beforeend', itemHtml(it));
+  box.replaceChildren(frame, things, svg);
 }
 
 // Every card is the same width: one number scales all the pictures. The grid's cards change width with the window.
@@ -510,6 +515,8 @@ function fromBackup(d) {
   const note = { id: d.id, name: d.name, html: d.html, strokes: d.strokes, updatedAt: d.updatedAt };
   if (typeof d.folder === 'string') note.folder = d.folder;
   // A paged note (pages.js): its pages and paper, and no HTML of its own. Any other may have gaps.
+  const items = cleanItems(d.items);
+  if (items.length) note.items = items;
   const pages = cleanPages(d.pages), gaps = cleanGaps(d.gaps);
   if (pages) Object.assign(note, { html: '', pages }, d.paper ? { paper: cleanPaper(d.paper) } : {});
   else if (gaps) note.gaps = gaps;
@@ -860,10 +867,12 @@ function measure() {
 const ink = createInk(svg, {
   surface: scroller, // fingers pan and pinch anywhere in the window, grey margin included
   scroller: { scrollBy: ({ left = 0, top = 0 }) => panBy(left, top) }, // ink.js scrolls through this; see the view section
-  onChange(strokes) {
+  onChange(strokes, items) {
     current.strokes = strokes;
+    if (items.length || current.items) current.items = items;
+    itemsView.render(items);
     // A notebook always has a blank page ahead: ink on its last page brings the next one (pages.js).
-    if (current.pages && needsPage(current, strokes)) {
+    if (current.pages && needsPage(current, strokes, items)) {
       addPage(current, undefined, frame.contentDocument);
       measure();
     }
@@ -876,6 +885,7 @@ const ink = createInk(svg, {
   onZoom: pinchMove, // two-finger pinch and pan
   onZoomEnd: pinchEnd,
   onDoubleTap: () => toggleEraser(),
+  onTap: pt => { if (tool === 'text') textAt(pt); else if (tool === 'lasso') lasso.tapAt(pt); }, // a finger's tap
   onErase() { // eraser option "auto-deselect": go back to the previous tool once something was erased
     if (autoDeselect() && tool === 'eraser') choose(beforeEraser);
   },
@@ -885,10 +895,17 @@ const ink = createInk(svg, {
 // offers the colours of the pen panel, and keeps to the note's window, clear of the toolbar over its top.
 const lassoBar = $('lasso-bar');
 lassoBar.prepend(...[...document.querySelectorAll('#pen-colors [data-color]')].map(swatch => swatch.cloneNode(true)));
+// The text boxes and pictures (items.js): ink.js keeps them, with the strokes, in its history; this draws them.
+const itemsView = createItems($('items'), {
+  change(from, to) { // a text box was made (from null), edited, or emptied (to null)
+    const list = ink.getItems().map(it => (it === from ? to : it)).filter(Boolean);
+    ink.replace(ink.getStrokes(), from ? list : [...list, to]);
+  },
+});
 const lasso = createLasso(svg, ink, lassoBar, () => {
   const box = scroller.getBoundingClientRect();
   return [box.left, box.top + restTop() - MARGIN, box.right, box.bottom];
-});
+}, itemsView);
 // "Add space": a blank page put into a paged note, a gap opened in a file (space.js).
 const space = createSpace({ button: $('space-btn'), mover, frame, ink, note: () => current, resize: measure });
 
@@ -1012,6 +1029,44 @@ eraserRange.oninput = () => {
   try { localStorage.setItem('eraserSize', eraserRange.value); } catch { /* lasts for this visit only */ }
 };
 
+// The text tool: a tap on the page makes a box and the keyboard comes up; a tap on text edits it
+// (items.js does the typing). Tapped again while it is the tool, a flyout sets the size of the letters.
+const textFly = flyout($('text-wrap'), document.querySelector('[data-tool="text"]'));
+const textRange = $('text-range');
+let textSize = 28;
+try {
+  const saved = Number(localStorage.getItem('textSize'));
+  if (saved >= TEXT_SIZES[0] && saved <= 96) textSize = saved;
+} catch { /* storage blocked */ }
+function setTextSize(n) {
+  textSize = n;
+  textRange.value = n;
+  $('text-sample').style.fontSize = `${Math.round(10 + n / 3)}px`; // a picture of the size, not to scale
+}
+textRange.oninput = () => {
+  setTextSize(Number(textRange.value));
+  try { localStorage.setItem('textSize', textSize); } catch { /* lasts for this visit only */ }
+};
+setTextSize(textSize);
+
+function textAt(pt) {
+  const box = itemsView.hit(ink.getItems(), pt, 'text');
+  // The keyboard covers the lower part of the window: bring the place to be typed at up into the upper part first.
+  const [, top] = origin(), y = top + pos[1] + (box ? box.y : pt[1]) * zoom;
+  if (y > top + scroller.clientHeight * 0.45) place([pos[0], pos[1] - (y - top - scroller.clientHeight * 0.3)], true);
+  itemsView.start(box ?? null, pt, { size: textSize, color: penOf(inkPen)?.color ?? '#111111' });
+}
+// With a stylus the text tool is a handler like the lasso's: a touch that stays put is a tap.
+{
+  let from = null, moved = false;
+  ink.setHandler('text', {
+    down: pt => { from = pt; moved = false; },
+    move: pt => { if (Math.hypot(pt[0] - from[0], pt[1] - from[1]) > 10) moved = true; },
+    up: () => { if (!moved) textAt(from); },
+    cancel: () => {},
+  });
+}
+
 // Hand the pen's own settings to the ink layer.
 function usePen(pen) {
   ink.setTool(PEN_TYPES[pen.type].tool);
@@ -1021,17 +1076,20 @@ function usePen(pen) {
   ink.setStability(pen.stability);
 }
 
-// Make `value` the tool: 'eraser', 'hand', 'lasso' or a pen's id.
+let inkPen = ''; // the pen last used: text takes its colour
+// Make `value` the tool: 'eraser', 'hand', 'lasso', 'text' or a pen's id.
 function choose(value) {
   const pen = penOf(value);
-  if (!pen && value !== 'eraser' && value !== 'hand' && value !== 'lasso') return;
+  if (!pen && !['eraser', 'hand', 'lasso', 'text'].includes(value)) return;
   if (value !== 'lasso') lasso.clear(); // what the lasso held is let go with it
   if (value === 'eraser' && tool !== 'eraser') beforeEraser = tool;
   if (value !== tool) showPanel(false);
   tool = value;
   autoBtn.hidden = value !== 'eraser';
   if (value !== 'eraser') eraserFly.set(false);
+  if (value !== 'text') textFly.set(false);
   if (pen) {
+    inkPen = pen.id;
     usePen(pen);
     savePens();
   } else {
@@ -1133,6 +1191,7 @@ toolbar.addEventListener('click', e => {
   if (value !== tool) return choose(value);
   // Already the tool: the tap is for its settings.
   if (value === 'eraser') eraserFly.toggle();
+  else if (value === 'text') textFly.toggle();
   else showPanel(panel.hidden);
 });
 undoBtn.onclick = () => ink.undo();
@@ -1202,7 +1261,10 @@ function save() {
 }
 
 // Save now if a save is pending.
-const flush = () => (saveTimer ? save() : undefined);
+const flush = () => {
+  itemsView.finish(); // text still being typed is part of the note
+  return saveTimer ? save() : undefined;
+};
 addEventListener('pagehide', flush);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); }); // the app went to the background
 
@@ -1216,7 +1278,9 @@ async function openDoc(id) {
   space.set(false);
   setPageHeight(doc.pages ? pagesHeight(doc) : MIN_HEIGHT); // a file: reset before load so the last note's height can't inflate the measurement
   frame.srcdoc = noteHtml(doc);
-  ink.load(doc.strokes || []);
+  const items = cleanItems(doc.items);
+  ink.load(doc.strokes || [], items);
+  itemsView.render(items);
   refreshHistory();
   lastFit = fitZoom();
   resetZoom(Math.min(1, lastFit));
@@ -1312,7 +1376,7 @@ function pageAct(what, i, extra) {
   else if (what === 'move') order.splice(extra, 0, order.splice(i, 1)[0]);
   else if (what === 'remove') {
     const page = current.pages[i];
-    if ((page.img || inkedPages(current, ink.getStrokes())[i]) && !confirm(`Delete page ${i + 1}? Its ink goes with it, and undo cannot bring it back.`)) return;
+    if ((page.img || inkedPages(current, ink.getStrokes(), ink.getItems())[i]) && !confirm(`Delete page ${i + 1}? Its ink goes with it, and undo cannot bring it back.`)) return;
     order.splice(i, 1);
   }
   restructure(order);
@@ -1327,9 +1391,10 @@ function restructure(order) {
   body.replaceChildren(...order.map((p, j) => (order.indexOf(p) === j ? shown[p] : shown[p].cloneNode(true))));
   lasso.clear();
   ink.load(r.strokes, r.items);
+  itemsView.render(r.items);
   current.strokes = ink.getStrokes();
   if (current.items || r.items.length) current.items = ink.getItems();
-  if (needsPage(current, current.strokes)) addPage(current, undefined, frame.contentDocument); // a notebook keeps a blank page ahead
+  if (needsPage(current, current.strokes, r.items)) addPage(current, undefined, frame.contentDocument); // a notebook keeps a blank page ahead
   refreshHistory();
   measure();
   space.refresh();
@@ -1337,6 +1402,41 @@ function restructure(order) {
   thumbs.build();
   thumbs.setCurrent(pageAt());
 }
+
+/* ---------- Pictures ---------- */
+
+// A picture from Photos or Files, or pasted: put in the middle of what can be seen, and held by the lasso,
+// which moves it, resizes it (its corners) and deletes it.
+const imageInput = $('image-input');
+$('image-btn').onclick = () => imageInput.click();
+imageInput.onchange = () => {
+  const [file] = imageInput.files;
+  imageInput.value = ''; // lets the same picture be picked again
+  if (file) addImage(file);
+};
+async function addImage(file) {
+  if (!current) return;
+  let made;
+  try {
+    made = await readImage(file);
+  } catch {
+    return notify('That picture could not be opened.');
+  }
+  const x = within1((scroller.clientWidth / 2 - pos[0]) / zoom - made.w / 2, 0, Math.max(0, PAGE_WIDTH - made.w));
+  const y = within1(((scroller.clientHeight + restTop()) / 2 - pos[1]) / zoom - made.h / 2, 0, Math.max(0, pageHeight - made.h));
+  const item = { type: 'image', x: Math.round(x), y: Math.round(y), w: made.w, h: made.h, src: made.src };
+  ink.replace(ink.getStrokes(), [...ink.getItems(), item]);
+  choose('lasso');
+  lasso.selectItems([item]);
+}
+document.addEventListener('paste', e => {
+  if (!current || e.target.closest?.('input, textarea')) return;
+  const file = [...(e.clipboardData?.files ?? [])].find(f => f.type.startsWith('image/'));
+  if (file) {
+    e.preventDefault();
+    addImage(file);
+  }
+});
 
 /* ---------- Export ---------- */
 
@@ -1643,12 +1743,12 @@ if (shellRecorder) {
 
 /* ---------- Keyboard ---------- */
 
-const TOOL_KEYS = { e: 'eraser', v: 'hand', l: 'lasso' }; // and 1 to 9: the pens, in tray order
+const TOOL_KEYS = { e: 'eraser', v: 'hand', l: 'lasso', t: 'text' }; // and 1 to 9: the pens, in tray order
 // The keys a browser scrolls with, as fractions of the window's height (the note is not a browser scroller: see the view section).
 const SCROLL_KEYS = { pagedown: 0.9, ' ': 0.9, pageup: -0.9, arrowdown: 0.12, arrowup: -0.12 };
 
 document.addEventListener('keydown', e => {
-  if (!current || e.target instanceof HTMLInputElement) return; // typing a name, or moving a slider
+  if (!current || e.target.closest?.('input, textarea, select')) return; // typing a name or in a text box, or moving a slider
   const key = e.key.toLowerCase();
   if (e.ctrlKey || e.metaKey) {
     if (key === 'z') { e.preventDefault(); e.shiftKey ? ink.redo() : ink.undo(); }
