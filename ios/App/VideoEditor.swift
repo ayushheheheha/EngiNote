@@ -1,8 +1,10 @@
 import AVFoundation
 import UIKit
 
-/// A stretch of the recording that is kept, in the recording's own time (seconds).
+/// A stretch of one recording that is kept (`clip` says which, as a place in the editor's list of
+/// recordings), in that recording's own time (seconds).
 fileprivate struct EditPiece: Equatable {
+    var clip: Int
     var start: Double
     var end: Double
     var length: Double { end - start }
@@ -28,6 +30,124 @@ fileprivate struct Failure: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// A recording the edit takes pieces from, opened: its tracks and how it is shown.
+fileprivate final class Clip {
+    let url: URL
+    let asset: AVURLAsset
+    let video: AVAssetTrack
+    let audio: AVAssetTrack?
+    let videoRange: CMTimeRange
+    let audioRange: CMTimeRange
+    let transform: CGAffineTransform
+    let natural: CGSize
+    let duration: Double
+    /// Pictures evenly spread over the whole recording, for the timeline; filled in as they are made.
+    var thumbs: [UIImage?] = []
+    var generator: AVAssetImageGenerator?
+
+    private init(url: URL, asset: AVURLAsset, video: AVAssetTrack, audio: AVAssetTrack?, videoRange: CMTimeRange, audioRange: CMTimeRange, transform: CGAffineTransform, natural: CGSize, duration: Double) {
+        self.url = url
+        self.asset = asset
+        self.video = video
+        self.audio = audio
+        self.videoRange = videoRange
+        self.audioRange = audioRange
+        self.transform = transform
+        self.natural = natural
+        self.duration = duration
+    }
+
+    static func open(_ url: URL) async throws -> Clip {
+        let asset = AVURLAsset(url: url)
+        let length = try await asset.load(.duration).seconds
+        guard length.isFinite, length > 0.3 else { throw Failure(message: "it is too short") }
+        guard let video = try await asset.loadTracks(withMediaType: .video).first else { throw Failure(message: "it has no picture") }
+        let transform = try await video.load(.preferredTransform)
+        let natural = try await video.load(.naturalSize)
+        let videoRange = try await video.load(.timeRange)
+        var audio: AVAssetTrack?
+        var audioRange = CMTimeRange.zero
+        if let sound = try await asset.loadTracks(withMediaType: .audio).first {
+            audio = sound
+            audioRange = try await sound.load(.timeRange)
+        }
+        return Clip(url: url, asset: asset, video: video, audio: audio, videoRange: videoRange, audioRange: audioRange, transform: transform, natural: natural, duration: length)
+    }
+
+    /// The picture's size as it is watched (a recording made on its side is turned upright).
+    var shown: CGSize {
+        let size = natural.applying(transform)
+        return CGSize(width: max(abs(size.width), 2), height: max(abs(size.height), 2))
+    }
+
+    /// How to lay this recording's picture into a movie `render` big: turned upright, as large as fits, in the middle.
+    func fit(into render: CGSize) -> CGAffineTransform {
+        let box = CGRect(origin: .zero, size: natural).applying(transform)
+        let scale = min(render.width / shown.width, render.height / shown.height)
+        return transform
+            .concatenating(CGAffineTransform(translationX: -box.minX, y: -box.minY))
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: (render.width - shown.width * scale) / 2, y: (render.height - shown.height * scale) / 2))
+    }
+}
+
+/// Lists the recordings in the app's folder, to choose one to add to the edit.
+private final class RecordingPicker: UITableViewController {
+    private let files: [(url: URL, detail: String)]
+    private let chosen: (URL) -> Void
+
+    init(folder: URL, skipping: Set<String>, chosen: @escaping (URL) -> Void) {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+        let dates = DateFormatter()
+        dates.dateStyle = .medium
+        dates.timeStyle = .short
+        files = found
+            .filter { $0.pathExtension.lowercased() == "mov" && !skipping.contains($0.lastPathComponent) }
+            .map { url -> (url: URL, when: Date, size: Int) in
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                return (url, values?.contentModificationDate ?? .distantPast, values?.fileSize ?? 0)
+            }
+            .sorted { $0.when > $1.when }
+            .map { ($0.url, "\(dates.string(from: $0.when)) · \(max(1, $0.size / 1_000_000)) MB") }
+        self.chosen = chosen
+        super.init(style: .insetGrouped)
+        title = "Add a recording"
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancel))
+    }
+
+    required init?(coder: NSCoder) { fatalError("not made from a storyboard") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if files.isEmpty {
+            let none = UILabel()
+            none.text = "There is no other recording to add."
+            none.textColor = .secondaryLabel
+            none.textAlignment = .center
+            tableView.backgroundView = none
+        }
+    }
+
+    @objc private func cancel() { dismiss(animated: true) }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { files.count }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        var content = cell.defaultContentConfiguration()
+        content.text = files[indexPath.row].url.deletingPathExtension().lastPathComponent
+        content.secondaryText = files[indexPath.row].detail
+        cell.contentConfiguration = content
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let url = files[indexPath.row].url
+        dismiss(animated: true) { [chosen] in chosen(url) }
+    }
+}
+
 /// A simple editor for one recording: trim it, split it, cut parts out, undo and redo; then it is
 /// saved as a new recording next to the original, which is never touched.
 ///
@@ -41,13 +161,9 @@ final class VideoEditor: UIViewController {
     var onSaved: (() -> Void)?
 
     private let file: URL
-    private let asset: AVURLAsset
-    private var videoTrack: AVAssetTrack?
-    private var audioTrack: AVAssetTrack?
-    private var videoRange = CMTimeRange.zero
-    private var audioRange = CMTimeRange.zero
-    private var transform = CGAffineTransform.identity
-    private var duration = 0.0
+    private let busy: String? // the recording being made right now: not to be added
+    private var clips: [Clip] = [] // the recording being edited, then any that were added; only ever grows, so pieces can name them
+    private var renderSize = CGSize(width: 1920, height: 1080) // the picture of the edited movie: the first recording's
 
     private var pieces: [EditPiece] = []
     private var original: [EditPiece] = []
@@ -61,7 +177,6 @@ final class VideoEditor: UIViewController {
     private let player = AVPlayer()
     private var tickToken: Any?
     private var endToken: NSObjectProtocol?
-    private var generator: AVAssetImageGenerator?
     private var exporting: AVAssetExportSession?
     private var ticker: Timer?
 
@@ -75,12 +190,14 @@ final class VideoEditor: UIViewController {
     private var redoButton = UIButton(type: .system)
     private var splitButton = UIButton(type: .system)
     private var deleteButton = UIButton(type: .system)
+    private var addButton = UIButton(type: .system)
     private let shield = UIView() // over everything while saving
     private let bar = UIProgressView(progressViewStyle: .default)
 
-    init(file: URL) {
+    /// `busy`: the name of the recording being made right now, if any.
+    init(file: URL, busy: String? = nil) {
         self.file = file
-        self.asset = AVURLAsset(url: file)
+        self.busy = busy
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
         isModalInPresentation = true
@@ -129,7 +246,8 @@ final class VideoEditor: UIViewController {
         redoButton = tool("Redo", "arrow.uturn.forward", .white, #selector(redo))
         splitButton = tool("Split", "scissors", .white, #selector(split))
         deleteButton = tool("Delete", "trash", .systemRed, #selector(remove))
-        let tools = UIStackView(arrangedSubviews: [undoButton, redoButton, splitButton, deleteButton])
+        addButton = tool("Add video", "plus.rectangle.on.rectangle", .white, #selector(addTapped))
+        let tools = UIStackView(arrangedSubviews: [undoButton, redoButton, splitButton, deleteButton, addButton])
         tools.distribution = .fillEqually
 
         for item in [cancelButton, saveButton, title, playerView, transport, timeline, tools] as [UIView] {
@@ -183,7 +301,7 @@ final class VideoEditor: UIViewController {
             self.refresh()
         }
 
-        for button in [undoButton, redoButton, splitButton, deleteButton, saveButton, playButton] { enable(button, false) }
+        for button in [undoButton, redoButton, splitButton, deleteButton, addButton, saveButton, playButton] { enable(button, false) }
         Task { await load() }
     }
 
@@ -260,26 +378,16 @@ final class VideoEditor: UIViewController {
 
     private func load() async {
         do {
-            let length = try await asset.load(.duration).seconds
-            guard length.isFinite, length > 0.3 else { throw Failure(message: "it is too short") }
-            guard let video = try await asset.loadTracks(withMediaType: .video).first else { throw Failure(message: "it has no picture") }
-            transform = try await video.load(.preferredTransform)
-            let size = try await video.load(.naturalSize).applying(transform)
-            timeline.aspect = abs(size.width) / max(abs(size.height), 1)
-            videoRange = try await video.load(.timeRange)
-            if let sound = try await asset.loadTracks(withMediaType: .audio).first {
-                audioTrack = sound
-                audioRange = try await sound.load(.timeRange)
-            }
-            videoTrack = video
-            duration = length
-            pieces = [EditPiece(start: 0, end: length)]
+            let first = try await Clip.open(file)
+            clips = [first]
+            renderSize = CGSize(width: ceil(first.shown.width / 2) * 2, height: ceil(first.shown.height / 2) * 2) // encoders want even numbers
+            pieces = [EditPiece(clip: 0, start: 0, end: first.duration)]
             original = pieces
+            timeline.clips = clips
             timeline.pieces = pieces
-            timeline.sourceDuration = length
             enable(playButton, true)
             rebuild()
-            makeThumbnails()
+            makeThumbnails(for: first)
             if timeline.bounds.width > 0 {
                 laidOut = true
                 zoomToFit(reset: true)
@@ -290,54 +398,102 @@ final class VideoEditor: UIViewController {
         }
     }
 
-    private func makeThumbnails() {
-        let count = min(200, max(30, Int(duration / 5)))
-        let step = duration / Double(count)
-        timeline.thumbs = Array(repeating: nil, count: count)
+    private func makeThumbnails(for clip: Clip) {
+        let count = min(200, max(30, Int(clip.duration / 5)))
+        let step = clip.duration / Double(count)
+        clip.thumbs = Array(repeating: nil, count: count)
         let times = (0..<count).map { NSValue(time: CMTime(seconds: step * (Double($0) + 0.5), preferredTimescale: 600)) }
-        let generator = AVAssetImageGenerator(asset: asset)
+        let generator = AVAssetImageGenerator(asset: clip.asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 320, height: 320)
         generator.requestedTimeToleranceBefore = .positiveInfinity // the nearest whole picture: much quicker
         generator.requestedTimeToleranceAfter = .positiveInfinity
-        self.generator = generator
+        clip.generator = generator
         generator.generateCGImagesAsynchronously(forTimes: times) { [weak self] requested, image, _, result, _ in
             guard result == .succeeded, let image = image else { return }
             let index = min(count - 1, max(0, Int(requested.seconds / step)))
             DispatchQueue.main.async {
-                guard let self = self, self.timeline.thumbs.indices.contains(index) else { return }
-                self.timeline.thumbs[index] = UIImage(cgImage: image)
-                self.timeline.setNeedsDisplay()
+                guard clip.thumbs.indices.contains(index) else { return }
+                clip.thumbs[index] = UIImage(cgImage: image)
+                self?.timeline.setNeedsDisplay()
             }
         }
     }
 
     // MARK: The edit
 
-    /// The kept pieces, one after the other, as a movie.
-    private func makeComposition() -> AVMutableComposition {
+    /// The kept pieces, one after the other, as a movie. With recordings added, each piece is laid
+    /// into the same picture size (`video`), whatever size it was made at; with just the one, the
+    /// movie is simply turned as that recording is and there is no `video`.
+    private func makeComposition() -> (movie: AVMutableComposition, video: AVMutableVideoComposition?) {
         let composition = AVMutableComposition()
         let picture = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-        picture?.preferredTransform = transform
-        let sound = audioTrack == nil ? nil : composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+        let sound = clips.contains { $0.audio != nil } ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) : nil
+        let used = Set(pieces.map { $0.clip })
+        let several = used.count > 1
+        if !several, let only = used.first, clips.indices.contains(only) { picture?.preferredTransform = clips[only].transform }
         var at = CMTime.zero
-        for piece in pieces {
+        var steps: [(range: CMTimeRange, clip: Clip)] = []
+        for piece in pieces where clips.indices.contains(piece.clip) {
+            let clip = clips[piece.clip]
             let range = CMTimeRange(start: CMTime(seconds: piece.start, preferredTimescale: 600), duration: CMTime(seconds: piece.length, preferredTimescale: 600))
             // A track may end a hair before the file does: ask only for what it has.
-            if let video = videoTrack {
-                try? picture?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: videoRange), of: video, at: at)
+            try? picture?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: clip.videoRange), of: clip.video, at: at)
+            if let heard = clip.audio {
+                try? sound?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: clip.audioRange), of: heard, at: at)
             }
-            if let heard = audioTrack {
-                try? sound?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: audioRange), of: heard, at: at)
-            }
+            steps.append((CMTimeRange(start: at, duration: range.duration), clip))
             at = CMTimeAdd(at, range.duration)
         }
-        return composition
+        guard several, let picture = picture else { return (composition, nil) }
+        let video = AVMutableVideoComposition()
+        video.renderSize = renderSize
+        video.frameDuration = CMTime(value: 1, timescale: 60)
+        video.instructions = steps.map { step -> AVMutableVideoCompositionInstruction in
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = step.range
+            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: picture)
+            layer.setTransform(step.clip.fit(into: renderSize), at: .zero)
+            instruction.layerInstructions = [layer]
+            return instruction
+        }
+        return (composition, video)
     }
 
     private func rebuild() {
-        player.replaceCurrentItem(with: AVPlayerItem(asset: makeComposition()))
+        let made = makeComposition()
+        let item = AVPlayerItem(asset: made.movie)
+        item.videoComposition = made.video
+        player.replaceCurrentItem(with: item)
         seek()
+    }
+
+    // MARK: Adding a recording
+
+    @objc private func addTapped() {
+        setPlaying(false)
+        let picker = RecordingPicker(folder: file.deletingLastPathComponent(), skipping: [file.lastPathComponent, busy ?? ""]) { [weak self] url in self?.add(url) }
+        let sheet = UINavigationController(rootViewController: picker)
+        sheet.modalPresentationStyle = .formSheet
+        present(sheet, animated: true)
+    }
+
+    /// Put the whole of recording `url` at the end of the edit, as one more piece.
+    private func add(_ url: URL) {
+        Task {
+            do {
+                let clip = try await Clip.open(url)
+                clips.append(clip)
+                timeline.clips = clips
+                makeThumbnails(for: clip)
+                var next = pieces
+                next.append(EditPiece(clip: clips.count - 1, start: 0, end: clip.duration))
+                time = total // the playhead goes to where the new one begins
+                commit(next)
+            } catch {
+                problem("That recording could not be added (\(error.localizedDescription)).", leave: false)
+            }
+        }
     }
 
     private func seek() {
@@ -384,8 +540,8 @@ final class VideoEditor: UIViewController {
         guard local > 0.1, piece.length - local > 0.1 else { return }
         let cut = ((piece.start + local) * 60).rounded() / 60 // on a frame
         var next = pieces
-        next[i] = EditPiece(start: piece.start, end: cut)
-        next.insert(EditPiece(start: cut, end: piece.end), at: i + 1)
+        next[i] = EditPiece(clip: piece.clip, start: piece.start, end: cut)
+        next.insert(EditPiece(clip: piece.clip, start: cut, end: piece.end), at: i + 1)
         commit(next)
     }
 
@@ -411,6 +567,7 @@ final class VideoEditor: UIViewController {
         let local = time - pieceStart(pieces, i)
         enable(splitButton, local > 0.1 && pieces[i].length - local > 0.1)
         enable(deleteButton, pieces.count > 1)
+        enable(addButton, true)
         enable(undoButton, !undoStack.isEmpty)
         enable(redoButton, !redoStack.isEmpty)
         enable(saveButton, pieces != original)
@@ -478,10 +635,12 @@ final class VideoEditor: UIViewController {
         guard !pieces.isEmpty, pieces != original else { return }
         setPlaying(false)
         let target = freeURL()
-        guard let session = AVAssetExportSession(asset: makeComposition(), presetName: AVAssetExportPresetHighestQuality) else {
+        let made = makeComposition()
+        guard let session = AVAssetExportSession(asset: made.movie, presetName: AVAssetExportPresetHighestQuality) else {
             problem("This iPad cannot save this recording.", leave: false)
             return
         }
+        session.videoComposition = made.video
         session.outputURL = target
         session.outputFileType = .mov
         exporting = session
@@ -537,9 +696,7 @@ private final class EditTimeline: UIView {
     var pps: CGFloat = 50 { didSet { setNeedsDisplay() } } // points to a second
     var minPPS: CGFloat = 1
     var maxPPS: CGFloat = 400
-    var thumbs: [UIImage?] = [] // evenly spread over the whole original recording
-    var sourceDuration = 1.0
-    var aspect: CGFloat = 16 / 9
+    fileprivate var clips: [Clip] = [] // what the pieces are cut from, with their pictures
     /// A finger came down: stop playing.
     var onTouch: (() -> Void)?
     /// The playhead was moved by the user, to this time in the edited movie.
@@ -623,13 +780,16 @@ private final class EditTimeline: UIView {
             UIColor(white: 0.2, alpha: 1).setFill()
             context.fill(band)
             // The pictures, one tile after another, only across the part that is on screen.
-            let tile = max(8, height * aspect)
-            var x = x0 >= 0 ? x0 : x0 + floor(-x0 / tile) * tile
-            while x < min(x0 + width, bounds.width), !thumbs.isEmpty {
-                let at = piece.start + Double((x + tile / 2 - x0) / pps)
-                let index = min(thumbs.count - 1, max(0, Int(min(max(at, piece.start), piece.end) / sourceDuration * Double(thumbs.count))))
-                thumbs[index]?.draw(in: CGRect(x: x, y: top, width: tile, height: height))
-                x += tile
+            if clips.indices.contains(piece.clip) {
+                let clip = clips[piece.clip]
+                let tile = max(8, height * clip.shown.width / clip.shown.height)
+                var x = x0 >= 0 ? x0 : x0 + floor(-x0 / tile) * tile
+                while x < min(x0 + width, bounds.width), !clip.thumbs.isEmpty {
+                    let at = piece.start + Double((x + tile / 2 - x0) / pps)
+                    let index = min(clip.thumbs.count - 1, max(0, Int(min(max(at, piece.start), piece.end) / clip.duration * Double(clip.thumbs.count))))
+                    clip.thumbs[index]?.draw(in: CGRect(x: x, y: top, width: tile, height: height))
+                    x += tile
+                }
             }
             context.restoreGState()
             if i == selected {

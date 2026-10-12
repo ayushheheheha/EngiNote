@@ -249,7 +249,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 share(file)
             case "edit": // trim and cut: VideoEditor.swift saves the result as a new recording
                 if presentedViewController == nil {
-                    let editor = VideoEditor(file: file)
+                    let editor = VideoEditor(file: file, busy: recorder.activeFile?.lastPathComponent)
                     editor.onSaved = { [weak self] in self?.recordings([:]) }
                     present(editor, animated: true)
                 }

@@ -240,6 +240,19 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // The strokes live in their own group, in order; the tip preview sits after it, so above them all.
   const layer = document.createElementNS(NS, 'g');
   svg.appendChild(layer);
+  // The stroke being drawn goes on an svg of its own over the page, which the browser keeps as a layer
+  // of its own: each step of the stroke then redraws that one stroke, not all the ink under it (which
+  // grows with the note, and is what made writing lag deep into one). The highlighter stays among the
+  // strokes: it multiplies with what is under it, and alone on a layer there would be nothing to show.
+  const live = document.createElementNS(NS, 'svg');
+  live.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;will-change:transform';
+  if (svg.parentNode) {
+    svg.after(live);
+    const mirror = () => { const box = svg.getAttribute('viewBox'); if (box) live.setAttribute('viewBox', box); };
+    mirror();
+    new MutationObserver(mirror).observe(svg, { attributes: true, attributeFilter: ['viewBox'] });
+  }
+  const drawnOn = name => (live.isConnected && name !== 'highlighter' ? live : layer);
   // Laser lines, drawn and fading, have a group of their own above the strokes: they are not strokes.
   const beams = document.createElementNS(NS, 'g');
   svg.appendChild(beams);
@@ -357,6 +370,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     } else if (a.path) {
       if (!a.shape) toTip(a);   // the line ends where the tip left the page, not where the trailing point had got to
       setData(a.path, strokeData(a.stroke));   // its finished shape
+      if (a.path.parentNode !== layer) layer.appendChild(a.path);   // off its own layer, in among the strokes
       els.push(a.path);   // the live path becomes the stroke's element
       elOf.set(a.stroke, a.path);
       commit([...strokes, a.stroke]);
@@ -507,7 +521,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
         // Kept on the stroke only where it says something, so most strokes stay as small as before.
         if (!laser && (opacity < 1 || tool === 'highlighter')) stroke.opacity = opacity;
         const path = makeEl(stroke, false);
-        (laser ? beams : layer).appendChild(path);
+        (laser ? beams : drawnOn(tool)).appendChild(path);
         act = { ...base, stroke, path, laser, tip: base.at, soft: base.at, kept: base.at };
         if (!laser) rest(act);
       }
