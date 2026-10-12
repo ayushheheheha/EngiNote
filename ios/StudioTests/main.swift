@@ -185,8 +185,8 @@ check(paused.videoTime(started + 1200) == nil && abs((paused.videoTime(started +
 
 // The zoom plan.
 let plan = ZoomPlan(path: sidecar.penPath(), duration: seconds, canvas: 16.0 / 9, source: 16.0 / 9)
-let idle = plan.at(0.1), writing = plan.at(1.6), later = plan.at(4.9)
-print(String(format: "camera: t=0.1 z=%.2f  t=1.6 z=%.2f at (%.2f, %.2f)  t=4.9 z=%.2f at (%.2f, %.2f)", idle.z, writing.z, writing.x, writing.y, later.z, later.x, later.y))
+let idle = plan.at(0.0), writing = plan.at(1.6), later = plan.at(4.9)
+print(String(format: "camera: t=0 z=%.2f  t=1.6 z=%.2f at (%.2f, %.2f)  t=4.9 z=%.2f at (%.2f, %.2f)", idle.z, writing.z, writing.x, writing.y, later.z, later.x, later.y))
 check(idle.z < 1.05, "the camera starts on the whole picture")
 check(writing.z > 1.25 && writing.y < 0.5, "it comes in on the first line")
 check(later.x > 0.5, "it follows the pen to the right")
