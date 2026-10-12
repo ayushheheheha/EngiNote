@@ -1333,6 +1333,14 @@ const autoDeselect = option(autoBtn, 'autoDeselect');
 // The promo cover (cover.js): the button puts it in front of the open note, or takes it away, and the
 // choice is what the next import starts with (on, until it has been switched off).
 const promoBtn = $('promo-btn');
+// The cover makes its entrance again when a recording begins (after the countdown), so the video opens on it.
+function replayCover() {
+  const root = frame.contentDocument?.querySelector('iframe[data-enginote-cover]')?.contentDocument?.documentElement;
+  if (!root) return;
+  root.classList.remove('live');
+  void root.offsetWidth; // let the page see it without the class, or adding it again would change nothing
+  root.classList.add('live');
+}
 let promoNew = true;
 try { promoNew = localStorage.getItem('promo') !== '0'; } catch { /* storage blocked */ }
 const promo = () => promoNew;
@@ -1776,6 +1784,7 @@ if (shellRecorder) {
   function showState(next) {
     if (state === 'recording') done += Date.now() - since; // the stretch that just ended
     if (next === 'idle' || state === 'idle') done = 0;     // over, or a new recording
+    if (next === 'recording' && state === 'idle') replayCover(); // a new one, not a resume after a pause
     state = next;
     since = Date.now();
     const on = state !== 'idle';
