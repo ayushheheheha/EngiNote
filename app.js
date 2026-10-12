@@ -215,6 +215,7 @@ addEventListener('recordings', e => {
 
 const VIDEO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>';
 const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
+const STUDIO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L14 10M13 5l1-2 1 2 2 1-2 1-1 2-1-2-2-1zM18 13l.7-1.4.7 1.4 1.4.7-1.4.7-.7 1.4-.7-1.4-1.4-.7z"/></svg>';
 const EDIT_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11 9M8.5 16l11-9"/></svg>';
 const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
@@ -280,6 +281,14 @@ function makeVideoCard(video) {
   edit.setAttribute('aria-label', 'Edit recording');
   edit.innerHTML = EDIT_ICON;
   edit.onclick = () => act('edit');
+  const studio = document.createElement('button'); // zoom on the writing, polish the voice, intro and outro, a vertical short (ios/App/Studio.swift)
+  studio.type = 'button';
+  studio.className = 'icon-btn card-copy';
+  studio.title = 'Studio: auto-zoom, voice polish, intro and outro, a vertical short';
+  studio.setAttribute('aria-label', 'Studio');
+  studio.innerHTML = STUDIO_ICON;
+  studio.onclick = () => act('studio');
+  edit.before(studio);
   return card;
 }
 

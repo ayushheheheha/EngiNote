@@ -324,6 +324,12 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     editor.onSaved = { [weak self] in self?.recordings([:]) }
                     present(editor, animated: true)
                 }
+            case "studio": // zoom on the writing, polish the voice, intro and outro, a vertical short: Studio.swift
+                if presentedViewController == nil {
+                    let studio = StudioViewController(movie: file)
+                    studio.onSaved = { [weak self] in self?.recordings([:]) }
+                    present(studio, animated: true)
+                }
             case "delete": // the page has already asked the user if they are sure
                 try? FileManager.default.removeItem(at: file)
                 if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
