@@ -3,6 +3,7 @@
 import { makeEl, boxOf } from './ink.js';
 import { noteHtml, pageTops, inkedPages, paperCss, pageStyle, PAGE_WIDTH } from './pages.js';
 import { itemHtml } from './items.js';
+import { coverFrame } from './cover.js';
 
 const attr = text => text.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 
@@ -50,7 +51,7 @@ function pagedDoc(doc, strokes) {
       '.page img{display:block;width:100%;height:100%}' +
       '</style></head><body>' +
       pages.map((p, i) => `<div class="page" style="${pageStyle(p, doc.paper)};page:s${sizes.indexOf(p.h)}">` +
-        `${p.img ? `<img src="${attr(p.img)}" alt="">` : ''}${itemsOn(doc.items, tops[i], p.h)}${inkSvg(strokes, tops[i], p.h, 'left:0;top:0;width:100%;height:100%')}</div>`).join('') +
+        `${p.cover ? coverFrame() : p.img ? `<img src="${attr(p.img)}" alt="">` : ''}${itemsOn(doc.items, tops[i], p.h)}${inkSvg(strokes, tops[i], p.h, 'left:0;top:0;width:100%;height:100%')}</div>`).join('') +
       '</body></html>',
   };
 }

@@ -1,6 +1,7 @@
 import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
 import { createLasso } from './lasso.js';
-import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages } from './pages.js';
+import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages, hasCover, setCover } from './pages.js';
+import { COVER_H } from './cover.js';
 import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
 import { exportDoc, printDoc, pinUnits } from './export.js';
@@ -525,7 +526,10 @@ function fromBackup(d) {
   if (items.length) note.items = items;
   const pages = cleanPages(d.pages), gaps = cleanGaps(d.gaps);
   if (pages) Object.assign(note, { html: '', pages }, d.paper ? { paper: cleanPaper(d.paper) } : {});
-  else if (gaps) note.gaps = gaps;
+  else {
+    if (gaps) note.gaps = gaps;
+    if (d.cover === true) note.cover = true;
+  }
   return note;
 }
 
@@ -615,6 +619,7 @@ async function importFiles(fileList) {
         const { pdfPages } = await import('./pdfimport.js');
         doc.pages = await pdfPages(file, (n, of) => notify(`Importing ${file.name}: page ${n} of ${of}`));
       }
+      if (promo()) setCover(doc, true); // the promo cover (cover.js), until it is switched off
       if (into) doc.folder = into; // imported into a folder: it belongs there
       await db.put(doc); // only now, whole: a PDF that fails part way leaves nothing behind
       last = doc;
@@ -1324,6 +1329,35 @@ function option(btn, key, apply = () => {}, on = false) { // `on`: how it starts
 }
 
 const autoDeselect = option(autoBtn, 'autoDeselect');
+
+// The promo cover (cover.js): the button puts it in front of the open note, or takes it away, and the
+// choice is what the next import starts with (on, until it has been switched off).
+const promoBtn = $('promo-btn');
+let promoNew = true;
+try { promoNew = localStorage.getItem('promo') !== '0'; } catch { /* storage blocked */ }
+const promo = () => promoNew;
+promoBtn.onclick = () => {
+  if (!current) return;
+  const on = !hasCover(current);
+  if (!on) { // what was written on the cover goes with it
+    const strokes = ink.getStrokes(), items = ink.getItems();
+    const kept = strokes.filter(s => s.points[0][1] >= COVER_H), keptItems = items.filter(it => it.y >= COVER_H);
+    if ((kept.length < strokes.length || keptItems.length < items.length) && !confirm('Remove the cover? What you wrote on it goes with it, and undo cannot bring it back.')) return;
+    if (kept.length < strokes.length || keptItems.length < items.length) {
+      lasso.clear();
+      ink.replace(kept, keptItems);
+    }
+  }
+  const dy = setCover(current, on, frame.contentDocument, true);
+  // ponytail: ink still in the undo history for what was on the cover comes back, on an undo, over the top of the note. Clear the history here if that is ever met.
+  ink.shift(0, dy); // everything under the cover moves with it; also saves
+  promoBtn.setAttribute('aria-pressed', on);
+  promoNew = on;
+  try { localStorage.setItem('promo', on ? '1' : '0'); } catch { /* lasts for this visit only */ }
+  measure();
+  space.refresh();
+  if (current.pages) { pagesStale = true; syncPages(); thumbs.setCurrent(pageAt()); }
+};
 // Off by default: fingers scroll and zoom, and only a stylus or mouse draws.
 option($('finger-btn'), 'fingerDraw', on => ink.setFingerDraw(on));
 
@@ -1374,7 +1408,8 @@ async function openDoc(id) {
   nameInput.value = doc.name;
   space.set(false);
   setPageHeight(doc.pages ? pagesHeight(doc) : MIN_HEIGHT); // a file: reset before load so the last note's height can't inflate the measurement
-  frame.srcdoc = noteHtml(doc);
+  frame.srcdoc = noteHtml(doc, true); // true: the promo cover, if there is one, makes its entrance
+  promoBtn.setAttribute('aria-pressed', hasCover(doc));
   const paper = doc.pages && cleanPaper(doc.paper).color, dark = paper && (parseInt(paper.slice(1, 3), 16) * 0.3 + parseInt(paper.slice(3, 5), 16) * 0.59 + parseInt(paper.slice(5, 7), 16) * 0.11) < 110;
   ghost.dark(!!dark); // a shadow on black paper is a light one
   const items = cleanItems(doc.items);

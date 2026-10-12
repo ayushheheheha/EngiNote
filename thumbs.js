@@ -4,6 +4,7 @@
 // What changes the note is app.js's business: this file shows, and calls `act` with what was asked.
 import { makeEl, boxOf } from './ink.js';
 import { PAGE_WIDTH, TEMPLATES, pageTops, pagePaper, paperCss } from './pages.js';
+import { coverFrame } from './cover.js';
 
 const THUMB_W = 120;               // px: how wide a picture is
 const K = THUMB_W / PAGE_WIDTH;    // page px to picture px
@@ -46,6 +47,7 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
       img.src = page.img;
       paper.append(img);
     }
+    if (page.cover) paper.insertAdjacentHTML('beforeend', coverFrame()); // the promo cover (cover.js)
     for (const it of items()) {
       if (it.y >= bottom || it.y + it.h <= top) continue;
       const el = it.type === 'image' ? new Image() : document.createElement('div');
@@ -128,7 +130,7 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
     menuFor = i;
     const row = (label, name, extra = '') => `<button class="btn-secondary${extra}" type="button" data-do="${name}">${label}</button>`;
     // Colour and template: only where the page is paper (a page of a PDF is a picture, and covers it).
-    const paper = page.img ? '' :
+    const paper = page.img || page.cover ? '' :
       '<div class="menu-head">Page colour</div><div class="menu-swatches">' +
       `<button class="icon-btn chip" type="button" data-bg="" aria-pressed="${!page.bg}">Same</button>` +
       COLOURS.map(([c, name]) => `<button class="icon-btn swatch" type="button" data-bg="${c}" style="--c:${c}" title="${name}" aria-label="${name}" aria-pressed="${page.bg === c}"></button>`).join('') +

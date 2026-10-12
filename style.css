@@ -1212,6 +1212,7 @@ body.wide.editing #message {
 .thumb.lifted .thumb-sheet { transform: scale(1.06); box-shadow: 0 0 0 2.5px var(--accent), 0 10px 24px rgb(0 0 0 / .35); }
 .thumb-paper { position: absolute; left: 0; top: 0; width: 900px; transform-origin: 0 0; }
 .thumb-bg { display: block; width: 100%; height: 100%; }
+.thumb-paper iframe { pointer-events: none; } /* the promo cover (cover.js) must not take the tap that goes to the page */
 .thumb-n { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .thumb.on .thumb-n { color: var(--accent); font-weight: 600; }
 .thumb-more { position: absolute; right: 2px; bottom: 0; --hit: 28px; color: var(--muted); }

@@ -12,6 +12,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 - Import one or more `.html` or `.pdf` files (button, or drag and drop). Each becomes a note you can open and write on.
 - **New notebook** makes blank paged paper: plain, ruled, grid or dotted, in your choice of size, direction, paper colour, line colour and spacing. A thin line marks each page, and pages are added as you write.
 - **Add space**: a blank page between two pages of a notebook or PDF, or a gap between two parts of an HTML note. The ink below moves down with it.
+- **Promo cover**: a 16:9 title page in the look of the EngiKode site (channel, website, courses) put in front of a note. On for every new HTML or PDF import until you switch it off; the toolbar button adds or removes it on the open note and remembers your choice. Ink under it moves with the note. To change the links or wording, edit `PROMO` and the markup in `cover.js`.
 - **Export** a note with its ink as a PDF (the iPad app makes the file; a browser opens its print dialog, which can save one).
 - Search your notes, sort them by date or name, and duplicate one.
 - Organise notes in folders. Rename anything by typing over its name.
@@ -158,6 +159,7 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `space.js` | "Add space": a blank page in a paged note, a gap in an HTML note |
 | `pdfimport.js` | PDF import: each page drawn to an image, as a paged note |
 | `pdfjs.min.js`, `pdfjs.worker.min.js` | [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0, see `pdfjs.LICENSE.txt`), which reads PDFs |
+| `cover.js`, `cover-fonts.js` | The promo cover, and the site's three typefaces cut down and embedded in it |
 | `export.js` | Export: the note with its ink as one printable document |
 | `perfect-freehand.js` | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) 1.2.3, which shapes the flow pen's strokes |
 | `ink.test.html` | Tests for the ink engine |

@@ -10,7 +10,8 @@
 //                                     page px (every page is PAGE_WIDTH wide). `img`, if there, is a
 //                                     data:image/ URL drawn to fill the page; a page without one
 //                                     shows the paper. `bg` and `tpl`, if there, are that page's own
-//                                     colour and template, over the notebook's (pagePaper).
+//                                     colour and template, over the notebook's (pagePaper). `cover: true`
+//                                     marks the promo cover (cover.js), which is only ever the first page.
 //   paper: { size, direction, template, color, line, spacing }   What a blank page looks like.
 //   html:  ''                         Its document is made from the pages whenever it is wanted
 //                                     (pagesHtml). Keeping it too would store every page's picture twice.
@@ -22,6 +23,9 @@
 //                                     list of child indexes (children that are elements, in the file
 //                                     as imported). `height`: how far the gap moves everything below
 //                                     it, in page px. `trim`: see spacerStyle().
+//   cover: true                       The promo cover (cover.js) is in front of the file: see noteHtml().
+
+import { COVER_H, COVER_MARK, coverFrame, coverStyle } from './cover.js';
 
 export const PAGE_WIDTH = 900; // the width every note is laid out at; the same number as in app.js
 
@@ -55,6 +59,7 @@ export function cleanPages(list) {
   const pages = [];
   for (const p of list) {
     if (!p || !Number.isFinite(p.h) || p.h <= 0) return null;
+    if (p.cover === true) { pages.push({ h: COVER_H, cover: true }); continue; } // its own size, whatever the file says
     const page = typeof p.img === 'string' && p.img.startsWith('data:image/') ? { h: p.h, img: p.img } : { h: p.h };
     if (colour(p.bg, '')) page.bg = colour(p.bg, '');
     if (TEMPLATES.includes(p.tpl)) page.tpl = p.tpl;
@@ -110,14 +115,15 @@ export const pageStyle = (page, paper) => `height:${Number(page.h)}px` + (page.b
 
 const attr = text => text.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 
-/** One page as markup. */
-export function pageHtml(page, paper) {
-  return `<div class="page" style="${pageStyle(page, paper)}">${page.img ? `<img src="${attr(page.img)}" alt="">` : ''}</div>`;
+/** One page as markup. `live`: the promo cover, if this is it, makes its entrance. */
+export function pageHtml(page, paper, live) {
+  const inside = page.cover ? coverFrame({ live }) : page.img ? `<img src="${attr(page.img)}" alt="">` : '';
+  return `<div class="page" style="${pageStyle(page, paper)}">${inside}</div>`;
 }
 
 /** A paged note as a document: its pages one under the other with nothing between them but a thin
     line, each exactly as tall as its `h`. No scripts. */
-export function pagesHtml(doc) {
+export function pagesHtml(doc, live) {
   return '<!doctype html><html><head><meta charset="utf-8"><style>' +
     'html,body{margin:0}' +
     'body{background:#9a9fab}' + // only seen past the last page, where a frame is taller than the note (a card's picture of a short one)
@@ -125,7 +131,7 @@ export function pagesHtml(doc) {
     '.page img{display:block;width:100%;height:100%}' +
     // Where one page ends and the next begins. A middle grey: it shows on white paper and on black.
     '.page+.page::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:#7f8696}' +
-    '</style></head><body>' + doc.pages.map(p => pageHtml(p, doc.paper)).join('') + '</body></html>';
+    '</style></head><body>' + doc.pages.map(p => pageHtml(p, doc.paper, live)).join('') + '</body></html>';
 }
 
 /** Put a blank page into a note, before page `index` (left out: at the end). It is the size of the
@@ -206,8 +212,8 @@ export function needsPage(doc, strokes, items = []) {
 // value is the gap's place in doc.gaps.
 export const GAP_MARK = 'data-enginote-gap';
 
-/** An element's children, leaving out spacers: what a gap's path counts. */
-export const kids = el => [...el.children].filter(c => !c.hasAttribute(GAP_MARK));
+/** An element's children, leaving out spacers and the cover: what a gap's path counts. */
+export const kids = el => [...el.children].filter(c => !c.hasAttribute(GAP_MARK) && !c.hasAttribute(COVER_MARK));
 
 /** The gaps of a note from outside (a backup file), in the shape above; null if there are none. */
 export function cleanGaps(list) {
@@ -230,17 +236,18 @@ export function spacerStyle(gap) {
     'margin:0!important;padding:0!important;border:0!important;background:none!important;';
 }
 
-/** The document to show for a note: a paged note's pages; an HTML note's file, with its gaps opened.
+/** The document to show for a note: a paged note's pages; an HTML note's file, with its gaps opened
+    and its cover in front. `live`: the cover makes its entrance (the editor does; a card or an export does not).
     Gaps go in as text (the file is read, the spacers put in, and it is written out again), so a
     frame that cannot be reached into, like a card's, shows them too.
     ponytail: a file with gaps is shown as the browser writes it back out, which is the same page in
     all but odd corners (a <pre> that starts with an empty line loses it). Without gaps it is shown untouched. */
-export function noteHtml(doc) {
-  if (doc.pages) return pagesHtml(doc);
-  if (!doc.gaps?.length) return doc.html;
+export function noteHtml(doc, live) {
+  if (doc.pages) return pagesHtml(doc, live);
+  if (!doc.gaps?.length && !doc.cover) return doc.html;
   const file = new DOMParser().parseFromString(doc.html, 'text/html');
   // Every path is followed before anything is put in: a spacer must not shift what a later path counts.
-  const places = doc.gaps.map(gap => gap.path.reduce((el, i) => el && el.children[i], file.body));
+  const places = (doc.gaps ?? []).map(gap => gap.path.reduce((el, i) => el && el.children[i], file.body));
   places.forEach((after, i) => {
     if (!after || after === file.body) return; // a path that leads nowhere: that gap is left out
     const spacer = file.createElement('div');
@@ -248,5 +255,39 @@ export function noteHtml(doc) {
     spacer.setAttribute('style', spacerStyle(doc.gaps[i]));
     after.after(spacer);
   });
+  if (doc.cover) { // last in <body>, so it is nobody's first or second child; it lies over the top, and the page makes room
+    file.head.insertAdjacentHTML('beforeend', coverStyle);
+    file.body.insertAdjacentHTML('beforeend', coverFrame({ live, floating: true }));
+  }
   return (file.doctype ? new XMLSerializer().serializeToString(file.doctype) : '') + file.documentElement.outerHTML;
+}
+
+/* ---------- The promo cover ---------- */
+
+/** Whether the note has the promo cover (cover.js) in front of it. */
+export const hasCover = doc => (doc.pages ? !!doc.pages[0]?.cover : !!doc.cover);
+
+/** Put the promo cover in front of a note, or take it away. Returns how far everything under it moved:
+    COVER_H, -COVER_H, or 0 if nothing changed. The caller moves the ink by that (ink.shift). `shown`: a
+    document showing the note (the editor's frame), changed to match in place, as for addPage(). */
+export function setCover(doc, on, shown, live) {
+  if (on === hasCover(doc)) return 0;
+  if (doc.pages) {
+    if (on) {
+      const page = { h: COVER_H, cover: true };
+      doc.pages.unshift(page);
+      shown?.body?.insertAdjacentHTML('afterbegin', pageHtml(page, doc.paper, live));
+    } else {
+      doc.pages.shift();
+      shown?.body?.children[0]?.remove();
+    }
+  } else if (on) {
+    doc.cover = true;
+    shown?.head?.insertAdjacentHTML('beforeend', coverStyle);
+    shown?.body?.insertAdjacentHTML('beforeend', coverFrame({ live, floating: true }));
+  } else {
+    delete doc.cover;
+    shown?.querySelectorAll(`[${COVER_MARK}]`).forEach(el => el.remove());
+  }
+  return on ? COVER_H : -COVER_H;
 }
