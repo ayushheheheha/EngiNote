@@ -43,6 +43,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 - "Enhance" removes background noise from your voice.
 - A countdown before a recording starts, and a mic check that shows your voice as live sound waves.
 - A camera bubble showing you over the note: drag it anywhere, pinch to resize it, double-tap to change its shape (circle, rounded square, wide, tall).
+- **Studio** (the wand on each recording): decided after you have recorded, never before. Each is a switch, and the finished video is a new recording beside the original: **auto-zoom** (the picture eases in on whatever the Pencil is writing and back out when it stops; the camera bubble stays where it is), **polish the voice** (rumble out, loud and quiet words evened, loudness set to YouTube's -16 LUFS), the EngiKode **intro** and **outro** videos, and a vertical 9:16 **short** (the writing zoomed, your face and the channel below, a progress bar) of 30 to 90 seconds from any start. Recordings are made at 60 frames a second at higher bit rates. Auto-zoom needs the pen's path, which every recording made in the app keeps (a few numbers a second); a recording that was trimmed in the editor has none.
 - A Recordings folder to play, share or delete your videos, and a simple editor (the scissors button on a recording) to trim, split and cut parts out, add another recording to the end, with undo and redo. The edited video is saved as a new recording; the original is kept.
 
 ## Using it
@@ -160,6 +161,8 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `pdfimport.js` | PDF import: each page drawn to an image, as a paged note |
 | `pdfjs.min.js`, `pdfjs.worker.min.js` | [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0, see `pdfjs.LICENSE.txt`), which reads PDFs |
 | `cover.js`, `cover-fonts.js` | The promo cover, and the site's three typefaces cut down and embedded in it |
+| `ios/App/Studio*.swift` | Studio: the screen, the zoom plan, the voice polish, the frame drawing and the writing of the movie. All but `Studio.swift` are free of UIKit, so `ios/StudioTests` can run them on a Mac (`.github/workflows/studio.yml`), with a made-up recording, and keep the pictures |
+| `ios/App/studio-intro.mp4`, `studio-outro.mp4` | The intro (14 s) and outro (6 s), made from the live site and channel, with their own music (nothing licensed) |
 | `export.js` | Export: the note with its ink as one printable document |
 | `perfect-freehand.js` | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) 1.2.3, which shapes the flow pen's strokes |
 | `ink.test.html` | Tests for the ink engine |
