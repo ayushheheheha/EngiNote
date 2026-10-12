@@ -42,7 +42,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 - "Enhance" removes background noise from your voice.
 - A countdown before a recording starts, and a mic check that shows your voice as live sound waves.
 - A camera bubble showing you over the note: drag it anywhere, pinch to resize it, double-tap to change its shape (circle, rounded square, wide, tall).
-- A Recordings folder to play, share or delete your videos.
+- A Recordings folder to play, share or delete your videos, and a simple editor (the scissors button on a recording) to trim, split and cut parts out, with undo and redo. The edited video is saved as a new recording; the original is kept.
 
 ## Using it
 

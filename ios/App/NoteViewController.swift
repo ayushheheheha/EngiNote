@@ -14,7 +14,7 @@ import WebKit
 ///  - Recording the screen as a 16:9 movie (Recorder.swift), started and stopped by the page
 ///    (the 'recorder' message), which is told how it goes (a 'recorder' event on its window).
 ///  - The recordings themselves: the page lists them as a folder, and asks for one to be played,
-///    shared or deleted (the 'recordings' message; the list goes back as a 'recordings' event).
+///    shared, edited (VideoEditor.swift) or deleted (the 'recordings' message; the list goes back as a 'recordings' event).
 ///  - The mic check: the page asks to be shown how loud the microphone's sound is (the 'mic'
 ///    message) and is sent the levels, or why not, as 'mic' events (Recorder.swift).
 ///  - The camera bubble (CameraBubble.swift), switched on and off and given its shape by the page
@@ -247,6 +247,12 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 }
             case "share":
                 share(file)
+            case "edit": // trim and cut: VideoEditor.swift saves the result as a new recording
+                if presentedViewController == nil {
+                    let editor = VideoEditor(file: file)
+                    editor.onSaved = { [weak self] in self?.recordings([:]) }
+                    present(editor, animated: true)
+                }
             case "delete": // the page has already asked the user if they are sure
                 try? FileManager.default.removeItem(at: file)
                 if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {

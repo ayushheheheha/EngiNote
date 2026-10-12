@@ -211,6 +211,7 @@ addEventListener('recordings', e => {
 
 const VIDEO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>';
 const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
+const EDIT_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11 9M8.5 16l11-9"/></svg>';
 const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
 function showVideos() {
@@ -265,7 +266,11 @@ function makeVideoCard(video) {
   save.innerHTML = SHARE_ICON;
   save.onclick = () => act('share');
   card.querySelector('.card-move').replaceWith(save);
-  card.querySelector('.card-copy').remove(); // a recording is the app's file, not a note
+  const edit = card.querySelector('.card-copy'); // a recording is not duplicated: its button trims and cuts it instead
+  edit.title = 'Trim or cut this recording';
+  edit.setAttribute('aria-label', 'Edit recording');
+  edit.innerHTML = EDIT_ICON;
+  edit.onclick = () => act('edit');
   return card;
 }
 
