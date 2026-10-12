@@ -276,7 +276,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const hovering = !erasing && tool !== 'hand' && svg.contains(e.target) &&
       (e.pointerType === 'pen' ? !penDown : e.pointerType === 'mouse' && tool === 'eraser' && e.buttons === 0);
     if (!erasing && !hovering && e.pointerType === 'touch') return;   // a finger elsewhere leaves a stylus's preview alone
-    const pt = (erasing || hovering) && toPoint(e);
+    const pt = (erasing || hovering) && toPoint(e, erasing ? act.box : undefined);
     nib.style.display = pt ? '' : 'none';
     if (!pt) return;
     const rubber = erasing || tool === 'eraser';
@@ -404,18 +404,51 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     const top = Math.min(y0, y1) - eraserRadius, bottom = Math.max(y0, y1) + eraserRadius;
     // Sampled along the sweep, a radius apart, so a fast swipe cannot jump over a stroke.
     const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / eraserRadius));
-    const gone = new Set();
-    strokes.forEach((s, i) => {
-      const box = boxOf(s);
-      if (box[0] > right || box[2] < left || box[1] > bottom || box[3] < top) return;
-      for (let k = 1; k <= steps; k++) {
-        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, eraserRadius)) { gone.add(i); break; }
+    // Only the strokes in the grid cells the sweep passes over (and the few too big for the grid).
+    const near = new Set(a.big);
+    for (let cx = Math.floor(left / CELL); cx <= Math.floor(right / CELL); cx++) {
+      for (let cy = Math.floor(top / CELL); cy <= Math.floor(bottom / CELL); cy++) {
+        for (const s of a.grid.get(cellKey(cx, cy)) || []) near.add(s);
       }
-    });
+    }
+    const gone = new Set();
+    for (const s of near) {
+      if (a.gone.has(s)) continue;
+      const box = boxOf(s);
+      if (box[0] > right || box[2] < left || box[1] > bottom || box[3] < top) continue;
+      for (let k = 1; k <= steps; k++) {
+        if (hitStroke(s, x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, eraserRadius)) { gone.add(s); break; }
+      }
+    }
     if (!gone.size) return;
-    for (const i of gone) els[i].remove();
-    strokes = strokes.filter((_, i) => !gone.has(i));
-    els = els.filter((_, i) => !gone.has(i));
+    for (const s of gone) {
+      elOf.get(s)?.remove();
+      a.gone.add(s);
+    }
+    strokes = strokes.filter(s => !gone.has(s));
+    els = strokes.map(pathOf);
+  }
+
+  // Which strokes are where, so that an erasing gesture looks only at the strokes near the eraser and
+  // not at every stroke of the note on every move: a grid of CELL-sized squares of the page, each
+  // listing the strokes whose box touches it. A stroke that would fill very many squares is kept apart.
+  const CELL = 100;
+  const cellKey = (cx, cy) => (cx + 1000) * 100000 + (cy + 1000);
+  function indexStrokes(list) {
+    const grid = new Map(), big = [];
+    for (const s of list) {
+      const box = boxOf(s);
+      const [c0, r0, c1, r1] = box.map(v => Math.floor(v / CELL));
+      if ((c1 - c0 + 1) * (r1 - r0 + 1) > 64) { big.push(s); continue; }
+      for (let cx = c0; cx <= c1; cx++) {
+        for (let cy = r0; cy <= r1; cy++) {
+          const key = cellKey(cx, cy);
+          if (grid.has(key)) grid.get(key).push(s);
+          else grid.set(key, [s]);
+        }
+      }
+    }
+    return { grid, big };
   }
 
   // Throw away the gesture in progress without committing it.
@@ -510,7 +543,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       if (!pt) return;
       const base = { id: e.pointerId, touch: isTouch, at: [e.clientX, e.clientY] };
       if (tool === 'eraser' || rubber) {
-        act = { ...base, before: strokes, last: pt };
+        // The sheet stays where it is for the whole gesture, so it is measured once: asking again after
+        // each stroke has gone would make the browser lay the whole note out again every time.
+        act = { ...base, before: strokes, last: pt, box: svg.getBoundingClientRect(), gone: new Set(), ...indexStrokes(strokes) };
         eraseAlong(act, pt);
       } else {
         // The flow pen follows pressure, when the stylus really reports it (0.5 is the "no sensor"
@@ -577,7 +612,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       return;
     }
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
-    const box = svg.getBoundingClientRect();
+    const box = a.box || svg.getBoundingClientRect();
     const pts = a.path && a.stroke.points;
     for (const ev of coalesced.length ? coalesced : [e]) {
       if (!a.path) {

@@ -735,11 +735,14 @@ body.wide #editor {
   pointer-events: none;
 }
 
+/* Its own compositing layer, like the stroke being drawn (ink.js): erasing or moving ink then redraws the ink
+   alone, not the note's pictures and text under it as well. */
 #ink {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  will-change: transform;
 }
 
 /* ---------- Lasso ---------- */
