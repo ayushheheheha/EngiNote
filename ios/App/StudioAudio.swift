@@ -183,8 +183,8 @@ enum AudioPolish {
             progress(min(0.5, done / total / 2))
         }
         let before = meter.integrated()
-        // Not more than +18 dB (a recording that is nearly silent must not become a wall of hiss), nor more than 12 down.
-        let gain = before.map { min(18, max(-12, target - $0)) } ?? 0
+        // Not more than +24 dB (a recording that is nearly silent must not become a wall of hiss), nor more than 12 down.
+        let gain = before.map { min(24, max(-12, target - $0)) } ?? 0
         let factor = Float(pow(10, gain / 20))
 
         // Second pass: write it.

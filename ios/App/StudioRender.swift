@@ -142,7 +142,7 @@ enum StudioRender {
             let canvas = CGSize(width: 1080, height: 1920)
             let length = min(options.shortLength, max(1, duration.seconds - options.shortStart))
             var tuning = ZoomPlan.Tuning()
-            tuning.maxZoom = 1.7; tuning.past = 1.0; tuning.future = 0.35; tuning.linger = 1.6
+            tuning.maxZoom = 1.7; tuning.past = 1.0; tuning.future = 0.5; tuning.linger = 1.6
             let plan = ZoomPlan(path: path, duration: duration.seconds, canvas: 1, source: Double(source.width / source.height), tuning: tuning)
             let job = StudioJob(sidecar: sidecar, plan: plan, title: title, canvas: canvas, sourceSize: source, shortStart: options.shortStart, shortLength: length)
             let composition = AVMutableComposition()

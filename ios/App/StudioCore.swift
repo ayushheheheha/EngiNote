@@ -96,11 +96,11 @@ struct ZoomPlan {
 
     struct Tuning {
         var maxZoom = 1.8        // the closest it gets in
-        var past = 1.6           // seconds of writing before a moment that the camera keeps in view
-        var future = 0.5         // and after it, which it moves towards early
+        var past = 1.3           // seconds of writing before a moment that the camera keeps in view
+        var future = 0.7         // and after it, which it moves towards early
         var linger = 2.4         // seconds of stillness before it eases out
         var padding = 0.10       // room round the writing, as a fraction of the picture, at least
-        var spring = 4.2         // radians a second: how brisk the camera is (about 1.2 s to settle)
+        var spring = 5.5         // radians a second: how brisk the camera is (about 0.9 s to settle)
     }
 
     /// The shape of the picture the camera fills (`canvas`, width over height) from a source (`source`, likewise):
@@ -139,7 +139,7 @@ struct ZoomPlan {
                 let want = (x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: zWanted)
                 // Move only for writing that has gone well outside the view, or a different closeness.
                 let cropW = base.w / held.z, cropH = base.h / held.z
-                let outside = abs(want.x - held.x) > 0.22 * cropW || abs(want.y - held.y) > 0.22 * cropH
+                let outside = abs(want.x - held.x) > 0.15 * cropW || abs(want.y - held.y) > 0.15 * cropH
                 let closer = abs(log(want.z / held.z)) > 0.12
                 if held.z == 1 && want.z > 1.05 || outside || closer { held = want }
             } else if t - lastActive > tuning.linger {
