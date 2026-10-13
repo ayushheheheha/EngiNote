@@ -50,9 +50,14 @@ final class StudioInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     /// Seconds to add to the finished video's time to get the recording's time.
     let shift: Double
     let transform: CGAffineTransform
+    /// Seconds over which it comes up out of black at its start, and goes down into black at its end (0: it does not).
+    let fadeIn: Double, fadeOut: Double
 
-    init(range: CMTimeRange, kind: Kind, job: StudioJob, trackID: CMPersistentTrackID, shift: Double, transform: CGAffineTransform = .identity) {
+    init(range: CMTimeRange, kind: Kind, job: StudioJob, trackID: CMPersistentTrackID, shift: Double, transform: CGAffineTransform = .identity,
+         fadeIn: Double = 0, fadeOut: Double = 0) {
         timeRange = range
+        self.fadeIn = fadeIn
+        self.fadeOut = fadeOut
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
         self.kind = kind
         self.job = job
@@ -88,7 +93,12 @@ final class StudioCompositor: NSObject, AVVideoCompositing {
                 }
                 image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
                 let t = request.compositionTime.seconds + instruction.shift
-                let frame = StudioFrame.draw(instruction.kind, source: image, t: t, job: instruction.job, context: StudioCompositor.context)
+                var frame = StudioFrame.draw(instruction.kind, source: image, t: t, job: instruction.job, context: StudioCompositor.context)
+                // Up out of black at its start and down into it at its end, where it is to: an intro does not jump to the recording.
+                var light = 1.0
+                if instruction.fadeIn > 0 { light = min(light, (request.compositionTime.seconds - instruction.timeRange.start.seconds) / instruction.fadeIn) }
+                if instruction.fadeOut > 0 { light = min(light, (instruction.timeRange.end.seconds - request.compositionTime.seconds) / instruction.fadeOut) }
+                if light < 1 { frame = StudioFrame.dimmed(frame, to: max(0, light)) }
                 let box = CGRect(origin: .zero, size: instruction.job.canvas)
                 StudioCompositor.context.render(frame, to: target, bounds: box, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
                 request.finish(withComposedVideoFrame: target)
@@ -111,6 +121,14 @@ enum StudioFrame {
     }
 
     // MARK: Small helpers
+
+    /// The picture with `light` of its light left (0: black, 1: as it is), eased so that it neither starts nor ends with a jerk.
+    static func dimmed(_ image: CIImage, to light: Double) -> CIImage {
+        let l = CGFloat(light * light * (3 - 2 * light))
+        return image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: l, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: l, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: l, w: 0),
+        ])
+    }
 
     /// A white rounded rectangle on nothing, to cut an image to.
     static func roundedMask(_ rect: CGRect, radius: CGFloat) -> CIImage {

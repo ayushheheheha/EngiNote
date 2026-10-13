@@ -29,6 +29,10 @@ enum StudioRender {
         var notes: [String] = []
     }
 
+    /// The change from the intro to the recording, and from the recording to the outro, goes through black: the clip
+    /// fades over `clip` seconds and the recording over `recording`.
+    static let dip = (clip: 0.3, recording: 0.5)
+
     static func error(_ text: String) -> NSError { NSError(domain: "EngiNote", code: 30, userInfo: [NSLocalizedDescriptionKey: text]) }
 
     /// "Thermodynamics 2026-10-11 14.03.22" -> "Thermodynamics": a recording's name without the time it was made.
@@ -104,16 +108,17 @@ enum StudioRender {
             var instructions: [StudioInstruction] = []
             var cursor = CMTime.zero
 
-            func add(clip url: URL) async throws {
+            func add(clip url: URL, fadeIn: Double = 0, fadeOut: Double = 0) async throws {
                 let clip = AVURLAsset(url: url)
                 guard let v = try await clip.loadTracks(withMediaType: .video).first else { return }
                 let length = try await clip.load(.duration)
                 try track.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: v, at: cursor)
                 if let a = try await clip.loadTracks(withMediaType: .audio).first { try sound?.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: a, at: cursor) }
-                instructions.append(StudioInstruction(range: CMTimeRange(start: cursor, duration: length), kind: .clip, job: job, trackID: track.trackID, shift: 0))
+                instructions.append(StudioInstruction(range: CMTimeRange(start: cursor, duration: length), kind: .clip, job: job, trackID: track.trackID, shift: 0, fadeIn: fadeIn, fadeOut: fadeOut))
                 cursor = CMTimeAdd(cursor, length)
             }
-            if options.intro, let intro = intro { try await add(clip: intro) }
+            let opens = options.intro && intro != nil, closes = options.outro && outro != nil
+            if opens, let intro = intro { try await add(clip: intro, fadeOut: dip.clip) }
             let start = cursor
             try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: video, at: start)
             let voiceSource = voice ?? asset
@@ -121,9 +126,10 @@ enum StudioRender {
                 let length = min(duration, try await voiceSource.load(.duration))
                 try sound?.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: a, at: start)
             }
-            instructions.append(StudioInstruction(range: CMTimeRange(start: start, duration: duration), kind: .main, job: job, trackID: track.trackID, shift: -start.seconds, transform: transform))
+            instructions.append(StudioInstruction(range: CMTimeRange(start: start, duration: duration), kind: .main, job: job, trackID: track.trackID, shift: -start.seconds, transform: transform,
+                                                  fadeIn: opens ? dip.recording : 0, fadeOut: closes ? dip.recording : 0))
             cursor = CMTimeAdd(start, duration)
-            if options.outro, let outro = outro { try await add(clip: outro) }
+            if closes, let outro = outro { try await add(clip: outro, fadeIn: dip.clip) }
 
             let composed = AVMutableVideoComposition()
             composed.customVideoCompositorClass = StudioCompositor.self

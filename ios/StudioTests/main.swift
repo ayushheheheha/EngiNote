@@ -251,7 +251,7 @@ if finished.files.count == 2 {
     print(String(format: "lengths: video %.2f s, short %.2f s", mainLength, shortLength))
     check(abs(mainLength - (seconds + 2)) < 0.3, "the video is the recording with an intro and an outro")
     check(abs(shortLength - seconds) < 0.3, "the short is as long as asked")
-    for (name, at) in [("main-intro.png", 0.5), ("main-writing-1.png", 1.0 + 1.6), ("main-writing-2.png", 1.0 + 3.0), ("main-right.png", 1.0 + 4.9), ("main-outro.png", 1.0 + seconds + 0.5)] {
+    for (name, at) in [("main-intro.png", 0.5), ("main-fade-in.png", 1.0 + 0.2), ("main-fade-out.png", 1.0 + seconds - 0.15), ("main-writing-1.png", 1.0 + 1.6), ("main-writing-2.png", 1.0 + 3.0), ("main-right.png", 1.0 + 4.9), ("main-outro.png", 1.0 + seconds + 0.5)] {
         let size = try png(main, at: at, to: name)
         if name == "main-intro.png" { check(size == CGSize(width: W, height: H), "the video is \(W) by \(H) (\(size))") }
     }
@@ -308,15 +308,18 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
     try await StudioWrap.add(to: wrapped, intro: realIntro, outro: realOutro)
     print(String(format: "intro and outro put on in %.1f s the first time (the clips are made the recording's kind)", Date().timeIntervalSince(clock)))
     let marks = StudioWrap.marks(for: wrapped)
-    check(abs((marks?.lead ?? 0) - opens) < 0.02 && abs((marks?.tail ?? 0) - closes) < 0.02, "it is noted how long the intro and outro on it are (\(String(describing: marks)))")
+    let dip = StudioRender.dip.recording // the half second between a clip and the recording
+    check(abs((marks?.lead ?? 0) - opens - dip) < 0.02 && abs((marks?.tail ?? 0) - closes - dip) < 0.02, "it is noted how long the intro and outro on it are (\(String(describing: marks)))")
     let joined = AVURLAsset(url: wrapped)
     let joinedLength = try await joined.load(.duration).seconds, joinedFrames = try await frames(in: wrapped)
     print(String(format: "with them: %.2f s, %d frames, %d KB (the recording alone: %d frames, %d KB)", joinedLength, joinedFrames, bytes(wrapped) / 1000, plainFrames, plain / 1000))
-    check(abs(joinedLength - (seconds + opens + closes)) < 0.1, "intro + recording + outro, by copying")
-    check(abs(joinedFrames - plainFrames - Int(((opens + closes) * 60).rounded())) <= 2, "every frame of the three plays, in one track")
+    check(abs(joinedLength - (seconds + opens + closes + 2 * dip)) < 0.1, "intro + recording + outro, by copying, with the fades between")
+    check(abs(joinedFrames - plainFrames - Int(((opens + closes + 2 * dip) * 60).rounded())) <= 2, "every frame of them plays, in one track")
     let voiced = try await AudioPolish.loudness(of: joined) ?? -99
     check(voiced > -40, "it has sound all the way (\(voiced) LUFS)")
-    for (name, at) in [("wrap-intro.png", 3.0), ("wrap-recording.png", opens + 2.5), ("wrap-last-of-recording.png", opens + seconds - 0.05), ("wrap-outro.png", opens + seconds + closes / 2)] { _ = try png(joined, at: at, to: name) }
+    let begins = opens + dip
+    for (name, at) in [("wrap-intro.png", 3.0), ("wrap-intro-fading.png", opens - 0.12), ("wrap-fade-in.png", begins - 0.2), ("wrap-recording.png", begins + 2.5), ("wrap-last-of-recording.png", begins + seconds - 0.05),
+                       ("wrap-fade-out.png", begins + seconds + 0.3), ("wrap-outro-coming.png", begins + seconds + dip + 0.15), ("wrap-outro.png", begins + seconds + dip + closes / 2)] { _ = try png(joined, at: at, to: name) }
 
     // A second recording: the clips are there already, so this is the copy alone.
     let second = work.appendingPathComponent("Wrapped again 2026-10-13 10.05.00.mov")

@@ -8,6 +8,11 @@ import Foundation
 // For a copy to be possible the two clips have to be the recording's kind of movie: its size, H.264, its
 // kind of sound. They are made so once (a few seconds) and kept in the caches folder.
 //
+// So that the intro does not jump to the recording, nor the recording to the outro, the change goes through black,
+// as it does in Studio: the clip fades, and between it and the recording stands half a second of the recording's
+// first (or last) frame coming up out of black (or going down into it). The recording's own frames are still
+// copied untouched, and taking the intro and outro off gives back exactly the recording.
+//
 // No UIKit, like the other Studio files, so that ios/StudioTests can try it on a Mac.
 enum StudioWrap {
     /// How long the intro before a recording and the outro after it are, in seconds. Kept beside the
@@ -61,18 +66,28 @@ enum StudioWrap {
             if let a = try await piece.loadTracks(withMediaType: .audio).first { try sound.insertTimeRange(range, of: a, at: cursor) }
             cursor = CMTimeAdd(cursor, length)
         }
-        /// A clip, made the recording's kind; its length in whole frames, so that the recording begins exactly on one.
-        func clip(_ url: URL?) async throws -> Double {
-            guard let url = url else { return 0 }
-            let made = AVURLAsset(url: try await matched(url, size: size))
+        /// A movie made the recording's kind; its length in whole frames, so that what follows begins exactly on one.
+        func piece(_ url: URL) async throws -> Double {
+            let made = AVURLAsset(url: url)
             guard let v = try await made.loadTracks(withMediaType: .video).first else { return 0 }
             let length = CMTime(value: Int64((try await v.load(.timeRange).duration.seconds * 60 + 0.001).rounded(.down)), timescale: 60)
             try await append(made, length)
             return length.seconds
         }
-        let lead = try await clip(intro)
+        var bridges: [URL] = [] // made for this recording alone, and needed only until the copy is done
+        defer { bridges.forEach { try? FileManager.default.removeItem(at: $0) } }
+        var lead = 0.0, tail = 0.0
+        if let intro = intro {
+            lead += try await piece(try await matched(intro, size: size, fadeOut: StudioRender.dip.clip))
+            bridges.append(try await bridge(video, size: size, end: false))
+            lead += try await piece(bridges[bridges.count - 1])
+        }
         try await append(asset, try await asset.load(.duration))
-        let tail = try await clip(outro)
+        if let outro = outro {
+            bridges.append(try await bridge(video, size: size, end: true))
+            tail += try await piece(bridges[bridges.count - 1])
+            tail += try await piece(try await matched(outro, size: size, fadeIn: StudioRender.dip.clip))
+        }
         if sound.segments.isEmpty { composition.removeTrack(sound) }
 
         try await replace(movie) { try await copy(composition, range: nil, to: $0) }
@@ -121,14 +136,36 @@ enum StudioWrap {
 
     // MARK: The clips, made the recording's kind
 
-    /// `clip` as a movie `size` large, in the picture and sound a recording has: made once, then kept (in the caches
-    /// folder, which the system may empty: then it is made again).
-    static func matched(_ clip: URL, size: CGSize) async throws -> URL {
+    /// Half a second of the recording's first frame coming up out of black (`end`: of its last, going down into
+    /// black), as a movie of its own: what stands between a clip and the recording.
+    private static func bridge(_ video: AVAssetTrack, size: CGSize, end: Bool) async throws -> URL {
+        let whole = try await video.load(.timeRange), one = CMTime(value: 1, timescale: 60)
+        let composition = AVMutableComposition()
+        guard let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw StudioRender.error("the video could not be put together") }
+        // One frame's worth of the recording, drawn out to the length of the fade.
+        try track.insertTimeRange(CMTimeRange(start: end ? CMTimeSubtract(whole.end, one) : whole.start, duration: one), of: video, at: .zero)
+        let range = CMTimeRange(start: .zero, duration: CMTime(seconds: StudioRender.dip.recording, preferredTimescale: 600))
+        track.scaleTimeRange(CMTimeRange(start: .zero, duration: one), toDuration: range.duration)
+        let composed = AVMutableVideoComposition()
+        composed.customVideoCompositorClass = StudioCompositor.self
+        composed.frameDuration = one
+        composed.renderSize = size
+        let job = StudioJob(sidecar: nil, plan: nil, title: "", canvas: size, sourceSize: size)
+        composed.instructions = [StudioInstruction(range: range, kind: .clip, job: job, trackID: track.trackID, shift: 0, fadeIn: end ? 0 : range.duration.seconds, fadeOut: end ? range.duration.seconds : 0)]
+        let made = FileManager.default.temporaryDirectory.appendingPathComponent("bridge-\(UUID().uuidString).mov")
+        try await StudioRender.write(composition, composed, to: made, size: size, bitRate: StudioRender.bitRate(size), length: range.duration.seconds, cancel: StudioCancel()) { _ in }
+        return made
+    }
+
+    /// `clip` as a movie `size` large, in the picture and sound a recording has, fading up out of black over
+    /// `fadeIn` seconds and down into it over `fadeOut`: made once, then kept (in the caches folder, which the
+    /// system may empty: then it is made again).
+    static func matched(_ clip: URL, size: CGSize, fadeIn: Double = 0, fadeOut: Double = 0) async throws -> URL {
         let folder = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("StudioClips", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // Its size in bytes is in the name: a new intro in a new build is a new file, and is made anew.
         let bytes = (try? clip.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        let kept = folder.appendingPathComponent("\(clip.deletingPathExtension().lastPathComponent)-\(Int(size.width))x\(Int(size.height))-\(bytes).mov")
+        let kept = folder.appendingPathComponent("\(clip.deletingPathExtension().lastPathComponent)-\(Int(size.width))x\(Int(size.height))-\(bytes)-\(fadeIn)-\(fadeOut).mov")
         if FileManager.default.fileExists(atPath: kept.path) { return kept }
 
         let asset = AVURLAsset(url: clip)
@@ -145,7 +182,7 @@ enum StudioWrap {
         composed.frameDuration = CMTime(value: 1, timescale: 60)
         composed.renderSize = size
         let job = StudioJob(sidecar: nil, plan: nil, title: "", canvas: size, sourceSize: size)
-        composed.instructions = [StudioInstruction(range: range, kind: .clip, job: job, trackID: track.trackID, shift: 0)]
+        composed.instructions = [StudioInstruction(range: range, kind: .clip, job: job, trackID: track.trackID, shift: 0, fadeIn: fadeIn, fadeOut: fadeOut)]
         // Under another name until it is whole: a half-made one must never be taken for the clip.
         let making = folder.appendingPathComponent("making-\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: making) }
