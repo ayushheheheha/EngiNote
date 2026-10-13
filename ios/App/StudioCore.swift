@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import CoreMedia
 
 // Studio: what is done to a recording after it is made, when the user asks (Studio.swift is the screen,
 // StudioRender.swift does the work). Nothing in the Studio files except Studio.swift uses UIKit, so that
@@ -21,6 +22,9 @@ struct Sidecar: Codable {
     /// [wall clock ms, x, y, width, height, corner radius] in screen points: where the camera bubble was from then on.
     /// Width 0: it was switched off.
     var bubble: [[Double]] = []
+    /// How the voice got into the movie: [pieces written, pieces that had to wait their turn, pieces lost, breaks
+    /// in its timing]. nil: recorded before this was counted.
+    var sound: [Int]?
 
     static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
 
@@ -41,6 +45,14 @@ struct Sidecar: Codable {
         guard let place = url(for: movie), let data = try? Data(contentsOf: place), let found = try? JSONDecoder().decode(Sidecar.self, from: data),
               found.startedAt > 0 else { return nil }
         return found
+    }
+
+    /// The sound count in words, for the Studio screen; nil if it was not counted.
+    var soundReport: String? {
+        guard let sound = sound, sound.count == 4 else { return nil }
+        if sound[0] == 0 { return "Sound check: no sound reached this recording." }
+        if sound[2] == 0 && sound[3] == 0 { return "Sound check: all \(sound[0]) pieces of sound were written, none lost." }
+        return "Sound check: \(sound[2]) of \(sound[0] + sound[2]) pieces of sound were lost and the microphone's timing broke \(sound[3]) times. Places where the voice drops or stutters may come from that."
     }
 
     /// Seconds into the movie for a wall-clock time; nil if that was before it began or while it was paused.
@@ -168,5 +180,32 @@ struct ZoomPlan {
         let view = at(t), base = ZoomPlan.base(canvas: canvas, source: source)
         let w = base.w / view.z, h = base.h / view.z
         return CGRect(x: min(max(view.x - w / 2, 0), 1 - w), y: min(max(view.y - h / 2, 0), 1 - h), width: w, height: h)
+    }
+}
+
+/// Times the microphone's sound for the movie. Each piece arrives with the device's time for its first sample, and
+/// those times wobble a little; written as they come, the pieces could overlap or leave hairline gaps. So a piece
+/// that arrives about when the one before it ended is placed exactly there, to the sample, and only a real break
+/// (the microphone stopped for a moment) moves the sound to the device's time again.
+struct SoundClock {
+    private var anchor: Int64 = 0 // the sample (counted at `rate` from the device's time zero) the unbroken run began on
+    private var count: Int64 = 0  // samples placed since
+    private var rate = 0.0
+    private(set) var breaks = 0
+    /// How far a piece may be from where the last one ended and still be joined to it.
+    static let slack = 0.02 // seconds
+
+    /// Where a piece of `frames` samples at `rate` a second, said to start at `host`, goes in the movie.
+    mutating func place(host: CMTime, frames: Int, rate: Double) -> CMTime {
+        let said = Int64((CMTimeGetSeconds(host) * rate).rounded())
+        if self.rate != rate || abs(Double(said - (anchor + count))) > SoundClock.slack * rate {
+            if self.rate != 0 { breaks += 1 }
+            anchor = said
+            count = 0
+            self.rate = rate
+        }
+        let start = CMTime(value: anchor + count, timescale: CMTimeScale(rate))
+        count += Int64(frames)
+        return start
     }
 }

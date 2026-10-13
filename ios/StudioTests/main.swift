@@ -187,6 +187,23 @@ var paused = sidecar
 paused.pauses = [[started + 1000, started + 1500]]
 check(paused.videoTime(started + 1200) == nil && abs((paused.videoTime(started + 2000) ?? -1) - 1.5) < 0.001, "a pause is left out of movie time")
 
+// The recorder's timing of the sound (Recorder.swift, piece): pieces that wobble are joined, a real gap is kept.
+var soundClock = SoundClock()
+var joined = true, at = 5_000.0, expected = CMTime(value: Int64(at * 48_000), timescale: 48_000)
+for i in 0..<200 {
+    let wobble = i == 0 ? 0 : Double((i * 7) % 5 - 2) * 0.0004 // up to 0.8 ms early or late
+    let placed = soundClock.place(host: CMTime(seconds: at + wobble, preferredTimescale: 1_000_000_000), frames: 4800, rate: 48_000)
+    if placed != expected { joined = false }
+    expected = CMTimeAdd(expected, CMTime(value: 4800, timescale: 48_000))
+    at += 0.1
+}
+check(joined && soundClock.breaks == 0, "pieces of sound that arrive a little early or late are joined end to end")
+let afterGap = soundClock.place(host: CMTime(seconds: at + 0.5, preferredTimescale: 1_000_000_000), frames: 4800, rate: 48_000)
+check(soundClock.breaks == 1 && abs(afterGap.seconds - (at + 0.5)) < 0.0001, "a real gap in the sound is kept as a gap")
+var counted = Sidecar()
+counted.sound = [1200, 3, 0, 0]
+check(counted.soundReport?.contains("none lost") == true && Sidecar().soundReport == nil, "the sound count is put into words")
+
 // The zoom plan.
 let plan = ZoomPlan(path: sidecar.penPath(), duration: seconds, canvas: 16.0 / 9, source: 16.0 / 9)
 let idle = plan.at(0.0), writing = plan.at(1.6), later = plan.at(4.9)
@@ -261,8 +278,9 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
         let asset = AVURLAsset(url: file)
         let length = try await asset.load(.duration).seconds
         print(String(format: "with the real clips: %.2f s", length))
-        check(abs(length - (seconds + 14 + 6)) < 0.4, "intro (14 s) + recording + outro (6 s)")
-        for (name, at) in [("real-intro.png", 3.0), ("real-first-scene.png", 7.0), ("real-recording.png", 14.0 + 2.5), ("real-outro.png", 14.0 + seconds + 3.2)] { _ = try png(asset, at: at, to: name) }
+        let opens = try await AVURLAsset(url: realIntro).load(.duration).seconds, closes = try await AVURLAsset(url: realOutro).load(.duration).seconds
+        check(abs(length - (seconds + opens + closes)) < 0.4, String(format: "intro (%.1f s) + recording + outro (%.1f s)", opens, closes))
+        for (name, at) in [("real-intro.png", 3.0), ("real-first-scene.png", opens / 2), ("real-recording.png", opens + 2.5), ("real-outro.png", opens + seconds + closes / 2)] { _ = try png(asset, at: at, to: name) }
     }
 }
 

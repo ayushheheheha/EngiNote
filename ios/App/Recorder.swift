@@ -58,6 +58,11 @@ final class Recorder {
     private var offset = CMTime.zero
     private var lastEnd = CMTime.zero
     private var soundPieces = 0 // pieces of sound written so far
+    // Sound the movie was not ready for when it arrived, waiting its turn (see take), and how that went.
+    private var held: [CMSampleBuffer] = []
+    private var soundWaited = 0, soundLost = 0
+    private static let mostHeld = 200 // pieces: ten seconds or so
+    private var clock = SoundClock()
     private var metering = false // the page is showing the sound: see `checking`
     private var heardAt: TimeInterval = 0 // when the microphone last handed over sound (the device's uptime)
 
@@ -222,6 +227,10 @@ final class Recorder {
         self.offset = .zero
         self.lastEnd = .zero
         self.soundPieces = 0
+        self.held = []
+        self.soundWaited = 0
+        self.soundLost = 0
+        self.clock = SoundClock()
         self.sidecar = Sidecar()
         self.pausedSince = nil
         if let known = Recorder.qualities[name] { self.quality = known }
@@ -258,7 +267,7 @@ final class Recorder {
         microphone.removeTap(onBus: 0)
         microphone.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] heard, time in
             guard let self = self else { return }
-            if let piece = Recorder.piece(from: heard, at: time) { self.take(piece, .audioMic) }
+            if let piece = self.piece(from: heard, at: time) { self.take(piece, .audioMic) }
             self.measure(heard) // for the mic check; after the recording has had its sound
         }
         engine.prepare()
@@ -366,12 +375,16 @@ final class Recorder {
     }
 
     /// What the microphone heard, as a piece of sound the movie can take, timed on the same clock
-    /// as ReplayKit's picture (the device's own).
-    private static func piece(from heard: AVAudioPCMBuffer, at time: AVAudioTime) -> CMSampleBuffer? {
+    /// as ReplayKit's picture (the device's own), and joined to the piece before it (SoundClock).
+    private func piece(from heard: AVAudioPCMBuffer, at time: AVAudioTime) -> CMSampleBuffer? {
         guard time.isHostTimeValid, heard.frameLength > 0 else { return nil }
+        lock.lock()
+        let start = clock.place(host: CMTimeAdd(CMClockMakeHostTimeFromSystemUnits(time.hostTime), Recorder.voiceShift),
+                                frames: Int(heard.frameLength), rate: heard.format.sampleRate)
+        lock.unlock()
         var timing = CMSampleTimingInfo(
             duration: CMTime(value: 1, timescale: CMTimeScale(heard.format.sampleRate)),
-            presentationTimeStamp: CMTimeAdd(CMClockMakeHostTimeFromSystemUnits(time.hostTime), voiceShift),
+            presentationTimeStamp: start,
             decodeTimeStamp: .invalid
         )
         var made: CMSampleBuffer?
@@ -449,6 +462,9 @@ final class Recorder {
         RPScreenRecorder.shared().stopCapture { [weak self] error in
             guard let self = self else { return }
             self.lock.lock()
+            self.drain() // sound still waiting its turn
+            if self.microphone { self.sidecar.sound = [self.soundPieces, self.soundWaited, self.soundLost + self.held.count, self.clock.breaks] }
+            self.held = []
             let writer = self.writer
             let video = self.video
             let audio = self.audio
@@ -513,18 +529,50 @@ final class Recorder {
         if type == .video, video == nil { begin(writer, with: buffer) }
 
         if writer.status == .failed { fail(writer.error?.localizedDescription ?? "The recording stopped.") }
-        guard writer.status == .writing, let input = (type == .video ? video : audio), input.isReadyForMoreMediaData else { return }
+        guard writer.status == .writing, let input = (type == .video ? video : audio) else { return }
         guard let piece = CMTimeCompare(offset, .zero) == 0 ? buffer : moved(buffer, earlierBy: offset) else { return }
+        if type == .audioMic {
+            // A frame of picture the movie is not ready for can be left out: the one before it stays up a moment
+            // longer. Sound cannot: a piece left out is a hole in the voice. So sound waits its turn.
+            held.append(piece)
+            drain()
+            if !held.isEmpty { soundWaited += 1 }
+            if held.count > Recorder.mostHeld {
+                held.removeFirst()
+                soundLost += 1
+            }
+            return
+        }
+        drain()
+        guard input.isReadyForMoreMediaData else { return }
         guard input.append(piece) else {
             fail(writer.error?.localizedDescription ?? "The recording could not be written.")
             return
         }
+        reached(piece)
+    }
+
+    // With the lock held: write the sound that is waiting, as far as the movie will take it.
+    private func drain() {
+        guard let writer = writer, writer.status == .writing, let audio = audio else { return }
+        while let piece = held.first, audio.isReadyForMoreMediaData {
+            held.removeFirst()
+            guard audio.append(piece) else {
+                fail(writer.error?.localizedDescription ?? "The recording could not be written.")
+                return
+            }
+            reached(piece)
+            soundPieces += 1
+        }
+    }
+
+    // With the lock held: the movie has got as far as the end of this piece.
+    private func reached(_ piece: CMSampleBuffer) {
         // A frame of picture often does not say how long it lasts: a sixtieth of a second will do.
         let length = CMSampleBufferGetDuration(piece)
         let lasts = length.isValid && CMTimeCompare(length, .zero) > 0 ? length : CMTime(value: 1, timescale: 60)
         let end = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(piece), lasts)
         if CMTimeCompare(end, lastEnd) > 0 { lastEnd = end }
-        if type == .audioMic { soundPieces += 1 }
     }
 
     /// A copy of a piece of picture or sound, timed `offset` earlier.

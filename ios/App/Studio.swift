@@ -145,10 +145,19 @@ final class StudioViewController: UIViewController {
         status.numberOfLines = 0
         status.textAlignment = .center
 
-        let stack = UIStackView(arrangedSubviews: [name, zoom, polish, start, end, short, shortBox, makeButton, progress, status])
+        // What the recorder counted about the sound, when it did (Recorder.swift, take).
+        let sound = UILabel()
+        sound.text = sidecar?.soundReport
+        sound.font = .systemFont(ofSize: 13)
+        sound.textColor = .lightGray
+        sound.numberOfLines = 0
+        sound.isHidden = sound.text == nil
+
+        let stack = UIStackView(arrangedSubviews: [name, sound, zoom, polish, start, end, short, shortBox, makeButton, progress, status])
         stack.axis = .vertical
         stack.spacing = 12
-        stack.setCustomSpacing(18, after: name)
+        stack.setCustomSpacing(sound.isHidden ? 18 : 6, after: name)
+        stack.setCustomSpacing(18, after: sound)
         stack.setCustomSpacing(20, after: shortBox)
 
         let scroll = UIScrollView()
