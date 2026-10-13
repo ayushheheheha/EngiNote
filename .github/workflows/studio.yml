@@ -20,7 +20,7 @@ jobs:
       - name: Build the test
         run: |
           xcodebuild -version
-          swiftc -O -swift-version 5 ios/App/StudioCore.swift ios/App/StudioAudio.swift ios/App/StudioCompositor.swift ios/App/StudioRender.swift ios/StudioTests/main.swift -o studiotest
+          swiftc -O -swift-version 5 ios/App/StudioCore.swift ios/App/StudioAudio.swift ios/App/StudioCompositor.swift ios/App/StudioRender.swift ios/App/StudioWrap.swift ios/StudioTests/main.swift -o studiotest
       - name: Run it
         run: ./studiotest studio-out
       - uses: actions/upload-artifact@v4

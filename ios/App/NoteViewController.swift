@@ -196,7 +196,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             recorder.resume()
             send("recorder", ["state": "recording"])
         case "stop":
-            stopRecording(because: nil)
+            stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false)
         default:
             // Asked to pause or resume a recording that is no longer running: say how things stand.
             send("recorder", ["state": "idle"])
@@ -218,7 +218,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     }
 
     /// Stop, finish the movie and tell the page. `problem`: why, if it was not the user's choice.
-    private func stopRecording(because problem: String?) {
+    /// `wrap`: the bar's Intro switch is on, so the intro and outro go onto the recording at once.
+    private func stopRecording(because problem: String?, wrap: Bool = false) {
         bubbleTimer?.invalidate()
         bubbleTimer = nil
         guard recorder.isActive else {
@@ -233,11 +234,12 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         }
         recorder.stop { [weak self] file, error in
             UIApplication.shared.isIdleTimerDisabled = false
-            if task != .invalid {
+            let finished = {
+                guard task != .invalid else { return }
                 UIApplication.shared.endBackgroundTask(task)
                 task = .invalid
             }
-            guard let self = self else { return }
+            guard let self = self else { return finished() }
             let trouble = problem ?? error
             let place = "Files, under On My iPad > EngiNote"
             let message: String
@@ -248,10 +250,43 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             } else {
                 message = "Recording saved. It is also in \(place)."
             }
-            self.send("recorder", ["state": "idle", "message": message])
+            // Offer to send the movie somewhere at once: once it has its intro and outro, if it is to have them.
+            let offer = {
+                finished()
+                if let file = file, UIApplication.shared.applicationState == .active { self.share(file) }
+            }
+            guard wrap, let file = file else {
+                self.send("recorder", ["state": "idle", "message": message])
+                return offer()
+            }
+            self.send("recorder", ["state": "idle", "message": message + " Adding the intro and outro: keep EngiNote open for a moment."])
+            self.wrap(file, add: true, then: offer)
+        }
+    }
 
-            // Offer to send the movie somewhere at once.
-            if let file = file, UIApplication.shared.applicationState == .active { self.share(file) }
+    // MARK: Intro and outro, put straight on
+
+    private var wrapping: Set<String> = [] // the recordings being worked on just now
+
+    /// Put the intro and outro on a recording, or take them off (StudioWrap.swift): a copy of the file, not a new
+    /// video, so it is quick. The page is then sent the list of recordings, with how it went.
+    private func wrap(_ file: URL, add: Bool, then: (() -> Void)? = nil) {
+        guard wrapping.insert(file.lastPathComponent).inserted else { return }
+        let intro = Bundle.main.url(forResource: "studio-intro", withExtension: "mp4")
+        let outro = Bundle.main.url(forResource: "studio-outro", withExtension: "mp4")
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var note = add ? "Intro and outro added." : "Intro and outro removed."
+            do {
+                if add { try await StudioWrap.add(to: file, intro: intro, outro: outro) } else { try await StudioWrap.remove(from: file) }
+            } catch {
+                note = "The intro and outro could not be \(add ? "added" : "removed"): \(error.localizedDescription). The recording is as it was."
+            }
+            let said = note
+            await MainActor.run {
+                self?.wrapping.remove(file.lastPathComponent)
+                self?.recordings([:], note: said)
+                then?()
+            }
         }
     }
 
@@ -307,7 +342,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
 
     /// Play, share or delete one recording, as the page asks; then, whatever was asked (also just
     /// "list"), send the page the list as it now stands.
-    private func recordings(_ body: [String: Any]) {
+    private func recordings(_ body: [String: Any], note: String? = nil) {
         if let file = recording(named: body["name"]) {
             switch body["action"] as? String {
             case "play":
@@ -330,8 +365,11 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     studio.onSaved = { [weak self] in self?.recordings([:]) }
                     present(studio, animated: true)
                 }
+            case "wrap": // the intro and outro, on if they are off and off if they are on
+                wrap(file, add: StudioWrap.marks(for: file) == nil)
             case "delete": // the page has already asked the user if they are sure
                 try? FileManager.default.removeItem(at: file)
+                StudioWrap.forget(file)
                 if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
                     try? FileManager.default.removeItem(at: caches.appendingPathComponent("RecordingPictures/" + file.lastPathComponent + ".jpg"))
                 }
@@ -355,14 +393,17 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
                     var entry: [String: Any] = ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
                     if let picture = Self.picture(of: url) { entry["picture"] = "data:image/jpeg;base64," + picture.base64EncodedString() }
+                    if StudioWrap.marks(for: url) != nil { entry["wrapped"] = true }
                     return entry
                 }
-            DispatchQueue.main.async { self?.send("recordings", ["files": files]) }
+            var news: [String: Any] = ["files": files]
+            if let note = note { news["message"] = note }
+            DispatchQueue.main.async { self?.send("recordings", news) }
         }
     }
 
-    /// A small picture of a recording (a frame a second in), made once and kept in the caches
-    /// folder, which the system may empty: then it is simply made again.
+    /// A small picture of a recording (a frame a second in, past its intro if it has one), made once and
+    /// kept in the caches folder, which the system may empty: then it is simply made again.
     private static func picture(of movie: URL) -> Data? {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return nil }
         let folder = caches.appendingPathComponent("RecordingPictures", isDirectory: true)
@@ -372,7 +413,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: movie))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 480, height: 270)
-        guard let frame = (try? generator.copyCGImage(at: CMTime(seconds: 1, preferredTimescale: 600), actualTime: nil))
+        let lead = StudioWrap.marks(for: movie)?.lead ?? 0
+        guard let frame = (try? generator.copyCGImage(at: CMTime(seconds: lead + 1, preferredTimescale: 600), actualTime: nil))
                 ?? (try? generator.copyCGImage(at: .zero, actualTime: nil)),
               let data = UIImage(cgImage: frame).jpegData(compressionQuality: 0.7) else { return nil }
         try? data.write(to: kept)

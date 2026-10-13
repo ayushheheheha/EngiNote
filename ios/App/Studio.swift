@@ -180,7 +180,8 @@ final class StudioViewController: UIViewController {
         // Its length decides how far the short's start can go.
         Task { [weak self] in
             guard let self = self else { return }
-            let seconds = (try? await AVURLAsset(url: self.movie).load(.duration).seconds) ?? 0
+            var seconds = (try? await AVURLAsset(url: self.movie).load(.duration).seconds) ?? 0
+            if let marks = StudioWrap.marks(for: self.movie) { seconds -= marks.lead + marks.tail } // Studio works on the recording between them
             await MainActor.run {
                 self.length = seconds
                 self.startSlider.maximumValue = Float(max(0, seconds - 10))
@@ -247,7 +248,20 @@ final class StudioViewController: UIViewController {
         status.text = "Starting..."
         let movie = movie, intro = intro, outro = outro, cancel = cancel
         task = Task.detached(priority: .userInitiated) { [weak self] in
+            // A recording that already has its intro and outro (StudioWrap.swift): Studio works on the recording
+            // between them, under the same name, so that its pen path is found.
+            // ponytail: that is a copy (seconds, and the file's size in free space for as long); a time range through StudioRender if it hurts.
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("studio-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: scratch) }
             do {
+                var movie = movie
+                if StudioWrap.marks(for: movie) != nil {
+                    await MainActor.run { self?.status.text = "Getting the recording ready..." }
+                    try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+                    let bare = scratch.appendingPathComponent(movie.lastPathComponent)
+                    try await StudioWrap.bare(movie, to: bare)
+                    movie = bare
+                }
                 let folder = try Recorder.folder()
                 let made = try await StudioRender.run(movie: movie, options: options, intro: intro, outro: outro, folder: folder, cancel: cancel) { fraction, what in
                     DispatchQueue.main.async {

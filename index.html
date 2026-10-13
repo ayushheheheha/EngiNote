@@ -431,6 +431,9 @@
     <button id="rec-count-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Count down 3, 2, 1 before a recording starts" aria-label="Count down before recording">3s</button>
     <button id="rec-mic" class="icon-btn chip" type="button" aria-pressed="true" title="Record your voice with the screen" aria-label="Record the microphone">Mic</button>
     <button id="rec-enhance" class="icon-btn chip" type="button" aria-pressed="false" title="Enhance voice: take the background noise out of your voice" aria-label="Enhance voice">Enhance</button>
+    <!-- On: when the recording stops, the EngiKode intro goes before it and the outro after it, by copying (no
+         new video is made: ios/App/StudioWrap.swift). It can be taken off again from the recording's card. -->
+    <button id="rec-wrap" class="icon-btn chip" type="button" aria-pressed="false" title="Intro and outro: put the EngiKode intro before the recording and the outro after it, as soon as you stop" aria-label="Add the intro and outro when the recording stops">Intro</button>
     <!-- Mic check: switched on, the little picture beside it moves with what the microphone hears
          (as it would be recorded: through Enhance, if that is on). It stays through a recording. -->
     <button id="rec-check" class="icon-btn" type="button" aria-pressed="false" title="Mic check: show the sound the microphone is picking up" aria-label="Mic check">

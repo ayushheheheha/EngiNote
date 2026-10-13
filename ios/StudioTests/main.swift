@@ -284,6 +284,62 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
     }
 }
 
+// The intro and outro put straight onto a recording by copying (StudioWrap.swift), and taken off again.
+/// How many frames of picture a movie really holds: every one is decoded, so a track that cannot be played through fails here.
+func frames(in url: URL) async throws -> Int {
+    let asset = AVURLAsset(url: url)
+    guard let track = try await asset.loadTracks(withMediaType: .video).first else { return 0 }
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+    reader.add(output)
+    guard reader.startReading() else { return 0 }
+    var count = 0
+    while output.copyNextSampleBuffer() != nil { count += 1 }
+    return reader.status == .completed ? count : -1
+}
+if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.fileExists(atPath: realOutro.path) {
+    let wrapped = work.appendingPathComponent("Wrapped 2026-10-13 10.00.00.mov")
+    try FileManager.default.copyItem(at: movie, to: wrapped)
+    let bytes = { (url: URL) in (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0 }
+    let plain = bytes(wrapped), plainFrames = try await frames(in: wrapped)
+    let opens = try await AVURLAsset(url: realIntro).load(.duration).seconds, closes = try await AVURLAsset(url: realOutro).load(.duration).seconds
+
+    var clock = Date()
+    try await StudioWrap.add(to: wrapped, intro: realIntro, outro: realOutro)
+    print(String(format: "intro and outro put on in %.1f s the first time (the clips are made the recording's kind)", Date().timeIntervalSince(clock)))
+    let marks = StudioWrap.marks(for: wrapped)
+    check(abs((marks?.lead ?? 0) - opens) < 0.02 && abs((marks?.tail ?? 0) - closes) < 0.02, "it is noted how long the intro and outro on it are (\(String(describing: marks)))")
+    let joined = AVURLAsset(url: wrapped)
+    let joinedLength = try await joined.load(.duration).seconds, joinedFrames = try await frames(in: wrapped)
+    print(String(format: "with them: %.2f s, %d frames, %d KB (the recording alone: %d frames, %d KB)", joinedLength, joinedFrames, bytes(wrapped) / 1000, plainFrames, plain / 1000))
+    check(abs(joinedLength - (seconds + opens + closes)) < 0.1, "intro + recording + outro, by copying")
+    check(abs(joinedFrames - plainFrames - Int(((opens + closes) * 60).rounded())) <= 2, "every frame of the three plays, in one track")
+    let voiced = try await AudioPolish.loudness(of: joined) ?? -99
+    check(voiced > -40, "it has sound all the way (\(voiced) LUFS)")
+    for (name, at) in [("wrap-intro.png", 3.0), ("wrap-recording.png", opens + 2.5), ("wrap-last-of-recording.png", opens + seconds - 0.05), ("wrap-outro.png", opens + seconds + closes / 2)] { _ = try png(joined, at: at, to: name) }
+
+    // A second recording: the clips are there already, so this is the copy alone.
+    let second = work.appendingPathComponent("Wrapped again 2026-10-13 10.05.00.mov")
+    try FileManager.default.copyItem(at: movie, to: second)
+    clock = Date()
+    try await StudioWrap.add(to: second, intro: realIntro, outro: realOutro)
+    let copying = Date().timeIntervalSince(clock)
+    print(String(format: "put on a second recording in %.2f s", copying))
+    check(copying < 3, "with the clips ready, putting them on is only a copy")
+
+    // What Studio is given for such a recording, and taking them off again.
+    let bare = work.appendingPathComponent("bare.mov")
+    try await StudioWrap.bare(wrapped, to: bare)
+    let bareLength = try await AVURLAsset(url: bare).load(.duration).seconds
+    check(abs(bareLength - seconds) < 0.05, "the recording between them comes out whole (\(bareLength) s)")
+    _ = try png(AVURLAsset(url: bare), at: 0, to: "wrap-bare-first.png")
+    try await StudioWrap.remove(from: wrapped)
+    let backLength = try await AVURLAsset(url: wrapped).load(.duration).seconds, backFrames = try await frames(in: wrapped)
+    print(String(format: "taken off again: %.2f s, %d frames, %d KB", backLength, backFrames, bytes(wrapped) / 1000))
+    check(StudioWrap.marks(for: wrapped) == nil && abs(backLength - seconds) < 0.05 && abs(backFrames - plainFrames) <= 1, "taken off, the recording is as long as it was")
+    StudioWrap.forget(second)
+}
+
 try? FileManager.default.removeItem(at: work)
 print(failures.isEmpty ? "\nALL GOOD" : "\nFAILED: \(failures.count)")
 exit(failures.isEmpty ? 0 : 1)
