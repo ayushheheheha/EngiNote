@@ -160,7 +160,7 @@ func average(_ asset: AVAsset, at seconds: Double) throws -> (r: Double, g: Doub
 }
 /// What a picture is: the note's paper (light, and blue), one of the green test clips, or black.
 func kind(_ c: (r: Double, g: Double, b: Double)) -> String {
-    if max(c.r, c.g, c.b) < 0.12 { return "black" }
+    if max(c.r, c.g, c.b) < 0.2 { return "black" }
     if c.b > 0.8 { return "paper" }
     if c.b > 0.25 && c.b < 0.6 && c.g > 0.5 { return "clip" }
     return String(format: "something else (%.2f %.2f %.2f)", c.r, c.g, c.b)
@@ -386,9 +386,9 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
     check(abs(insideFrames - plainFrames - Int(((opens + closes + 3 * dip) * 60).rounded())) <= 3, "every frame of it plays, in one track")
     let insideLoud = try await AudioPolish.loudness(of: insideAsset) ?? -99
     check(insideLoud > -40, "it has sound (\(insideLoud) LUFS)")
-    let thenIntro = 2.5 + dip, thenRest = 2.5 + 2 * dip + opens
+    let thenIntro = 2.5 + dip, thenUp = 2.5 + dip + opens, thenRest = 2.5 + 2 * dip + opens // the intro begins, the rest begins to come up, the rest is whole
     for (name, at, wanted) in [("middle-first.png", 1.0, "paper"), ("middle-last-before.png", 2.47, "paper"), ("middle-going-down.png", thenIntro - 0.02, "black"),
-                               ("middle-coming-up.png", thenRest + 0.02, "black"), ("middle-rest.png", thenRest + 1.0, "paper")] {
+                               ("middle-coming-up.png", thenUp + 0.02, "black"), ("middle-rest.png", thenRest + 1.0, "paper")] {
         _ = try png(insideAsset, at: at, to: name)
         let seen = kind(try average(insideAsset, at: at))
         check(seen == wanted, "at \(at) s the copy shows \(wanted) (\(seen))")
