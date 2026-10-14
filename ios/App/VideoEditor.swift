@@ -44,6 +44,8 @@ fileprivate final class Clip {
     /// Pictures evenly spread over the whole recording, for the timeline; filled in as they are made.
     var thumbs: [UIImage?] = []
     var generator: AVAssetImageGenerator?
+    /// "Intro" or "Outro" for the EngiKode clips put in with those tools (drawn as such, and faded into and out of the recording); nil for a recording.
+    var tag: String?
 
     private init(url: URL, asset: AVURLAsset, video: AVAssetTrack, audio: AVAssetTrack?, videoRange: CMTimeRange, audioRange: CMTimeRange, transform: CGAffineTransform, natural: CGSize, duration: Double) {
         self.url = url
@@ -191,6 +193,10 @@ final class VideoEditor: UIViewController {
     private var splitButton = UIButton(type: .system)
     private var deleteButton = UIButton(type: .system)
     private var addButton = UIButton(type: .system)
+    private var introButton = UIButton(type: .system)
+    private var outroButton = UIButton(type: .system)
+    private let introURL = Bundle.main.url(forResource: "studio-intro", withExtension: "mp4")
+    private let outroURL = Bundle.main.url(forResource: "studio-outro", withExtension: "mp4")
     private let shield = UIView() // over everything while saving
     private let bar = UIProgressView(progressViewStyle: .default)
 
@@ -247,7 +253,9 @@ final class VideoEditor: UIViewController {
         splitButton = tool("Split", "scissors", .white, #selector(split))
         deleteButton = tool("Delete", "trash", .systemRed, #selector(remove))
         addButton = tool("Add video", "plus.rectangle.on.rectangle", .white, #selector(addTapped))
-        let tools = UIStackView(arrangedSubviews: [undoButton, redoButton, splitButton, deleteButton, addButton])
+        introButton = tool("Intro", "film", .systemYellow, #selector(introTapped))
+        outroButton = tool("Outro", "flag.checkered", .systemYellow, #selector(outroTapped))
+        let tools = UIStackView(arrangedSubviews: [undoButton, redoButton, splitButton, deleteButton, addButton, introButton, outroButton])
         tools.distribution = .fillEqually
 
         for item in [cancelButton, saveButton, title, playerView, transport, timeline, tools] as [UIView] {
@@ -301,7 +309,7 @@ final class VideoEditor: UIViewController {
             self.refresh()
         }
 
-        for button in [undoButton, redoButton, splitButton, deleteButton, addButton, saveButton, playButton] { enable(button, false) }
+        for button in [undoButton, redoButton, splitButton, deleteButton, addButton, introButton, outroButton, saveButton, playButton] { enable(button, false) }
         Task { await load() }
     }
 
@@ -449,11 +457,19 @@ final class VideoEditor: UIViewController {
         let video = AVMutableVideoComposition()
         video.renderSize = renderSize
         video.frameDuration = CMTime(value: 1, timescale: 60)
-        video.instructions = steps.map { step -> AVMutableVideoCompositionInstruction in
+        // Where the EngiKode intro or outro meets a recording the picture goes down into black and comes up out of it
+        // (the clip over 0.3 s, the recording over 0.5 s), as in Studio: the change does not jump.
+        let tagged = steps.map { $0.clip.tag != nil }
+        video.instructions = steps.enumerated().map { i, step -> AVMutableVideoCompositionInstruction in
             let instruction = AVMutableVideoCompositionInstruction()
             instruction.timeRange = step.range
             let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: picture)
             layer.setTransform(step.clip.fit(into: renderSize), at: .zero)
+            let meets = { (other: Int) in tagged.indices.contains(other) && tagged[other] != tagged[i] }
+            let fade = CMTime(seconds: min(tagged[i] ? 0.3 : 0.5, step.range.duration.seconds / 2), preferredTimescale: 600)
+            if meets(i - 1) { layer.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: CMTimeRange(start: step.range.start, duration: fade)) }
+            else if meets(i + 1) { layer.setOpacity(1, at: step.range.start) }
+            if meets(i + 1) { layer.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: CMTimeRange(start: CMTimeSubtract(step.range.end, fade), duration: fade)) }
             instruction.layerInstructions = [layer]
             return instruction
         }
@@ -492,6 +508,56 @@ final class VideoEditor: UIViewController {
                 commit(next)
             } catch {
                 problem("That recording could not be added (\(error.localizedDescription)).", leave: false)
+            }
+        }
+    }
+
+    // MARK: The intro and outro
+
+    @objc private func introTapped() { place(introURL, as: "Intro") }
+    @objc private func outroTapped() { place(outroURL, as: "Outro") }
+
+    /// Put the EngiKode clip at `url` into the edit where the playhead is: the piece under it is cut there, and the clip
+    /// goes between the halves. At the very start or end it goes before or after everything. It is a piece like any other:
+    /// it can be taken out with Delete, and Undo puts the edit back as it was.
+    private func place(_ url: URL?, as tag: String) {
+        guard let url = url, !pieces.isEmpty else { return }
+        setPlaying(false)
+        Task {
+            do {
+                let index: Int
+                if let found = clips.firstIndex(where: { $0.url == url }) {
+                    index = found
+                } else {
+                    let clip = try await Clip.open(url)
+                    clip.tag = tag
+                    clips.append(clip)
+                    timeline.clips = clips
+                    makeThumbnails(for: clip)
+                    index = clips.count - 1
+                }
+                let piece = EditPiece(clip: index, start: 0, end: clips[index].duration)
+                var next = pieces
+                var place: Int // where in the list the clip is now
+                let i = pieceIndex(pieces, at: time)
+                let local = time - pieceStart(pieces, i)
+                if time >= total - 0.05 {
+                    place = next.count
+                } else if local <= 0.1 {
+                    place = i
+                } else if pieces[i].length - local <= 0.1 {
+                    place = i + 1
+                } else {
+                    let cut = ((pieces[i].start + local) * 60).rounded() / 60 // on a frame
+                    next[i] = EditPiece(clip: pieces[i].clip, start: pieces[i].start, end: cut)
+                    next.insert(EditPiece(clip: pieces[i].clip, start: cut, end: pieces[i].end), at: i + 1)
+                    place = i + 1
+                }
+                next.insert(piece, at: place)
+                time = pieceStart(next, place) // the playhead goes to where the clip begins
+                commit(next)
+            } catch {
+                problem("The \(tag.lowercased()) could not be put in (\(error.localizedDescription)).", leave: false)
             }
         }
     }
@@ -568,6 +634,8 @@ final class VideoEditor: UIViewController {
         enable(splitButton, local > 0.1 && pieces[i].length - local > 0.1)
         enable(deleteButton, pieces.count > 1)
         enable(addButton, true)
+        enable(introButton, introURL != nil)
+        enable(outroButton, outroURL != nil)
         enable(undoButton, !undoStack.isEmpty)
         enable(redoButton, !redoStack.isEmpty)
         enable(saveButton, pieces != original)
@@ -789,6 +857,13 @@ private final class EditTimeline: UIView {
                     let index = min(clip.thumbs.count - 1, max(0, Int(min(max(at, piece.start), piece.end) / clip.duration * Double(clip.thumbs.count))))
                     clip.thumbs[index]?.draw(in: CGRect(x: x, y: top, width: tile, height: height))
                     x += tile
+                }
+                // The EngiKode intro and outro: a lime strip and their name, so they are told from the recording.
+                if let tag = clip.tag {
+                    UIColor(red: 0.875, green: 1, blue: 0.447, alpha: 1).setFill()
+                    context.fill(CGRect(x: band.minX, y: band.maxY - 5, width: band.width, height: 5))
+                    (tag as NSString).draw(at: CGPoint(x: max(band.minX, 0) + 6, y: band.minY + 4),
+                                           withAttributes: [.font: UIFont.boldSystemFont(ofSize: 12), .foregroundColor: UIColor.white, .backgroundColor: UIColor(white: 0, alpha: 0.6)])
                 }
             }
             context.restoreGState()
