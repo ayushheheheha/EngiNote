@@ -196,7 +196,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             recorder.resume()
             send("recorder", ["state": "recording"])
         case "stop":
-            stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false)
+            stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false, introAt: body["introAt"] as? Double ?? 0)
         default:
             // Asked to pause or resume a recording that is no longer running: say how things stand.
             send("recorder", ["state": "idle"])
@@ -218,8 +218,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     }
 
     /// Stop, finish the movie and tell the page. `problem`: why, if it was not the user's choice.
-    /// `wrap`: the bar's Intro switch is on, so the intro and outro go onto the recording at once.
-    private func stopRecording(because problem: String?, wrap: Bool = false) {
+    /// `wrap`: the bar's Intro switch is on, so the intro and outro go onto the recording at once; `introAt`: how many seconds in the intro goes.
+    private func stopRecording(because problem: String?, wrap: Bool = false, introAt: Double = 0) {
         bubbleTimer?.invalidate()
         bubbleTimer = nil
         guard recorder.isActive else {
@@ -260,7 +260,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 return offer()
             }
             self.send("recorder", ["state": "idle", "message": message + " Adding the intro and outro: keep EngiNote open for a moment."])
-            self.wrap(file, add: true, then: offer)
+            self.wrap(file, add: true, introAt: introAt, then: offer)
         }
     }
 
@@ -270,14 +270,14 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
 
     /// Put the intro and outro on a recording, or take them off (StudioWrap.swift): a copy of the file, not a new
     /// video, so it is quick. The page is then sent the list of recordings, with how it went.
-    private func wrap(_ file: URL, add: Bool, then: (() -> Void)? = nil) {
+    private func wrap(_ file: URL, add: Bool, introAt: Double = 0, then: (() -> Void)? = nil) {
         guard wrapping.insert(file.lastPathComponent).inserted else { return }
         let intro = Bundle.main.url(forResource: "studio-intro", withExtension: "mp4")
         let outro = Bundle.main.url(forResource: "studio-outro", withExtension: "mp4")
         Task.detached(priority: .userInitiated) { [weak self] in
             var note = add ? "Intro and outro added." : "Intro and outro removed."
             do {
-                if add { try await StudioWrap.add(to: file, intro: intro, outro: outro) } else { try await StudioWrap.remove(from: file) }
+                if add { try await StudioWrap.add(to: file, intro: intro, outro: outro, introAt: introAt) } else { try await StudioWrap.remove(from: file) }
             } catch {
                 note = "The intro and outro could not be \(add ? "added" : "removed"): \(error.localizedDescription). The recording is as it was."
             }
@@ -366,7 +366,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     present(studio, animated: true)
                 }
             case "wrap": // the intro and outro, on if they are off and off if they are on
-                wrap(file, add: StudioWrap.marks(for: file) == nil)
+                wrap(file, add: StudioWrap.marks(for: file) == nil, introAt: body["introAt"] as? Double ?? 0)
             case "delete": // the page has already asked the user if they are sure
                 try? FileManager.default.removeItem(at: file)
                 StudioWrap.forget(file)

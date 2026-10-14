@@ -283,7 +283,7 @@ try {
   };
   check('touches that land just after the stylus wrote are taken for the palm', pinch(10300) === 1);
 
-  const nib = svg.querySelector('circle');
+  const nib = (svg.nextElementSibling || svg).querySelector('circle');   // on the live layer beside the svg
   fire('pointermove', 60, 60, 'pen', 2, { t: 11000, buttons: 0 });
   check('a hovering stylus shows a preview of the tip and draws nothing',
     nib.style.display !== 'none' && +nib.getAttribute('cx') === 60 && +nib.getAttribute('cy') === 60 &&
@@ -309,6 +309,43 @@ try {
   check('a drawing tool\'s preview is hidden while the stylus is drawing', previewWhileDrawing === 'none');
   check('...and the pinch it cut short is reported as ended, once', endsAtPenDown === endsBefore + 1 && zoomEnds === endsBefore + 1);
   ink.undo();
+
+  // A pinch is the last two fingers to land, whatever else is on the glass, and however far each has gone.
+  {
+    const was = zoomed, ends = zoomEnds;
+    fire('pointerdown', 10, 290, 'touch', 41, { t: 50000 });   // a thumb resting at the edge of the screen
+    fire('pointerdown', 100, 250, 'touch', 42, { t: 50100 });
+    fire('pointerdown', 190, 250, 'touch', 43, { t: 50100 });
+    fire('pointermove', 280, 250, 'touch', 43, { t: 50116 });  // 90 apart, then 180
+    fire('pointerup', 280, 250, 'touch', 43, { t: 50200 });
+    fire('pointerup', 100, 250, 'touch', 42, { t: 50200 });
+    fire('pointerup', 10, 290, 'touch', 41, { t: 50300 });
+    check('a thumb resting on the screen does not stop two other fingers pinching', Math.abs(zoomed / was - 2) < 0.01 && zoomEnds === ends + 1);
+  }
+  {
+    const was = zoomed;
+    fire('pointerdown', 100, 250, 'touch', 42, { t: 51000 });
+    fire('pointerdown', 190, 250, 'touch', 43, { t: 51000 });
+    fire('pointermove', 90, 250, 'touch', 42, { t: 51016 });   // one finger goes well past the slop: 90 apart to 100
+    fire('pointermove', 195, 250, 'touch', 43, { t: 51032 });  // the other only 5px: 100 apart to 105, which still counts
+    fire('pointerup', 195, 250, 'touch', 43, { t: 51100 });
+    fire('pointerup', 90, 250, 'touch', 42, { t: 51100 });
+    check('a pinch counts the small steps of the finger that has not travelled far', Math.abs(zoomed / was - 105 / 90) < 0.01);
+  }
+  {
+    fire('pointerdown', 100, 250, 'touch', 42, { t: 52000 });
+    fire('pointerdown', 190, 250, 'touch', 43, { t: 52000 });
+    fire('pointermove', 280, 250, 'touch', 43, { t: 52016 });
+    fire('pointerup', 100, 250, 'touch', 42, { t: 52100 });    // one finger lifts, the other stays down
+    const was = zoomed, ends = zoomEnds, top = scrollY;
+    fire('pointermove', 280, 100, 'touch', 43, { t: 52116 });
+    check('the finger left down after a pinch does not scroll or zoom on its own', zoomed === was && scrollY === top);
+    fire('pointerdown', 150, 100, 'touch', 44, { t: 52200 });   // ...but a new finger pinches with it again
+    fire('pointermove', 40, 100, 'touch', 44, { t: 52216 });    // 130 apart, then 240
+    fire('pointerup', 40, 100, 'touch', 44, { t: 52300 });
+    fire('pointerup', 280, 100, 'touch', 43, { t: 52300 });
+    check('...a new finger pinches with it again, without both being lifted', zoomed / was > 1.5 && zoomEnds === ends + 1);
+  }
 
   // A finger tap: down and up on the same spot `held` ms apart.
   const tap = (t, x = 200, y = 150, held = 80) => {

@@ -22,6 +22,10 @@ final class StudioViewController: UIViewController {
     private let startLabel = UILabel()
     private let lengthPicker = UISegmentedControl(items: ["30 s", "45 s", "60 s", "90 s"])
     private let shortBox = UIStackView()
+    // Where the intro goes: seconds into the recording (0: before it), by slider and, to the second, by stepper.
+    private let introBox = UIStackView()
+    private let introSlider = UISlider(), introStepper = UIStepper()
+    private let introLabel = UILabel()
     private let makeButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
     private let progress = UIProgressView(progressViewStyle: .bar)
@@ -106,7 +110,23 @@ final class StudioViewController: UIViewController {
             : (sidecar == nil ? "Needs a recording made straight in EngiNote: this one was trimmed or edited, or made before Studio." : "The pen was not used in this recording."),
             zoomSwitch, key: "zoom", fallback: true, available: hasPen)
         let polish = row("Polish the voice", "Takes out rumble, evens out loud and quiet words, and sets the loudness to what YouTube plays at.", polishSwitch, key: "polish", fallback: true)
-        let start = row("Intro", intro == nil ? "Not in this build." : "The EngiKode intro video, before the recording.", introSwitch, key: "intro", fallback: true, available: intro != nil)
+        let start = row("Intro", intro == nil ? "Not in this build." : "The EngiKode intro video: at the start, or where you choose, so that you can speak first.", introSwitch, key: "intro", fallback: true, available: intro != nil)
+
+        // Where the intro goes.
+        introSlider.minimumTrackTintColor = UIColor(red: 0.875, green: 1, blue: 0.447, alpha: 1)
+        introSlider.addTarget(self, action: #selector(introMoved), for: .valueChanged)
+        introStepper.addTarget(self, action: #selector(introStepped), for: .valueChanged)
+        introStepper.stepValue = 1
+        introLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        introLabel.textColor = .white
+        introLabel.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        let introRow = UIStackView(arrangedSubviews: [UILabel.plain("Plays at"), introSlider, introLabel, introStepper])
+        introRow.spacing = 12
+        introRow.alignment = .center
+        introBox.axis = .vertical
+        introBox.isLayoutMarginsRelativeArrangement = true
+        introBox.layoutMargins = UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16)
+        introBox.addArrangedSubview(introRow)
         let end = row("Outro", outro == nil ? "Not in this build." : "The EngiKode outro, after the recording.", outroSwitch, key: "outro", fallback: true, available: outro != nil)
         let short = row("Also make a vertical short", "A 9:16 video for Shorts and Reels: the writing, zoomed, with your face and the channel below.", shortSwitch, key: "short", fallback: false)
 
@@ -153,7 +173,7 @@ final class StudioViewController: UIViewController {
         sound.numberOfLines = 0
         sound.isHidden = sound.text == nil
 
-        let stack = UIStackView(arrangedSubviews: [name, sound, zoom, polish, start, end, short, shortBox, makeButton, progress, status])
+        let stack = UIStackView(arrangedSubviews: [name, sound, zoom, polish, start, introBox, end, short, shortBox, makeButton, progress, status])
         stack.axis = .vertical
         stack.spacing = 12
         stack.setCustomSpacing(sound.isHidden ? 18 : 6, after: name)
@@ -187,6 +207,11 @@ final class StudioViewController: UIViewController {
                 self.startSlider.maximumValue = Float(max(0, seconds - 10))
                 self.startSlider.value = 0
                 self.startMoved()
+                // The intro can go anywhere in it, but with a second of it left after: the outro comes from there.
+                let far = max(0, seconds - 1)
+                self.introSlider.maximumValue = Float(far)
+                self.introStepper.maximumValue = far.rounded(.down)
+                self.setIntroAt(min(far, self.defaults.double(forKey: "studio.introAt")), remember: false)
             }
         }
         refreshShortBox()
@@ -196,7 +221,20 @@ final class StudioViewController: UIViewController {
 
     private func refreshShortBox() {
         shortBox.isHidden = !shortSwitch.isOn
+        introBox.isHidden = !(introSwitch.isOn && intro != nil)
     }
+
+    /// Where the intro goes, in whole seconds, shown and remembered.
+    private func setIntroAt(_ seconds: Double, remember: Bool = true) {
+        let whole = seconds.rounded()
+        introSlider.value = Float(whole)
+        introStepper.value = whole
+        introLabel.text = whole == 0 ? "the start" : time(whole)
+        if remember { defaults.set(whole, forKey: "studio.introAt") }
+    }
+
+    @objc private func introMoved() { setIntroAt(Double(introSlider.value)) }
+    @objc private func introStepped() { setIntroAt(introStepper.value) }
 
     private func time(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())
@@ -212,8 +250,10 @@ final class StudioViewController: UIViewController {
 
     private func setBusy(_ busy: Bool) {
         optionViews.forEach { $0.alpha = busy ? 0.4 : 1; $0.isUserInteractionEnabled = !busy }
-        shortBox.alpha = busy ? 0.4 : 1
-        shortBox.isUserInteractionEnabled = !busy
+        for box in [shortBox, introBox] {
+            box.alpha = busy ? 0.4 : 1
+            box.isUserInteractionEnabled = !busy
+        }
         progress.isHidden = !busy
         makeButton.setTitle(busy ? "Stop" : "Make the video", for: .normal)
         UIApplication.shared.isIdleTimerDisabled = busy // the screen must not lock part-way through
@@ -234,6 +274,7 @@ final class StudioViewController: UIViewController {
         options.autoZoom = zoomSwitch.isOn
         options.polish = polishSwitch.isOn
         options.intro = introSwitch.isOn && intro != nil
+        options.introAt = introStepper.value
         options.outro = outroSwitch.isOn && outro != nil
         options.short = shortSwitch.isOn
         options.shortStart = Double(startSlider.value)

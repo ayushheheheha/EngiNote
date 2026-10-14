@@ -7,6 +7,8 @@ struct StudioOptions {
     var autoZoom = true
     var polish = true
     var intro = true
+    /// Seconds into the recording where the intro goes (0: before it). What is said before it plays first.
+    var introAt = 0.0
     var outro = true
     /// Also make a vertical short of `shortLength` seconds starting at `shortStart`.
     var short = false
@@ -118,17 +120,31 @@ enum StudioRender {
                 cursor = CMTimeAdd(cursor, length)
             }
             let opens = options.intro && intro != nil, closes = options.outro && outro != nil
-            if opens, let intro = intro { try await add(clip: intro, fadeOut: dip.clip) }
-            let start = cursor
-            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: video, at: start)
             let voiceSource = voice ?? asset
-            if let a = try await voiceSource.loadTracks(withMediaType: .audio).first {
-                let length = min(duration, try await voiceSource.load(.duration))
-                try sound?.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: a, at: start)
+            let voiceTrack = try await voiceSource.loadTracks(withMediaType: .audio).first
+            let voiceLength = min(duration, try await voiceSource.load(.duration))
+            /// The next stretch of the video is the recording from `from` to `to` (its own time), with its picture and voice.
+            func add(recording from: CMTime, to end: CMTime, fadeIn: Double, fadeOut: Double) throws {
+                let length = CMTimeSubtract(end, from)
+                guard length.seconds > 0 else { return }
+                try track.insertTimeRange(CMTimeRange(start: from, duration: length), of: video, at: cursor)
+                let heard = CMTimeSubtract(min(end, voiceLength), from)
+                if let a = voiceTrack, heard.seconds > 0 { try sound?.insertTimeRange(CMTimeRange(start: from, duration: heard), of: a, at: cursor) }
+                instructions.append(StudioInstruction(range: CMTimeRange(start: cursor, duration: length), kind: .main, job: job, trackID: track.trackID, shift: from.seconds - cursor.seconds,
+                                                      transform: transform, fadeIn: fadeIn, fadeOut: fadeOut))
+                cursor = CMTimeAdd(cursor, length)
             }
-            instructions.append(StudioInstruction(range: CMTimeRange(start: start, duration: duration), kind: .main, job: job, trackID: track.trackID, shift: -start.seconds, transform: transform,
-                                                  fadeIn: opens ? dip.recording : 0, fadeOut: closes ? dip.recording : 0))
-            cursor = CMTimeAdd(start, duration)
+            // The intro goes `introAt` seconds in, on a whole frame and with a second of the recording left after it: what is said
+            // before it plays first, then the intro (the picture going down into black and coming up out of it), then the rest.
+            let cut = CMTime(value: Int64((min(max(0, options.introAt), max(0, duration.seconds - 1)) * 60).rounded(.down)), timescale: 60)
+            if opens, let intro = intro, cut.seconds > 0 {
+                try add(recording: .zero, to: cut, fadeIn: 0, fadeOut: dip.recording)
+                try await add(clip: intro, fadeIn: dip.clip, fadeOut: dip.clip)
+                try add(recording: cut, to: duration, fadeIn: dip.recording, fadeOut: closes ? dip.recording : 0)
+            } else {
+                if opens, let intro = intro { try await add(clip: intro, fadeOut: dip.clip) }
+                try add(recording: .zero, to: duration, fadeIn: opens ? dip.recording : 0, fadeOut: closes ? dip.recording : 0)
+            }
             if closes, let outro = outro { try await add(clip: outro, fadeIn: dip.clip) }
 
             let composed = AVMutableVideoComposition()

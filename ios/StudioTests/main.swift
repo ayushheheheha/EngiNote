@@ -144,6 +144,28 @@ func png(_ asset: AVAsset, at seconds: Double, to name: String) throws -> CGSize
     return CGSize(width: image.width, height: image.height)
 }
 
+/// The average colour of the picture at `seconds` (0 to 1 each): enough to tell the recording's paper from a clip or from black.
+func average(_ asset: AVAsset, at seconds: Double) throws -> (r: Double, g: Double, b: Double) {
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    let image = try generator.copyCGImage(at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil)
+    var pixel = [UInt8](repeating: 0, count: 4)
+    pixel.withUnsafeMutableBytes { bytes in
+        let ctx = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+    return (Double(pixel[0]) / 255, Double(pixel[1]) / 255, Double(pixel[2]) / 255)
+}
+/// What a picture is: the note's paper (light, and blue), one of the green test clips, or black.
+func kind(_ c: (r: Double, g: Double, b: Double)) -> String {
+    if max(c.r, c.g, c.b) < 0.12 { return "black" }
+    if c.b > 0.8 { return "paper" }
+    if c.b > 0.25 && c.b < 0.6 && c.g > 0.5 { return "clip" }
+    return String(format: "something else (%.2f %.2f %.2f)", c.r, c.g, c.b)
+}
+
 // MARK: The test
 
 let work = FileManager.default.temporaryDirectory.appendingPathComponent("studio-test-\(UUID().uuidString)", isDirectory: true)
@@ -266,6 +288,28 @@ if finished.files.count == 2 {
     print("video file:", fileSize / 1000, "KB")
 }
 
+// The intro part-way in (Studio): what is said first plays, then the intro, then the rest of the recording.
+do {
+    var placed = StudioOptions()
+    placed.autoZoom = false
+    placed.polish = false
+    placed.introAt = 2.5
+    let part = try await StudioRender.run(movie: movie, options: placed, intro: intro, outro: outro, folder: out.appendingPathComponent("mid", isDirectory: true).createdFolder(), cancel: StudioCancel()) { _, _ in }
+    check(part.files.count == 1, "a video with the intro part-way in is made")
+    if let file = part.files.first {
+        let asset = AVURLAsset(url: file)
+        let length = try await asset.load(.duration).seconds
+        check(abs(length - (seconds + 2)) < 0.3, "it is the recording with the intro and outro in it (\(length) s)")
+        // The intro is 1 s, put in at 2.5 s: the recording to 2.5, the intro 2.5 to 3.5, the rest from 3.5.
+        for (name, at, wanted) in [("mid-render-before.png", 1.0, "paper"), ("mid-render-going-down.png", 2.47, "black"), ("mid-render-intro.png", 3.0, "clip"),
+                                   ("mid-render-coming-up.png", 3.53, "black"), ("mid-render-after.png", 5.0, "paper")] {
+            _ = try png(asset, at: at, to: name)
+            let seen = kind(try average(asset, at: at))
+            check(seen == wanted, "at \(at) s the video shows \(wanted) (\(seen))")
+        }
+    }
+}
+
 // The real intro and outro, as the app carries them: they must read, fit and play after the recording.
 let realIntro = URL(fileURLWithPath: "ios/App/studio-intro.mp4"), realOutro = URL(fileURLWithPath: "ios/App/studio-outro.mp4")
 if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.fileExists(atPath: realOutro.path) {
@@ -329,6 +373,44 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
     let copying = Date().timeIntervalSince(clock)
     print(String(format: "put on a second recording in %.2f s", copying))
     check(copying < 3, "with the clips ready, putting them on is only a copy")
+
+    // The intro part-way in: what is said first plays, the picture goes down into black, the intro, up out of black, the rest.
+    let middle = work.appendingPathComponent("Middle 2026-10-13 10.10.00.mov")
+    try FileManager.default.copyItem(at: movie, to: middle)
+    try await StudioWrap.add(to: middle, intro: realIntro, outro: realOutro, introAt: 2.5)
+    let inside = StudioWrap.marks(for: middle)
+    check(abs((inside?.at ?? 0) - 2.5) < 0.02 && abs((inside?.lead ?? 0) - opens - 2 * dip) < 0.02 && abs((inside?.tail ?? 0) - closes - dip) < 0.02, "it is noted where the intro is, and how long it and the outro are (\(String(describing: inside)))")
+    let insideAsset = AVURLAsset(url: middle)
+    let insideLength = try await insideAsset.load(.duration).seconds, insideFrames = try await frames(in: middle)
+    check(abs(insideLength - (seconds + opens + closes + 3 * dip)) < 0.1, "recording + intro + outro, by copying, with three fades (\(insideLength) s)")
+    check(abs(insideFrames - plainFrames - Int(((opens + closes + 3 * dip) * 60).rounded())) <= 3, "every frame of it plays, in one track")
+    let insideLoud = try await AudioPolish.loudness(of: insideAsset) ?? -99
+    check(insideLoud > -40, "it has sound (\(insideLoud) LUFS)")
+    let thenIntro = 2.5 + dip, thenRest = 2.5 + 2 * dip + opens
+    for (name, at, wanted) in [("middle-first.png", 1.0, "paper"), ("middle-last-before.png", 2.47, "paper"), ("middle-going-down.png", thenIntro - 0.02, "black"),
+                               ("middle-coming-up.png", thenRest + 0.02, "black"), ("middle-rest.png", thenRest + 1.0, "paper")] {
+        _ = try png(insideAsset, at: at, to: name)
+        let seen = kind(try average(insideAsset, at: at))
+        check(seen == wanted, "at \(at) s the copy shows \(wanted) (\(seen))")
+    }
+    // The recording's own frame at the place is the one that comes up out of black: the pen is where it was.
+    _ = try png(insideAsset, at: 2.45, to: "middle-before-cut.png")
+    _ = try png(insideAsset, at: thenRest + 0.4, to: "middle-after-cut.png")
+    let middleBare = work.appendingPathComponent("middle-bare.mov")
+    try await StudioWrap.bare(middle, to: middleBare)
+    let middleBareLength = try await AVURLAsset(url: middleBare).load(.duration).seconds, middleBareFrames = try await frames(in: middleBare)
+    check(abs(middleBareLength - seconds) < 0.06 && abs(middleBareFrames - plainFrames) <= 2, "the recording comes out whole from round the intro (\(middleBareLength) s, \(middleBareFrames) frames)")
+    try await StudioWrap.remove(from: middle)
+    let middleBack = try await AVURLAsset(url: middle).load(.duration).seconds
+    check(StudioWrap.marks(for: middle) == nil && abs(middleBack - seconds) < 0.06, "taken off, it is as long as it was")
+    StudioWrap.forget(middle)
+
+    // An intro asked for too late is put as late as there is room, not past the end.
+    let late = work.appendingPathComponent("Late 2026-10-13 10.12.00.mov")
+    try FileManager.default.copyItem(at: movie, to: late)
+    try await StudioWrap.add(to: late, intro: realIntro, outro: realOutro, introAt: 600)
+    check(abs((StudioWrap.marks(for: late)?.at ?? 0) - (seconds - 1)) < 0.02, "an intro asked for after the end goes a second before it (\(String(describing: StudioWrap.marks(for: late))))")
+    StudioWrap.forget(late)
 
     // What Studio is given for such a recording, and taking them off again.
     let bare = work.appendingPathComponent("bare.mov")

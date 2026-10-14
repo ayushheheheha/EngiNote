@@ -238,7 +238,11 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
   // use it is decided here exactly as for a pen (so a palm can no more move ink than leave a mark); what
   // its gesture does is the handler's business (see setHandler). A gesture is {id, touch, at, own}, `own` its handler.
   const handlers = {};
-  const pans = new Map();   // pointers that pan: id -> {x, y, ox, oy, touch, live}; two of them also pinch-zoom
+  // Pointers that pan: id -> {x, y, ox, oy, touch, live, spent}, in the order they landed. The last two also pinch-zoom:
+  // a thumb resting on the glass from before, or a finger whose lift was never reported, is no part of a pinch.
+  // `spent`: a pinch ended while this finger was still down, so alone it no longer scrolls (it may join a new pinch).
+  const pans = new Map();
+  let team = [];            // ids of the two fingers of the gesture in progress; a third touch landing later does not change it
   let grab = null;          // the page point a two-finger gesture took hold of; it stays under the fingers' centre
   let zooming = false;      // onZoom has been called in the current two-finger gesture, so onZoomEnd is owed
   // Fingers scroll and zoom; only a stylus or mouse draws. That is the palm rejection that matters:
@@ -508,9 +512,15 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     else if (strokes !== a.before) { strokes = a.before; render(); }
   }
 
-  // Centre of the panning pointers and, with two or more, the distance between the first two.
+  // The pointers that scroll, or with two, pinch: the last two to land (until one of them lifts).
+  function members() {
+    if (team.length < 2 || !team.every(id => pans.has(id))) team = [...pans.keys()].slice(-2);
+    return team.map(id => pans.get(id));
+  }
+
+  // Centre of those pointers and, with two, the distance between them.
   function grip() {
-    const pts = [...pans.values()];
+    const pts = members();
     return {
       x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
       y: pts.reduce((sum, p) => sum + p.y, 0) / pts.length,
@@ -563,6 +573,9 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (isPen) {
       penDown = true;
       lastContact = e.timeStamp;
+      // Caught at once: a stylus that lands on the margin, or lifts over the toolbar, must still be heard lifting,
+      // or penDown would stay set and every finger after it would be taken for a palm.
+      try { surface.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
       dropPalms();
     } else if (isTouch && (penDown || e.timeStamp - lastContact < PALM_AFTER_PEN)) {
       // Lands while the stylus is writing or the instant it lifted: a palm. It joins no gesture,
@@ -636,10 +649,12 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       const from = grip();
       p.x = e.clientX;
       p.y = e.clientY;
-      // Nothing scrolls under a stroke in progress, or for a touch that has not really moved yet.
-      if (!p.live || act || !scroller) return;
+      // Nothing scrolls under a stroke in progress, or for a touch that has not really moved yet (a pinch
+      // is on once either finger has: the other one's small steps count too). Nor does a finger left over from a pinch.
+      const pair = members(), pinching = pair.length > 1;
+      if (act || !scroller || !pair.includes(p) || (pinching ? !pair.some(q => q.live) || pair.every(q => q.spent) : !p.live || p.spent)) return;
       const to = grip();
-      if (pans.size > 1) {
+      if (pinching) {
         // Two fingers pan and zoom in one step: the app zooms by the change in their spread and puts
         // the grabbed page point back under their centre. That point is named once, as the gesture
         // really starts (the first move past the slop), not re-read on every move: re-reading is
@@ -720,31 +735,32 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     }
     noPress();
     const f = fingers.get(e.pointerId);
+    let tapped = null;   // what a tap calls, once this lift has been fully noted: a callback that throws must not leave a finger on record
     if (f) {
       fingers.delete(e.pointerId);
       // A short, still touch by one finger is a tap; two of them close together are a double tap.
       // Not while fingers draw: there a tap is a dot.
       const tap = !fingerDraw && !penDown && f.solo && e.type === 'pointerup' && e.timeStamp - f.t < TAP_MS &&
         Math.hypot(e.clientX - f.x, e.clientY - f.y) < PAN_SLOP;
-      if (tap && lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS &&
-          Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_DIST) {
-        lastTap = null;
-        if (onDoubleTap) onDoubleTap();
-      } else if (tap) {
-        lastTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-      }
-      if (tap && onTap) {
-        const pt = toPoint(e);
-        if (pt) onTap(pt);
-      }
+      const double = tap && lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS &&
+        Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_DIST;
+      lastTap = double ? null : tap ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : lastTap;
+      tapped = () => {
+        if (double && onDoubleTap) onDoubleTap();
+        if (tap && onTap) {
+          const pt = toPoint(e);
+          if (pt) onTap(pt);
+        }
+      };
     }
     if (pans.has(e.pointerId)) {
-      // A two-finger gesture ends as a whole when either finger lifts: the one still down must not
-      // carry on as a scroll, or the page would slide and fling away as the hand leaves.
-      const pinch = pans.size > 1;
-      if (pinch) pans.clear();
-      else pans.delete(e.pointerId);
-      endZoom();
+      // A two-finger gesture ends when either of its fingers lifts: the one still down must not
+      // carry on as a scroll, or the page would slide and fling away as the hand leaves. It stays on
+      // record, though, so that a finger landing next pinches with it: one pinch is rarely enough.
+      const pinch = pans.size > 1 && members().includes(pans.get(e.pointerId));
+      pans.delete(e.pointerId);
+      if (pinch) for (const p of pans.values()) p.spent = true;
+      if (pinch || !pans.size) endZoom();
       svg.style.cursor = CURSORS[tool];
       const flick = !pinch && vel && e.type === 'pointerup' && e.pointerType !== 'mouse' && e.timeStamp - vel.t < 60;
       if (flick) coast();
@@ -756,6 +772,7 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
       nib.style.display = 'none';   // the eraser's ring goes with the gesture...
       showNib(e);                   // ...unless a stylus or mouse is still hovering there
     }
+    if (tapped) tapped();
   }
 
   surface.addEventListener('pointerdown', down);

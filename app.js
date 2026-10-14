@@ -206,6 +206,8 @@ let videos = [];      // [{ name, size, modified }], newest first, as the app la
 let inVideos = false; // the library is showing them
 // Every message is answered with the list as it then stands.
 const askVideos = (message = { action: 'list' }) => shellVideos?.postMessage(message);
+// Where in a recording its intro goes, in seconds (0: before it): typed in the recording bar, kept on this device.
+const introAt = () => { try { return Math.max(0, Math.floor(+localStorage.getItem('recIntroAt')) || 0); } catch { return 0; } };
 addEventListener('recordings', e => {
   videos = (Array.isArray(e.detail?.files) ? e.detail.files : [])
     .filter(v => v && typeof v.name === 'string')
@@ -299,7 +301,11 @@ function makeVideoCard(video) {
   wrap.setAttribute('aria-label', wrap.title);
   wrap.setAttribute('aria-pressed', Boolean(video.wrapped));
   wrap.innerHTML = WRAP_ICON;
-  wrap.onclick = () => { notify(video.wrapped ? 'Taking the intro and outro off...' : 'Adding the intro and outro...'); act('wrap'); };
+  wrap.onclick = () => {
+    const at = introAt();
+    notify(video.wrapped ? 'Taking the intro and outro off...' : at ? `Adding the intro (at ${at} s) and the outro...` : 'Adding the intro and outro...');
+    askVideos({ action: 'wrap', name: video.name, introAt: at });
+  };
   edit.before(wrap);
   return card;
 }
@@ -1793,6 +1799,13 @@ if (shellRecorder) {
   const enhanceOn = option(recEnhance, 'recEnhance');
   const countOn = option($('rec-count-btn'), 'recCount', undefined, true); // 3, 2, 1 before a recording starts
   const wrapOn = option($('rec-wrap'), 'recWrap'); // the intro and outro go onto the recording as it stops; asked at the stop, so it can still be changed while recording
+  const introBox = $('rec-intro-at'); // ...the intro `introBox` seconds into it (0: before it)
+  introBox.value = introAt();
+  const introSeconds = () => Math.max(0, Math.floor(+introBox.value) || 0);
+  introBox.onchange = () => {
+    introBox.value = introSeconds();
+    try { localStorage.setItem('recIntroAt', introBox.value); } catch { /* lasts for this visit only */ }
+  };
   // 'idle', 'recording' or 'paused'. The clock counts recorded time only: `done` ms from before the
   // last pause, plus the time since `since` while it runs.
   let state = 'idle', done = 0, since = 0, ticker = 0;
@@ -1862,7 +1875,7 @@ if (shellRecorder) {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
       ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), title: nameInput.value, wide: document.body.classList.contains('wide') }
-      : { action: 'stop', wrap: wrapOn() });
+      : { action: 'stop', wrap: wrapOn(), introAt: introSeconds() });
   };
 
   // The countdown: 3, 2, 1 in the middle of the note, and only then is the app asked to record. So
