@@ -1800,6 +1800,10 @@ if (shellRecorder) {
   const countOn = option($('rec-count-btn'), 'recCount', undefined, true); // 3, 2, 1 before a recording starts
   const wrapOn = option($('rec-wrap'), 'recWrap'); // the intro and outro go onto the recording as it stops; asked at the stop, so it can still be changed while recording
   const introBox = $('rec-intro-at'); // ...the intro `introBox` seconds into it (0: before it)
+  // The usual places, to pick from (a typed number would raise the keyboard, which pushes the screen up and the video with it); Studio has the exact second.
+  const spots = [0, ...Array.from({ length: 12 }, (_, i) => 5 * (i + 1)), 75, 90, 105, 120, 150, 180, 240, 300];
+  if (!spots.includes(introAt())) spots.push(introAt()); // a place chosen before the picker, or another way
+  introBox.replaceChildren(...spots.sort((a, b) => a - b).map(n => new Option(n ? `${n} s` : 'start', n)));
   introBox.value = introAt();
   const introSeconds = () => Math.max(0, Math.floor(+introBox.value) || 0);
   introBox.onchange = () => {
