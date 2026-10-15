@@ -57,14 +57,22 @@ export function createGhost(surface) {
     draw(e.clientX, e.clientY, known ? e.azimuthAngle : LEAN, known ? e.altitudeAngle : UPRIGHT, 0, 0);
   }
 
-  // Hovering or writing: the shadow follows the tip either way. (The app's hover reports stop at the touch, so while writing the page's own events take over.)
-  const follow = e => { if (e.pointerType === 'pen' && on && performance.now() - fromApp >= NATIVE_FOR) fromPointer(e); };
+  // Hovering or writing: the shadow follows the tip either way. While the pen is down (writing) only the page's own
+  // pointer events are used, the very ones the ink is drawn from, so the shadow cannot lag or stick on an old hover report.
+  let down = false;
+  const follow = e => {
+    if (e.pointerType !== 'pen') return;
+    if (e.type === 'pointerdown') down = true;
+    if (on && (down || performance.now() - fromApp >= NATIVE_FOR)) fromPointer(e);
+  };
   surface.addEventListener('pointermove', follow, { passive: true });
   surface.addEventListener('pointerdown', follow, { passive: true });
-  for (const type of ['pointerleave', 'pointercancel']) surface.addEventListener(type, () => { if (performance.now() - fromApp >= NATIVE_FOR) hide(); }, { passive: true });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) surface.addEventListener(type, e => { if (e.pointerType === 'pen') down = false; }, { passive: true });
+  for (const type of ['pointerleave', 'pointercancel']) surface.addEventListener(type, () => { if (!down && performance.now() - fromApp >= NATIVE_FOR) hide(); }, { passive: true });
 
   // From the iPad app: { x, y, az, alt, roll, z } while hovering, { end: true } when it stops.
   addEventListener('pencilhover', e => {
+    if (down) return; // writing: the page's own events place the shadow
     const d = e.detail || {};
     fromApp = performance.now();
     if (d.end) fromApp = -Infinity; // the pen touched down (or left): the page's pointer events carry on from here
