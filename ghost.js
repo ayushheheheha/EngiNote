@@ -16,7 +16,7 @@
 const LEAN = -0.8;       // rad: where the pen points when the device does not say (up and right, as a right hand holds it)
 const UPRIGHT = 0.9;     // rad: how upright it is, likewise
 const SHORTEST = 0.4;    // a pen standing straight up casts this much of its length
-const GONE_AFTER = 5000; // ms: a hovering stylus that has gone out of range without a word is let go of after this
+const GONE_AFTER = 60000; // ms: a hovering stylus that has gone out of range without a word is let go of after this (a held-still pen sends nothing, so not short)
 const NATIVE_FOR = 1200; // ms after a report from the app during which the page's own pointer events are not used
 
 const SVG = '<svg width="190" height="26" viewBox="0 -13 190 26" aria-hidden="true"><defs>' +
