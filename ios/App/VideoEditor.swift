@@ -433,10 +433,12 @@ final class VideoEditor: UIViewController {
     /// The kept pieces, one after the other, as a movie. With recordings added, each piece is laid
     /// into the same picture size (`video`), whatever size it was made at; with just the one, the
     /// movie is simply turned as that recording is and there is no `video`.
-    private func makeComposition() -> (movie: AVMutableComposition, video: AVMutableVideoComposition?) {
+    private func makeComposition() -> (movie: AVMutableComposition, video: AVMutableVideoComposition?, mix: AVAudioMix?) {
         let composition = AVMutableComposition()
         let picture = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-        let sound = clips.contains { $0.audio != nil } ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) : nil
+        // One audio track per source: recordings, the intro and the outro differ in rate and channels, and one shared track
+        // made a file YouTube re-encoded without the sound of the clips that differ from the first.
+        var sounds: [Int: AVMutableCompositionTrack] = [:]
         let used = Set(pieces.map { $0.clip })
         let several = used.count > 1
         if !several, let only = used.first, clips.indices.contains(only) { picture?.preferredTransform = clips[only].transform }
@@ -448,12 +450,20 @@ final class VideoEditor: UIViewController {
             // A track may end a hair before the file does: ask only for what it has.
             try? picture?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: clip.videoRange), of: clip.video, at: at)
             if let heard = clip.audio {
-                try? sound?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: clip.audioRange), of: heard, at: at)
+                if sounds[piece.clip] == nil { sounds[piece.clip] = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) }
+                try? sounds[piece.clip]?.insertTimeRange(CMTimeRangeGetIntersection(range, otherRange: clip.audioRange), of: heard, at: at)
             }
             steps.append((CMTimeRange(start: at, duration: range.duration), clip))
             at = CMTimeAdd(at, range.duration)
         }
-        guard several, let picture = picture else { return (composition, nil) }
+        // Going through an audio mix makes the export mix every source into one uniform stream.
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = sounds.values.map { track in
+            let parameters = AVMutableAudioMixInputParameters(track: track)
+            parameters.setVolume(1, at: .zero)
+            return parameters
+        }
+        guard several, let picture = picture else { return (composition, nil, mix) }
         let video = AVMutableVideoComposition()
         video.renderSize = renderSize
         video.frameDuration = CMTime(value: 1, timescale: 60)
@@ -473,13 +483,14 @@ final class VideoEditor: UIViewController {
             instruction.layerInstructions = [layer]
             return instruction
         }
-        return (composition, video)
+        return (composition, video, mix)
     }
 
     private func rebuild() {
         let made = makeComposition()
         let item = AVPlayerItem(asset: made.movie)
         item.videoComposition = made.video
+        item.audioMix = made.mix
         player.replaceCurrentItem(with: item)
         seek()
     }
@@ -709,6 +720,7 @@ final class VideoEditor: UIViewController {
             return
         }
         session.videoComposition = made.video
+        session.audioMix = made.mix
         session.outputURL = target
         session.outputFileType = .mov
         exporting = session
