@@ -434,8 +434,8 @@
     <!-- On: when the recording stops, the EngiKode intro goes before it and the outro after it, by copying (no
          new video is made: ios/App/StudioWrap.swift). It can be taken off again from the recording's card. -->
     <button id="rec-wrap" class="icon-btn chip" type="button" aria-pressed="false" title="Intro and outro: put the EngiKode intro before the recording and the outro after it, as soon as you stop" aria-label="Add the intro and outro when the recording stops">Intro</button>
-    <!-- Where the intro goes, in seconds into the recording: 0 is before it, 30 is after the first half minute (you speak, then the intro video plays). Shown while Intro is on. A picker, not a typed number: the keyboard would push the screen up, and the video with it. -->
-    <label class="rec-at" title="Where the intro goes, in seconds into the recording: 0 before it, 30 after the first half minute">at <select id="rec-intro-at" aria-label="Seconds into the recording where the intro goes"></select></label>
+    <!-- Where the intro goes, in seconds into the recording: 0 is before it, 30 is after the first half minute (you speak, then the intro video plays). Shown while Intro is on. Typed (the exact second wanted). -->
+    <label class="rec-at" title="Where the intro goes, in seconds into the recording: 0 before it, 30 after the first half minute">at <input id="rec-intro-at" type="number" inputmode="numeric" min="0" step="1" placeholder="0" aria-label="Seconds into the recording where the intro goes"> s</label>
     <!-- Mic check: switched on, the little picture beside it moves with what the microphone hears
          (as it would be recorded: through Enhance, if that is on). It stays through a recording. -->
     <button id="rec-check" class="icon-btn" type="button" aria-pressed="false" title="Mic check: show the sound the microphone is picking up" aria-label="Mic check">

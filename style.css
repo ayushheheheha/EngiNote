@@ -1080,7 +1080,7 @@ body.paused #rec-time { color: var(--muted); }
 }
 /* Where the intro goes: beside the Intro button, there while it is on. */
 .rec-at { display: flex; align-items: center; gap: 4px; height: var(--hit); padding: 0 12px; border-radius: 999px; background: var(--fill); font-size: 16px; }
-.rec-at select { padding: 0; border: 0; background: none; color: inherit; font: inherit; -webkit-appearance: none; appearance: none; }
+.rec-at input { width: 3.5em; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: right; -moz-appearance: textfield; appearance: textfield; }
 #rec-wrap[aria-pressed="false"] + .rec-at { display: none; }
 #rec-bar :disabled { opacity: .45; }
 /* The button that puts the bar away is an arrow towards the corner; away, it is the red dot that
