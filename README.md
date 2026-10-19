@@ -31,7 +31,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 
 **Getting around**
 - Fingers scroll and pinch to zoom; only the stylus (or mouse) draws, so a resting palm never leaves a mark. A toggle lets fingers draw instead.
-- Pinch-zoom snaps to fit-width when you get close to it.
+- Pinch-zoom holds at fit-width when you get close to it: the page slows, stops while your fingers pass it and speeds up again with no jump, and the zoom label says "Fit" while it is held (`detent.js`, checked by `node detent.test.mjs`).
 - Light and dark themes.
 - Full screen, with the tools in a thin rail at the side.
 - A small arrow hides the toolbar and brings it back.

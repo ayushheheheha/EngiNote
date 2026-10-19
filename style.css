@@ -680,6 +680,8 @@ body.in-videos .lib-tabs { visibility: hidden; }
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
+/* While a pinch holds the sheet at fit-width (app.js, pinchMove). */
+#zoom-label.caught { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 /* The window onto the note. It does not scroll: app.js places the sheet in it (see "the view" there). */
 #scroller {

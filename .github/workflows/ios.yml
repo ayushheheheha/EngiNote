@@ -32,7 +32,7 @@ jobs:
       - name: Put the web app inside the iOS project
         run: |
           mkdir -p ios/web
-          cp index.html style.css app.js ink.js lasso.js shapes.js pages.js notebook.js space.js export.js ghost.js calc.js tabs.js items.js cover.js cover-fonts.js thumbs.js pdfimport.js pdfjs.min.js pdfjs.worker.min.js pdfjs.LICENSE.txt perfect-freehand.js icon.svg apple-touch-icon.png ios/web/
+          cp index.html style.css app.js ink.js lasso.js shapes.js pages.js notebook.js space.js export.js ghost.js calc.js tabs.js detent.js items.js cover.js cover-fonts.js thumbs.js pdfimport.js pdfjs.min.js pdfjs.worker.min.js pdfjs.LICENSE.txt perfect-freehand.js icon.svg apple-touch-icon.png ios/web/
           ls -l ios/web
 
       - name: Generate the Xcode project

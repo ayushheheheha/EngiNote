@@ -9,6 +9,7 @@ import { createThumbs } from './thumbs.js';
 import { createGhost } from './ghost.js';
 import { createCalc } from './calc.js';
 import { createTabs, MAX_TABS } from './tabs.js';
+import { detent, undetent, EASE } from './detent.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -717,7 +718,8 @@ const layoutTabs = () => { noteTabs.style.top = `${toolbar.offsetHeight + 6}px`;
 const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-const showZoom = (value = zoom) => { $('zoom-label').textContent = Math.round(value * 100) + '%'; };
+const zoomLabel = $('zoom-label');
+const showZoom = (value = zoom) => { zoomLabel.textContent = Math.round(value * 100) + '%'; zoomLabel.classList.remove('caught'); };
 
 // The window's top-left corner on screen.
 function origin() {
@@ -795,32 +797,46 @@ function setZoom(value, cx, cy, hold) {
 // it already has. So a pinch redraws nothing and lays out nothing, and the point the fingers hold
 // stays under them to a fraction of a pixel. The note is redrawn sharp once, when they lift.
 //
-// The fit-width zoom is a magnet: a pinch that comes within MAGNET of it is held there, the sheet
-// centred across the window, until the fingers have pulled clearly past. `raw` is the zoom the
-// fingers alone ask for; `zoom` is what is shown.
+// The fit-width zoom holds the sheet a little (detent.js): as the fingers come to it the sheet slows,
+// stops while they pass it, and speeds up again as they leave, with no jump anywhere. The zoom label
+// says "Fit" while it is held. `dd` is how far the sheet's zoom is from fit-width (log), `d` how far the
+// fingers' is; the two differ only once the hold is on. A pinch that starts within its reach (a note
+// opens at fit-width) moves freely at first, or a small pinch would be swallowed: the hold takes over once
+// the sheet has left its reach.
 let pinch = null;
-const MAGNET = 0.07;      // how close counts: 7% either side of the fit-width zoom
-const MAGNET_PULL = 150;  // ms the sheet takes to be drawn in to the magnet, or to spring off it
 
 function pinchMove(factor, x, y, hold) {
-  pinch ??= { raw: zoom, held: false, since: -Infinity, armed: false };
-  pinch.raw = clampZoom(pinch.raw * factor);
-  const fit = clampZoom(fitZoom()), near = Math.abs(Math.log(pinch.raw / fit)) < MAGNET;
-  // A note opens at fit-width, so a pinch that starts there is inside the magnet: held, it would do
-  // nothing until the fingers had gone 7% (a small pinch, the commonest, seemed to be ignored). The magnet
-  // takes hold only once the fingers have been clear of it, i.e. when they come back to fit-width.
-  if (!near) pinch.armed = true;
-  const held = near && pinch.armed;
-  if (held !== pinch.held) pinch.since = performance.now();
-  pinch.held = held;
-  pinch.zoom = held ? fit : pinch.raw;
+  const fit = clampZoom(fitZoom()), step = Math.log(factor);
+  if (!pinch) {
+    const dd = Math.log(zoom / fit);
+    pinch = { dd, d: Math.abs(dd) > EASE ? undetent(dd) : null };
+  }
+  if (pinch.d !== null) {
+    pinch.d += step;
+    pinch.dd = detent(pinch.d);
+  } else {
+    pinch.dd += step;
+    if (Math.abs(pinch.dd) > EASE) pinch.d = undetent(pinch.dd);
+  }
+  let z = fit * Math.exp(pinch.dd);
+  const bounded = clampZoom(z);
+  if (bounded !== z) { // the zoom limits: the fingers' zoom comes back to the sheet's, so that pinching the other way moves it at once
+    z = bounded;
+    pinch.dd = Math.log(z / fit);
+    if (pinch.d !== null) pinch.d = undetent(pinch.dd);
+  }
+  pinch.zoom = z;
+  const held = pinch.d !== null && pinch.dd === 0;
   const [left, top] = origin();
-  pinch.at = [x - left - hold[0] * pinch.zoom, y - top - hold[1] * pinch.zoom];
-  if (held) pinch.at[0] = (scroller.clientWidth - PAGE_WIDTH * fit) / 2;
-  // Catching and letting go are a jump in size: for a moment the sheet eases across it instead.
-  mover.style.transition = performance.now() - pinch.since < MAGNET_PULL ? 'transform .1s ease-out' : '';
-  mover.style.transform = `translate(${pinch.at[0]}px, ${pinch.at[1]}px) scale(${pinch.zoom / zoom})`;
-  showZoom(pinch.zoom);
+  pinch.at = [x - left - hold[0] * z, y - top - hold[1] * z];
+  if (pinch.d !== null) { // near fit-width the sheet also draws in to the middle of the window, the more the nearer it is
+    const t = Math.min(1, Math.abs(pinch.dd) / 0.08), centred = (scroller.clientWidth - PAGE_WIDTH * z) / 2, pull = 1 - t * t * (3 - 2 * t);
+    pinch.at[0] += (centred - pinch.at[0]) * pull;
+  }
+  mover.style.transition = '';
+  mover.style.transform = `translate(${pinch.at[0]}px, ${pinch.at[1]}px) scale(${z / zoom})`;
+  showZoom(z);
+  if (held) { zoomLabel.textContent = 'Fit'; zoomLabel.classList.add('caught'); }
 }
 
 function pinchEnd() {
