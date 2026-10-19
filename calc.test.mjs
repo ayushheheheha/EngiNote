@@ -66,5 +66,22 @@ check('html power', sumHtml('x^2'.replace('x', '5')), '5<sup>2</sup>');
 check('html x⁻¹', sumHtml('4^(−1)'), '4<sup>−1</sup>');
 check('html inverse', sumHtml('asin(1⁄2)'), 'sin⁻¹(<span class="frac"><span>1</span><span>2</span></span>)');
 
+// the cursor is drawn where it is, inside a fraction or a power when that is where the next digit goes
+const C = '<i class="caret"></i>', F = (a, b) => `<span class="frac"><span>${a}</span><span>${b}</span></span>`;
+check('caret at the start', sumHtml('12', 0), C + '12');
+check('caret between digits', sumHtml('12', 1), '1' + C + '2');
+check('caret at the end', sumHtml('1+2', 3), '1+2' + C);
+check('caret in a numerator', sumHtml('12⁄34', 1), F('1' + C + '2', '34'));
+check('caret at the end of a numerator', sumHtml('12⁄34', 2), F('12' + C, '34'));
+check('caret at the start of a denominator', sumHtml('12⁄34', 3), F('12', C + '34'));
+check('caret at the end of a denominator', sumHtml('12⁄34', 5), F('12', '34' + C));
+check('caret in an empty denominator', sumHtml('3⁄', 2), F('3', C + '<i class="box"></i>'));
+check('caret after a fraction and a sign', sumHtml('3⁄4+', 4), F('3', '4') + '+' + C);
+check('caret in a power', sumHtml('5^23', 3), '5<sup>2' + C + '3</sup>');
+check('caret at the start of a power', sumHtml('5^23', 2), '5<sup>' + C + '23</sup>');
+check('caret in x⁻¹', sumHtml('4^(−1)', 5), '4<sup>−1' + C + '</sup>');
+check('caret in a mixed number', sumHtml('1⌟34⁄5', 3), '1' + F('3' + C + '4', '5'));
+check('no caret asked, none drawn', sumHtml('12⁄34'), F('12', '34'));
+
 console.log(bad ? `${bad} failed` : 'all passed');
 process.exit(bad ? 1 : 0);
