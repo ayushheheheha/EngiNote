@@ -428,15 +428,87 @@ export function createCalc({ panel, button, host }) {
     panel.style.left = `${pos.x}px`;
     panel.style.top = `${pos.y}px`;
   }
-  const show = on => {
-    panel.hidden = !on;
-    button.setAttribute('aria-pressed', on);
-    if (on) place();
+
+  /* Motion, as iOS moves things: the pane grows out of the toolbar's button and goes back into it; the dash
+     takes it down to a chip, and out of the chip again. It is placed with left and top, never a transform, so
+     the one `transform` these use is the only one it has (the iPad drops a transform that another property
+     moves alongside). One motion at a time: a tap in the middle of one finishes it, and goes on from there. */
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const SOFT = 'cubic-bezier(.32, .72, 0, 1)'; // iOS: a quick start and a long, soft landing
+  let motion = null;                           // { animations, done }
+  const stop = () => {
+    if (!motion) return;
+    const { animations, done } = motion;
+    motion = null;
+    done();
+    for (const a of animations) a.cancel();
   };
-  button.addEventListener('click', () => show(panel.hidden));
+  const go = (animations, done) => {
+    stop();
+    const m = motion = { animations, done };
+    let left = animations.length;
+    for (const a of animations) {
+      a.onfinish = () => {
+        if (motion !== m || --left) return;
+        motion = null;
+        done();
+        for (const x of animations) x.cancel(); // what a motion held at its end (fill) is let go once the real state is the same
+      };
+    }
+  };
+  // Where the toolbar's button is, as a point of the pane: what it grows from and shrinks to.
+  const towardsButton = () => {
+    const b = button.getBoundingClientRect(), r = panel.getBoundingClientRect();
+    return b.width ? `${b.left + b.width / 2 - r.left}px ${b.top + b.height / 2 - r.top}px` : '50% 0';
+  };
+
+  let open = false;
+  const show = on => {
+    if (on === open) return;
+    open = on;
+    button.setAttribute('aria-pressed', on);
+    stop();
+    if (on) {
+      panel.hidden = false;
+      place();
+      if (still.matches) return;
+      panel.style.transformOrigin = towardsButton();
+      go([panel.animate([{ transform: 'scale(.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 480, easing: 'cubic-bezier(.3, 1.25, .5, 1)' })],
+        () => { panel.style.transformOrigin = ''; });
+    } else if (still.matches) {
+      panel.hidden = true;
+    } else {
+      panel.style.transformOrigin = towardsButton();
+      go([panel.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(.4)', opacity: 0 }], { duration: 260, easing: 'cubic-bezier(.5, 0, .9, .6)', fill: 'forwards' })],
+        () => { panel.hidden = true; panel.style.transformOrigin = ''; });
+    }
+  };
+
+  // Down to a chip, or back up: the pane's box glides from the old one to the new, and its body fades out as it goes
+  // (in as it comes), kept in view meanwhile (.morphing) so that it is not cut off at once.
+  const boxOf = () => ({ left: `${pos.x}px`, top: `${pos.y}px`, width: `${panel.offsetWidth}px`, height: `${panel.offsetHeight}px` });
+  function shrink(chip) {
+    if (chip === panel.classList.contains('min')) return;
+    stop();
+    const was = boxOf();
+    panel.classList.toggle('min', chip);
+    place(); // a pane near the bottom edge has to move up to grow
+    const now = boxOf();
+    save();
+    if (still.matches) return;
+    panel.classList.add('morphing');
+    const body = chip ? { frames: [{ opacity: 1 }, { opacity: 0 }], duration: 260, delay: 0 } : { frames: [{ opacity: 0 }, { opacity: 1 }], duration: 340, delay: 140 };
+    go([
+      panel.animate([was, now], { duration: 520, easing: SOFT }),
+      ...[display, keys].map(el => el.animate(body.frames, { duration: body.duration, delay: body.delay, easing: 'ease', fill: 'both' })),
+      mini.animate([{ opacity: chip ? 0 : 1 }, { opacity: chip ? 1 : 0 }], { duration: 260, delay: chip ? 220 : 0, easing: 'ease', fill: 'both' }),
+    ], () => panel.classList.remove('morphing'));
+  }
+
+  button.addEventListener('click', () => show(!open));
   $('#calc-close').addEventListener('click', () => show(false));
-  $('#calc-min').addEventListener('click', () => { panel.classList.toggle('min'); place(); save(); });
-  addEventListener('resize', () => { if (!panel.hidden) place(); });
+  $('#calc-min').addEventListener('click', () => shrink(!panel.classList.contains('min')));
+  addEventListener('resize', () => { if (open) place(); });
 
   // Dragged by the handle; a finger or the Pencil, kept inside the note's window.
   const grip = $('#calc-grip');

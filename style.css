@@ -1344,17 +1344,16 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
   touch-action: none; /* a finger on it never scrolls or zooms the note */
   --key: rgb(255 255 255 / .78);
   --key-fn: rgb(110 120 145 / .16);
-  animation: calc-in .18s ease;
 }
 :root[data-theme="dark"] #calc { --key: rgb(255 255 255 / .13); --key-fn: rgb(255 255 255 / .07); box-shadow: var(--rim), 0 24px 60px rgb(0 0 0 / .6); }
-@keyframes calc-in { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { #calc { animation: none; } }
 
 .calc-head { display: flex; align-items: center; gap: 6px; height: 36px; }
 .calc-hb { display: grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--fill); color: var(--muted); }
 .calc-hb .icon { width: 15px; height: 15px; }
-.calc-hb .v { display: none; }
-#calc.min .calc-hb .v { display: inline; }
+/* The dash becomes a plus: its upright stroke grows out of the middle. */
+.calc-hb .v { transform-box: fill-box; transform-origin: center; transform: scaleY(0); opacity: 0; transition: transform .45s cubic-bezier(.32, .72, 0, 1), opacity .25s ease; }
+#calc.min .calc-hb .v { transform: scaleY(1); opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .calc-hb .v { transition: none; } }
 /* The handle: wide enough to catch a finger, with a bar to show it is one; when shrunk, the last answer beside it. */
 #calc-grip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; height: 36px; min-width: 0; touch-action: none; cursor: grab; }
 #calc-grip .bar { flex: none; width: 44px; height: 5px; border-radius: 3px; background: var(--border); }
@@ -1363,6 +1362,10 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 #calc.min #calc-mini { display: block; }
 #calc.min #calc-grip .bar { display: none; }
 #calc.min #calc-disp, #calc.min #calc-keys { display: none; }
+/* While the pane moves between its sizes, its body stays (faded by calc.js) and what does not fit is cut off. */
+#calc.morphing { overflow: hidden; }
+#calc.min.morphing #calc-disp { display: flex; }
+#calc.min.morphing #calc-keys { display: grid; }
 
 /* The screen: the sum above, the answer below. While a sum is being typed, it is the large line. */
 #calc-disp { display: flex; flex-direction: column; justify-content: flex-end; height: 126px; margin-top: 4px; padding: 8px 14px 10px; border-radius: 16px; background: rgb(110 120 145 / .12); box-shadow: inset 0 1px 3px rgb(20 25 40 / .1); text-align: right; font-variant-numeric: tabular-nums; }
