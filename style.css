@@ -1323,3 +1323,76 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 
 /* "Paste picture", which a long press with a finger brings up where the finger is (app.js). */
 #paste-pill { position: fixed; z-index: 8; padding: 0 22px; white-space: nowrap; color: var(--accent); user-select: none; -webkit-user-select: none; }
+
+/* ---------- The calculator (calc.js) ---------- */
+
+/* Placed by calc.js with left and top (no transform: see the notes on the iPad), over the note and its toolbar. */
+#calc {
+  position: absolute;
+  z-index: 6;
+  width: min(424px, calc(100% - 12px));
+  padding: 8px 12px 14px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, var(--sheen), transparent 40%), var(--glass-thick);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--rim), 0 2px 4px rgb(20 25 40 / .08), 0 24px 60px rgb(20 25 40 / .28);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none; /* a finger on it never scrolls or zooms the note */
+  --key: rgb(255 255 255 / .78);
+  --key-fn: rgb(110 120 145 / .16);
+  animation: calc-in .18s ease;
+}
+:root[data-theme="dark"] #calc { --key: rgb(255 255 255 / .13); --key-fn: rgb(255 255 255 / .07); box-shadow: var(--rim), 0 24px 60px rgb(0 0 0 / .6); }
+@keyframes calc-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #calc { animation: none; } }
+
+.calc-head { display: flex; align-items: center; gap: 6px; height: 36px; }
+.calc-hb { display: grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--fill); color: var(--muted); }
+.calc-hb .icon { width: 15px; height: 15px; }
+.calc-hb .v { display: none; }
+#calc.min .calc-hb .v { display: inline; }
+/* The handle: wide enough to catch a finger, with a bar to show it is one; when shrunk, the last answer beside it. */
+#calc-grip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; height: 36px; min-width: 0; touch-action: none; cursor: grab; }
+#calc-grip .bar { flex: none; width: 44px; height: 5px; border-radius: 3px; background: var(--border); }
+#calc-mini { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#calc.min { width: 230px; padding-bottom: 8px; }
+#calc.min #calc-mini { display: block; }
+#calc.min #calc-grip .bar { display: none; }
+#calc.min #calc-disp, #calc.min #calc-keys { display: none; }
+
+/* The screen: the sum above, the answer below. While a sum is being typed, it is the large line. */
+#calc-disp { display: flex; flex-direction: column; justify-content: flex-end; height: 126px; margin-top: 4px; padding: 8px 14px 10px; border-radius: 16px; background: rgb(110 120 145 / .12); box-shadow: inset 0 1px 3px rgb(20 25 40 / .1); text-align: right; font-variant-numeric: tabular-nums; }
+#calc-ex { overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none; font-size: 19px; line-height: 1.5; color: var(--muted); }
+#calc-ex::-webkit-scrollbar { display: none; }
+#calc-disp.typing #calc-ex { font-size: 26px; color: var(--text); }
+#calc-re { min-height: 46px; font-size: 40px; font-weight: 600; line-height: 46px; letter-spacing: -.02em; white-space: nowrap; }
+#calc-disp.typing #calc-re { min-height: 0; height: 0; opacity: 0; }
+#calc-disp.typing:has(#calc-ex:empty) #calc-re { min-height: 46px; height: auto; opacity: 1; } /* nothing typed: a 0 */
+#calc-disp.bad #calc-re { font-size: 26px; color: var(--danger); }
+#calc-disp sup { font-size: .62em; line-height: 0; }
+/* A fraction written as in a book: the top over a bar over the bottom. */
+#calc-disp .frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 .12em; font-size: .78em; line-height: 1.1; }
+#calc-disp .frac > span:first-child { padding: 0 .15em .06em; border-bottom: .08em solid currentColor; }
+#calc-disp .frac > span:last-child { padding: .06em .15em 0; }
+#calc-re .frac { font-size: .8em; }
+
+#calc-keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 10px; }
+.k { display: grid; place-items: center; height: 44px; padding: 0; border: 0; border-radius: 13px; font-size: 16px; font-weight: 500; background: var(--key); box-shadow: inset 0 1px 0 rgb(255 255 255 / .5), 0 1px 2px rgb(20 25 40 / .14), 0 0 0 1px rgb(120 128 150 / .16); }
+.k.fn { background: var(--key-fn); font-size: 14px; box-shadow: inset 0 1px 0 rgb(255 255 255 / .35), 0 0 0 1px rgb(120 128 150 / .12); }
+.k.op { background: var(--accent-soft); color: var(--accent); font-size: 20px; font-weight: 600; }
+.k.eq { background: var(--accent); color: #fff; font-size: 20px; font-weight: 600; box-shadow: inset 0 1px 0 rgb(255 255 255 / .4), 0 6px 14px rgb(47 111 237 / .35); }
+.k.clr { color: var(--danger); }
+.k.tog { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.k.tog.on { background: var(--accent); color: #fff; }
+.k.wide { grid-column: span 2; }
+.k sup { font-size: .65em; line-height: 0; }
+.k .frac { display: inline-flex; flex-direction: column; align-items: center; font-size: 9px; line-height: 1; }
+.k .frac > span:first-child { padding-bottom: 1px; border-bottom: 1px solid currentColor; }
+.k .frac > span:last-child { padding-top: 1px; }
+@media (hover: hover) { .k:hover { filter: brightness(1.05); } }
+.k > span { display: inline-flex; align-items: center; gap: 1px; }
+/* What is still to be typed in a fraction: an empty box, drawn here (a font may have no such sign). */
+.box { display: inline-block; width: .5em; height: .72em; border: 1.5px solid currentColor; border-radius: 2px; opacity: .55; vertical-align: -.05em; }
+.k .box { width: 6px; height: 8px; border-width: 1px; }

@@ -7,6 +7,7 @@ import { createSpace } from './space.js';
 import { exportDoc, printDoc, pinUnits } from './export.js';
 import { createThumbs } from './thumbs.js';
 import { createGhost } from './ghost.js';
+import { createCalc } from './calc.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -952,6 +953,8 @@ const lasso = createLasso(svg, ink, lassoBar, () => {
 }, itemsView);
 // The faint shadow of the Apple Pencil while it hovers (ghost.js); the settings flyout turns it off.
 const ghost = createGhost(scroller);
+// The scientific calculator (calc.js), floating over the note.
+createCalc({ panel: $('calc'), button: $('calc-btn'), host: $('editor') });
 // "Add space": a blank page put into a paged note, a gap opened in a file (space.js).
 const space = createSpace({ button: $('space-btn'), mover, frame, ink, note: () => current, resize: measure });
 
