@@ -388,7 +388,7 @@ export function createCalc({ panel, button, host }) {
   /* Placing, moving, showing */
   function place() {
     const h = host.getBoundingClientRect(), w = panel.offsetWidth, ht = panel.offsetHeight;
-    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) { pos.x = h.width - w - 20; pos.y = 84; }
+    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) { pos.x = h.width - w - 20; pos.y = 130; } // 130: clear of the toolbar and the tabs
     pos.x = Math.min(Math.max(pos.x, 6), Math.max(6, h.width - w - 6));
     pos.y = Math.min(Math.max(pos.y, 6), Math.max(6, h.height - ht - 6));
     panel.style.left = `${pos.x}px`;

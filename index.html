@@ -355,6 +355,18 @@
       </button>
     </div>
 
+    <!-- The notes that are open (tabs.js; app.js opens and saves them): a strip under the toolbar. The + offers the
+         recent notes that are not open, and the library. Not shown in the 16:9 window, nor with the rail or the tools put away. -->
+    <div id="note-tabs" class="strip" role="group" aria-label="Open notes">
+      <div id="note-tab-list" role="tablist"></div>
+      <div id="tab-add-wrap" class="tool-wrap">
+        <button id="tab-add" class="icon-btn" type="button" title="Open another note in a new tab" aria-label="Open another note" aria-haspopup="true" aria-expanded="false">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <div id="tab-menu" class="flyout menu"></div>
+      </div>
+    </div>
+
     <!-- The window onto the note. It does not scroll: app.js moves #mover inside it and scales #page (see "the view" there). -->
     <div id="scroller">
       <div id="mover">

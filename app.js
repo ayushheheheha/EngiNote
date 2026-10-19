@@ -8,6 +8,7 @@ import { exportDoc, printDoc, pinUnits } from './export.js';
 import { createThumbs } from './thumbs.js';
 import { createGhost } from './ghost.js';
 import { createCalc } from './calc.js';
+import { createTabs, MAX_TABS } from './tabs.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -26,6 +27,7 @@ const message = $('message'), cardTemplate = $('card-template'), folderName = $(
 const androidPost = window.AndroidShell && (body => window.AndroidShell.postMessage(JSON.stringify(body)));
 
 let current = null;      // the note open in the editor, or null in the library
+let restoreView = null;  // { pos }: where an open note (a tab coming back) is to be scrolled to, once it has loaded
 let zoom = 1;
 let pageHeight = MIN_HEIGHT;
 let saveTimer = 0;
@@ -395,6 +397,8 @@ function makeCard(doc, folders) {
   card.querySelector('.card-delete').onclick = async () => {
     if (!confirm(`Delete "${doc.name}"? This cannot be undone.`)) return;
     await db.del(doc.id).catch(() => notify('Could not delete the note.'));
+    const tab = openTabs.find(doc.id);
+    if (tab) openTabs.remove(tab);
     showLibrary();
   };
   card.querySelector('.card-copy').onclick = () => duplicate(doc);
@@ -706,8 +710,11 @@ const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 // The toolbar floats over the top of the window, a sheet of glass with the note passing beneath it
 // (style.css). So the sheet's resting place, at the start of the note, is below the toolbar. In
 // full screen the tools are a rail beside the window, and nothing is in the way.
-const toolbar = $('toolbar');
-const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight); // .tools-off: the toolbar is put away
+const toolbar = $('toolbar'), noteTabs = $('note-tabs');
+// The strip of open notes hangs under the toolbar and is as much in the way (it is not there in the 16:9 window, the rail, or with the tools put away: style.css).
+const tabsHeight = () => (noteTabs.offsetHeight ? noteTabs.offsetHeight + 6 : 0);
+const layoutTabs = () => { noteTabs.style.top = `${toolbar.offsetHeight + 6}px`; };
+const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const showZoom = (value = zoom) => { $('zoom-label').textContent = Math.round(value * 100) + '%'; };
@@ -836,6 +843,7 @@ const fitZoom = () => (scroller.clientWidth - GUTTER) / PAGE_WIDTH;
 // The room for the sheet changed (tablet rotated, window resized, full screen toggled).
 let lastFit = Infinity;
 function refit() {
+  layoutTabs();
   layoutPages();
   if (!current) return;
   const fit = fitZoom();
@@ -892,6 +900,7 @@ frame.addEventListener('load', () => {
   pinViewportUnits(doc);
   space.loaded(); // the Add space mode (space.js) finds the note's gaps in it
   measure();
+  if (restoreView) { place(restoreView.pos); restoreView = null; } // a tab coming back: only now is the note as tall as it was
 });
 
 // Make the sheet as tall as the open note is: a paged note, its pages; a file, what is in it. Also
@@ -1442,12 +1451,65 @@ const flush = () => {
 addEventListener('pagehide', flush);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); }); // the app went to the background
 
+// The notes open at once (tabs.js). Each tab keeps, for the time another note is in front, where its note was
+// scrolled to, its zoom and its undo steps; `stamp` says which version of the note those belong to.
+const openTabs = createTabs({
+  list: $('note-tab-list'),
+  onOpen: tab => { if (tab !== openTabs.active) openDoc(tab.id); },
+  onClose: tab => closeTab(tab),
+  onCloseOthers: async tab => {
+    if (tab !== openTabs.active) await openDoc(tab.id);
+    if (openTabs.active === tab) openTabs.keepOnly(tab);
+  },
+});
+
+// Everything is saved: what is being typed, and the note itself, until nothing changes under the saving.
+async function settle() {
+  do await flush(); while (saveTimer);
+}
+
+// The tab in front keeps its place, zoom and undo for when it is next in front.
+function remember() {
+  const tab = openTabs.active;
+  if (!tab || !current) return;
+  tab.view = { pos: pos.slice(), zoom };
+  tab.history = ink.getHistory();
+  tab.stamp = current.updatedAt;
+}
+
+// Open a note: in a tab of its own, or, if it is already open, the tab it is in. One at a time: a second tap
+// while the first is still being opened is ignored.
+let opening = false;
 async function openDoc(id) {
+  if (opening) return;
+  opening = true;
+  try { await swapTo(id); } finally { opening = false; }
+}
+async function swapTo(id) {
+  const had = openTabs.find(id);
+  if (current && had === openTabs.active) return;
+  nameInput.blur(); // a name being typed is kept before the note goes
   const doc = await db.get(id).catch(() => null);
-  if (!doc) return notify('That note could not be opened.');
+  if (!doc) {
+    if (had) openTabs.remove(had);
+    return notify('That note could not be opened.');
+  }
+  if (current) await settle(); // the note being left is saved; from here to the swap below nothing waits, so nothing can be written and lost
+  remember();
+  if (!had && openTabs.isFull()) { // the oldest tab (never the one in front) makes room; its note is saved, only its place and undo are lost
+    const gone = openTabs.list().find(t => t !== openTabs.active);
+    openTabs.remove(gone);
+    notify(`${MAX_TABS} notes at most: the tab "${gone.name}" was closed.`);
+  }
+  const tab = had ?? openTabs.add({ id });
+  tab.name = doc.name;
+  tab.kind = doc.paper ? 'notebook' : 'file';
+  lasso.clear();
   current = doc;
+  openTabs.activate(tab);
   pagesStale = true;
   document.body.classList.add('editing'); // must be visible before fitZoom() measures the scroller
+  layoutTabs();
   nameInput.value = doc.name;
   space.set(false);
   setPageHeight(doc.pages ? pagesHeight(doc) : MIN_HEIGHT); // a file: reset before load so the last note's height can't inflate the measurement
@@ -1457,27 +1519,85 @@ async function openDoc(id) {
   ghost.dark(!!dark); // a shadow on black paper is a light one
   const items = cleanItems(doc.items);
   ink.load(doc.strokes || [], items);
+  if (tab.history && tab.stamp === doc.updatedAt) ink.setHistory(tab.history); // the undo it had, if the note is as it was left
   itemsView.render(items);
   refreshHistory();
   lastFit = fitZoom();
   resetZoom(Math.min(1, lastFit));
+  restoreView = null;
+  if (tab.view) { // back to where it was: the zoom now, the place once the note has loaded (a file is as tall as it was only then)
+    zoom = clampZoom(tab.view.zoom);
+    layout();
+    showZoom();
+    place(tab.view.pos);
+    restoreView = tab.view;
+  }
   showPages();
 }
 
-async function closeDoc() {
-  await flush();
+// To the library. A lone note is closed (as it always was); with others open, the tabs wait there.
+// `keep`: the tabs wait in any case, a lone one too.
+async function closeDoc(keep = false) {
+  nameInput.blur();
+  await settle();
+  remember();
+  if (!keep && openTabs.list().length <= 1) openTabs.clear(); else openTabs.activate(null);
   lasso.clear();
   current = null;
   frame.srcdoc = ''; // drop the document; also guarantees a reload if the same note is reopened
   showPages();
   showLibrary();
 }
-$('back-btn').onclick = closeDoc;
+$('back-btn').onclick = () => closeDoc();
+
+// The cross of a tab. The one in front gives way to its neighbour; the last one left is the same as Back.
+async function closeTab(tab) {
+  if (tab !== openTabs.active) return openTabs.remove(tab);
+  const list = openTabs.list(), i = list.indexOf(tab), next = list[i + 1] ?? list[i - 1];
+  if (!next) return closeDoc();
+  await openDoc(next.id);
+  if (openTabs.active !== tab) openTabs.remove(tab);
+}
+
+// The + : the notes most recently written in that are not open, and the library for the rest.
+const tabMenu = $('tab-menu'), tabAddFly = flyout($('tab-add-wrap'), $('tab-add'));
+$('tab-add').onclick = async () => {
+  if ($('tab-add-wrap').classList.contains('open')) return tabAddFly.set(false);
+  const all = await db.all().catch(() => []);
+  const open = new Set(openTabs.list().map(t => t.id));
+  const choice = (text, cls, go) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `btn-secondary ${cls}`;
+    b.textContent = text;
+    b.onclick = () => { tabAddFly.set(false); go(); };
+    return b;
+  };
+  tabMenu.replaceChildren(
+    ...all.filter(d => d.type !== 'folder' && !open.has(d.id)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map(d => choice(d.name, '', () => openDoc(d.id))),
+    choice('All notes…', 'all', () => closeDoc(true)));
+  tabMenu.classList.remove('flip');
+  tabAddFly.set(true);
+  tabMenu.classList.toggle('flip', tabMenu.getBoundingClientRect().right > innerWidth - 8); // too far right: open towards the left
+};
+
+// A recording shows which tab it began in.
+{
+  let was = false;
+  new MutationObserver(() => {
+    const on = document.body.classList.contains('recording');
+    if (on === was) return;
+    was = on;
+    openTabs.recording(on ? openTabs.active?.id ?? null : null);
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+}
+
 
 // "change" fires on Enter and on blur, only when the text was edited.
 nameInput.addEventListener('change', () => {
   current.name = nameInput.value.trim() || 'Untitled';
   nameInput.value = current.name;
+  if (openTabs.active) { openTabs.active.name = current.name; openTabs.render(); }
   touch();
 });
 nameInput.addEventListener('keydown', e => {
@@ -1511,7 +1631,7 @@ function pageAt() {
 }
 // Below the toolbar, or at the top where the toolbar is a rail or put away.
 function layoutPages() {
-  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? 10 : toolbar.offsetHeight + 8}px`;
+  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
 }
 function showPages() {
   const paged = !!current?.pages;

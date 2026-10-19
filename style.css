@@ -1396,3 +1396,43 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 /* What is still to be typed in a fraction: an empty box, drawn here (a font may have no such sign). */
 .box { display: inline-block; width: .5em; height: .72em; border: 1.5px solid currentColor; border-radius: 2px; opacity: .55; vertical-align: -.05em; }
 .k .box { width: 6px; height: 8px; border-width: 1px; }
+
+/* ---------- Open notes: the tabs (tabs.js) ---------- */
+
+/* A glass strip under the toolbar (app.js puts its top there). Its tabs shrink, their names cut with …, rather than the strip growing. */
+#note-tabs {
+  position: absolute;
+  left: 12px;
+  top: 64px;
+  z-index: 4;
+  flex-wrap: nowrap;
+  gap: 3px;
+  max-width: calc(100% - 96px); /* room at the right for the toolbar's arrow */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+#note-tab-list { display: flex; gap: 3px; min-width: 0; }
+.note-tab { display: flex; align-items: center; flex: 0 1 auto; width: 190px; min-width: 84px; height: 36px; border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--muted); }
+.note-tab.on { background: rgb(255 255 255 / .95); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgb(20 25 40 / .16), 0 0 0 1px rgb(120 128 150 / .16); }
+:root[data-theme="dark"] .note-tab.on { background: rgb(255 255 255 / .16); box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), 0 0 0 1px rgb(255 255 255 / .08); }
+.note-tab-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 36px; padding: 0 2px 0 13px; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; text-align: left; }
+.note-tab-open .icon { flex: none; width: 16px; height: 16px; }
+.note-tab-open span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-tab-x { display: grid; place-items: center; flex: none; width: 34px; height: 34px; margin-right: 1px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; }
+.note-tab-x .icon { width: 11px; height: 11px; stroke-width: 2.4; }
+.note-tab.on .note-tab-x { color: var(--muted); }
+.note-tab-rec { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #e03131; }
+#tab-add-wrap { flex: none; }
+#tab-add-wrap .flyout { top: calc(100% + 8px); left: 0; --at: translate(0); transform-origin: 0 0; max-width: min(320px, 80vw); }
+#tab-add-wrap .flyout.flip { left: auto; right: 0; transform-origin: 100% 0; } /* the + is far along: the menu opens towards the left */
+#tab-menu .btn-secondary { overflow: hidden; text-overflow: ellipsis; }
+#tab-menu .btn-secondary.all { color: var(--accent); }
+/* Not in what is recorded: the 16:9 window, the full-screen rail, or with the tools put away. */
+body.wide #note-tabs, body.full #note-tabs, body.tools-off #note-tabs { display: none; }
+/* With the tabs under the toolbar the arrow is at its right end, not in the middle, where the tabs would pass beneath it. */
+body:not(.full):not(.wide) #tools-toggle { left: auto; right: 12px; }
+@media (hover: hover) {
+  .note-tab:not(.on):hover { background: var(--fill); }
+  .note-tab-x:hover { background: var(--fill); }
+}

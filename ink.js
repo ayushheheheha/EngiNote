@@ -809,6 +809,13 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     redo: () => step(redoStack, undoStack),
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
+    // The undo and redo steps, to put back with setHistory: a tab keeps its own while another note is open.
+    // (A step is never altered once made, so copies of the two lists are enough.)
+    getHistory: () => ({ undo: undoStack.slice(), redo: redoStack.slice() }),
+    setHistory({ undo, redo }) {
+      undoStack.splice(0, undoStack.length, ...undo);
+      redoStack.splice(0, redoStack.length, ...redo);
+    },
     clear() {
       finish();
       if (!strokes.length) return;

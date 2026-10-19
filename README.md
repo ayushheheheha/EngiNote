@@ -35,6 +35,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 - Light and dark themes.
 - Full screen, with the tools in a thin rail at the side.
 - A small arrow hides the toolbar and brings it back.
+- **Tabs**: up to five notes open at once, in a strip under the toolbar. Tap a tab to switch (each keeps its place, zoom and undo), the + for a recent note or the library, the cross to close, hold a tab to close the others. The strip is not shown in the 16:9 window or the full-screen rail, so recordings stay clean. A lone note still closes with Back; with several open, Back leaves them waiting in the library.
 - A 16:9 window, for presenting or recording.
 - A **scientific calculator** that floats over the note (the calculator button in the tools), laid out like a Casio fx-991ES Plus: stacked fractions and mixed numbers typed with the fraction keys, exact answers (1÷3 stays 1/3, sin 30° is 1/2) with **S⇔D** for the decimal, trig in degrees or radians, 2nd for the inverse functions, powers, roots, logs, n!, ×10ˣ and Ans. Drag it by its handle, shrink it to a chip, close it. Answers as √ or π forms (√2) are shown as decimals. `node calc.test.mjs` checks the maths.
 
