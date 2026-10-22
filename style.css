@@ -1143,6 +1143,33 @@ body.recording #rec-count-btn,
   #rec-shape span { transition: none; }
 }
 
+/* The check before recording: a card in the middle of the note's window (app.js gives #precheck that window's
+   place and size, as for the countdown). A row each: the name, then what was found; a warning is red. */
+#precheck { position: fixed; z-index: 9; display: grid; place-items: center; pointer-events: none; }
+#precheck[hidden] { display: none; }
+.pc-card {
+  width: min(360px, calc(100% - 32px));
+  padding: 18px 20px 16px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, var(--sheen), transparent 40%), var(--glass-thick);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--rim), var(--float);
+  pointer-events: auto;
+  animation: pc-in .32s cubic-bezier(.3, 1.3, .5, 1) both;
+}
+@keyframes pc-in { from { opacity: 0; transform: scale(.92); } }
+.pc-card h3 { margin: 0 0 8px; font-size: 18px; }
+.pc-row { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: 15px; }
+.pc-row span { flex: 1; color: var(--muted); }
+.pc-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-row b.warn { color: var(--danger); }
+#pc-waves { width: 58px; height: 28px; color: var(--accent); }
+#pc-waves[hidden] { display: none; }
+.pc-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.pc-buttons .btn-secondary { background: var(--fill); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-motion: reduce) { .pc-card { animation: none; } }
+
 /* ---------- Toast ---------- */
 
 #message {
@@ -1301,6 +1328,8 @@ body:not(.editing) #pen-ghost { display: none; }
 /* A flyout of settings: a row each, its name and its choice. */
 .flyout.settings { flex-direction: column; align-items: stretch; gap: 2px; width: 340px; padding: 8px 12px; }
 .set-row span { white-space: nowrap; }
+.set-head { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+body:not(.can-record) .app-only { display: none; }
 #settings-wrap .flyout { left: auto; right: -6px; --at: translate(0); transform-origin: 100% 0; }
 /* In the rail the button is near the foot of the screen: the flyout rises from it instead of being centred on it. */
 body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(100% + 12px); --at: translate(0); transform-origin: 100% 100%; }

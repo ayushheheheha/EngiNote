@@ -296,7 +296,7 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
           </button>
           <button id="wide-btn" class="icon-btn chip" type="button" aria-pressed="false"
-            title="Show the app in a 16:9 window" aria-label="16 by 9 window">16:9</button>
+            title="Lecture mode: the app in a 16:9 window, with what Settings says for lecture mode" aria-label="Lecture mode, 16 by 9 window">16:9</button>
           <!-- Add space (space.js): marks where a blank page or a gap can be put into the note, and puts it there. -->
           <button id="space-btn" class="icon-btn" type="button" aria-pressed="false"
             title="Add space: a blank page, or a gap in the note, with the ink below moving down" aria-label="Add space">
@@ -318,13 +318,19 @@
           </button>
           <!-- Settings: the pen's shadow, and what the Apple Pencil's double-tap and squeeze do. -->
           <div id="settings-wrap" class="tool-wrap">
-            <button id="settings-btn" class="icon-btn" type="button" title="Settings: the pen's shadow and the Apple Pencil's shortcuts" aria-label="Settings" aria-haspopup="true" aria-expanded="false">
+            <button id="settings-btn" class="icon-btn" type="button" title="Settings: the pen, the Apple Pencil's shortcuts and lecture mode" aria-label="Settings" aria-haspopup="true" aria-expanded="false">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg>
             </button>
             <div class="flyout settings">
               <div class="set-row"><span>Pen shadow</span><button id="ghost-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Show a faint shadow of the Apple Pencil while it hovers over the page">On</button></div>
               <label class="set-row"><span>Pencil double-tap</span><select id="pencil-tap" aria-label="Apple Pencil double-tap"></select></label>
               <label class="set-row"><span>Pencil squeeze</span><select id="pencil-squeeze" aria-label="Apple Pencil squeeze"></select></label>
+              <div class="set-row"><span>Page follows pen</span><button id="follow-btn" class="icon-btn chip" type="button" aria-pressed="true" title="When you finish writing near the bottom of the screen, the note slides up so the writing sits higher">On</button></div>
+              <!-- Lecture mode: what the 16:9 button also does when it is switched on (app.js). The rows marked app-only need the iPad app. -->
+              <p class="set-head">Lecture mode (16:9)</p>
+              <div class="set-row app-only"><span>Camera bubble</span><button id="lec-cam" class="icon-btn chip" type="button" aria-pressed="false" title="Open the camera bubble with lecture mode">Off</button></div>
+              <div class="set-row"><span>Full screen</span><button id="lec-full" class="icon-btn chip" type="button" aria-pressed="false" title="Go full screen with lecture mode">Off</button></div>
+              <div class="set-row app-only"><span>Check before recording</span><button id="precheck-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Before the countdown, show the microphone, the room left and the battery">On</button></div>
             </div>
           </div>
           <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
@@ -491,6 +497,16 @@
 
   <!-- The countdown before a recording: app.js lays it over the note's window and puts 3, 2, 1 in it. -->
   <div id="rec-count" role="status" aria-label="Recording starts in" hidden></div>
+  <!-- The check before recording (app.js; Settings turns it off): the microphone, the room left on the iPad and the battery, then Start. -->
+  <div id="precheck" hidden>
+    <div class="pc-card" role="dialog" aria-labelledby="pc-title">
+      <h3 id="pc-title">Ready to record?</h3>
+      <div class="pc-row"><span>Microphone</span><canvas id="pc-waves" width="116" height="56" aria-hidden="true"></canvas><b id="pc-mic"></b></div>
+      <div class="pc-row"><span>Room</span><b id="pc-room">Checking…</b></div>
+      <div class="pc-row"><span>Battery</span><b id="pc-battery">Checking…</b></div>
+      <div class="pc-buttons"><button id="pc-cancel" class="btn-secondary" type="button">Cancel</button><button id="pc-start" class="btn-primary" type="button">Start</button></div>
+    </div>
+  </div>
 
   <input id="image-input" type="file" accept="image/*" hidden>
   <!-- A long press with a finger on the page: paste the picture that was copied, there (app.js). -->

@@ -197,6 +197,16 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             send("recorder", ["state": "recording"])
         case "stop":
             stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false, introAt: body["introAt"] as? Double ?? 0)
+        case "status": // the check before recording (app.js): the room left on the iPad, and the battery
+            let device = UIDevice.current
+            device.isBatteryMonitoringEnabled = true
+            let home = URL(fileURLWithPath: NSHomeDirectory())
+            let free = (try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage
+            send("recstatus", [
+                "free": free.map { Double($0) } ?? -1, // bytes; -1: not known
+                "battery": Double(device.batteryLevel), // 0 to 1; -1: not known
+                "charging": device.batteryState == .charging || device.batteryState == .full,
+            ])
         default:
             // Asked to pause or resume a recording that is no longer running: say how things stand.
             send("recorder", ["state": "idle"])

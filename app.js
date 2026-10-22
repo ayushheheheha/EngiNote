@@ -737,13 +737,13 @@ function within([x, y]) {
   ];
 }
 
-// Put the sheet at `at` (kept within bounds). `glide`: slide there instead of jumping.
+// Put the sheet at `at` (kept within bounds). `glide`: slide there instead of jumping (true, or the seconds it takes).
 function place(at = pos, glide = false) {
   pos = within(at);
   // Drawn on whole device pixels, where text is sharpest; `pos` itself keeps the fractions, so
   // slow finger movement still adds up.
   const snap = v => Math.round(v * devicePixelRatio) / devicePixelRatio;
-  mover.style.transition = glide ? 'transform .2s ease-out' : '';
+  mover.style.transition = glide ? `transform ${glide === true ? 0.2 : glide}s ease-out` : ''; // a number: that many seconds
   mover.style.transform = `translate(${snap(pos[0])}px, ${snap(pos[1])}px)`;
   // The thin bar at the right edge: how far down the note the window is.
   const top = restTop(), h = pageHeight * zoom + top + MARGIN, vh = scroller.clientHeight, length = Math.max(28, vh * vh / h);
@@ -1368,8 +1368,39 @@ option($('ghost-btn'), 'penShadow', on => {
   ghost.enable(on);
   $('ghost-btn').textContent = on ? 'On' : 'Off';
 }, true);
+// A setting in the flyout that reads On or Off.
+const setting = (id, key, on, apply = () => {}) => option($(id), key, value => { $(id).textContent = value ? 'On' : 'Off'; apply(value); }, on);
 const settingsFly = flyout($('settings-wrap'), $('settings-btn'));
 $('settings-btn').onclick = settingsFly.toggle;
+
+// Page follows the pen: writing that ends low in the window is brought up to the upper middle, once the pen has
+// been off the page for a moment (so never between the letters of a word), and a lecture never stops for a
+// scroll. Never under a stroke: a pen landing while the sheet slides stops it where it has got to.
+const FOLLOW_LOW = 0.75, FOLLOW_TO = 0.4; // of the window's height: where writing counts as low, and where it is brought to
+const FOLLOW_WAIT = 700, FOLLOW_GLIDE = 0.45; // ms with the pen up first; s the slide takes
+const followOn = setting('follow-btn', 'followPen', true);
+let followTimer = 0, lowest = -Infinity, slidingUntil = 0;
+scroller.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'pen') return;
+  clearTimeout(followTimer);
+  lowest = -Infinity;
+  if (performance.now() < slidingUntil) { // stop the slide where it is, before ink.js measures the sheet
+    const m = new DOMMatrix(getComputedStyle(mover).transform);
+    slidingUntil = 0;
+    place([m.e, m.f]);
+  }
+}, true);
+scroller.addEventListener('pointermove', e => { if (e.pointerType === 'pen' && e.buttons & 1) lowest = Math.max(lowest, e.clientY); }, { capture: true, passive: true });
+scroller.addEventListener('pointerup', e => {
+  if (e.pointerType !== 'pen' || !followOn() || !penOf(tool) || !current) return;
+  const top = origin()[1], low = (Math.max(lowest, e.clientY) - top - pos[1]) / zoom; // the stroke's lowest point, on the page
+  followTimer = setTimeout(() => {
+    const h = scroller.clientHeight, y = pos[1] + low * zoom; // where it is in the window now (the note may have been moved since)
+    if (y < h * FOLLOW_LOW || y > h) return;
+    slidingUntil = performance.now() + FOLLOW_GLIDE * 1000;
+    place([pos[0], pos[1] - (y - h * FOLLOW_TO)], FOLLOW_GLIDE);
+  }, FOLLOW_WAIT);
+}, true);
 
 // A toolbar button that switches an option on and off and remembers it on this device.
 // Returns a function that reads the current state.
@@ -1464,8 +1495,8 @@ const flush = () => {
   itemsView.finish(); // text still being typed is part of the note
   return saveTimer ? save() : undefined;
 };
-addEventListener('pagehide', flush);
-document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); }); // the app went to the background
+addEventListener('pagehide', () => { flush(); keepSession(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { flush(); keepSession(); } }); // the app went to the background
 
 // The notes open at once (tabs.js). Each tab keeps, for the time another note is in front, where its note was
 // scrolled to, its zoom and its undo steps; `stamp` says which version of the note those belong to.
@@ -1476,6 +1507,7 @@ const openTabs = createTabs({
   onCloseOthers: async tab => {
     if (tab !== openTabs.active) await openDoc(tab.id);
     if (openTabs.active === tab) openTabs.keepOnly(tab);
+    keepSession();
   },
 });
 
@@ -1491,6 +1523,27 @@ function remember() {
   tab.view = { pos: pos.slice(), zoom };
   tab.history = ink.getHistory();
   tab.stamp = current.updatedAt;
+}
+
+// Where the user left off, kept on this device for the next time the app opens: the open notes, each with its
+// place and zoom, and the one in front (none: the library).
+function keepSession() {
+  if (!restoreView) remember(); // not while a note is still loading: its place is not reached yet
+  const session = { active: openTabs.active?.id ?? null, tabs: openTabs.list().map(t => ({ id: t.id, view: t.view })) };
+  try { localStorage.setItem('session', JSON.stringify(session)); } catch { /* storage blocked: the app opens on the library */ }
+}
+async function restoreSession() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('session')); } catch { /* none kept, or storage blocked */ }
+  if (saved?.active && Array.isArray(saved.tabs)) {
+    for (const t of saved.tabs) {
+      const doc = t && await db.get(t.id).catch(() => null);
+      if (doc) openTabs.add({ id: doc.id, name: doc.name, kind: doc.paper ? 'notebook' : 'file', view: t.view });
+    }
+    if (openTabs.find(saved.active)) return openDoc(saved.active);
+    openTabs.clear(); // the note in front is gone: the library, as for a first start
+  }
+  showLibrary();
 }
 
 // Open a note: in a tab of its own, or, if it is already open, the tab it is in. One at a time: a second tap
@@ -1549,6 +1602,7 @@ async function swapTo(id) {
     restoreView = tab.view;
   }
   showPages();
+  keepSession();
 }
 
 // To the library. A lone note is closed (as it always was); with others open, the tabs wait there.
@@ -1563,16 +1617,21 @@ async function closeDoc(keep = false) {
   frame.srcdoc = ''; // drop the document; also guarantees a reload if the same note is reopened
   showPages();
   showLibrary();
+  keepSession();
 }
 $('back-btn').onclick = () => closeDoc();
 
 // The cross of a tab. The one in front gives way to its neighbour; the last one left is the same as Back.
 async function closeTab(tab) {
-  if (tab !== openTabs.active) return openTabs.remove(tab);
+  if (tab !== openTabs.active) {
+    openTabs.remove(tab);
+    return keepSession();
+  }
   const list = openTabs.list(), i = list.indexOf(tab), next = list[i + 1] ?? list[i - 1];
   if (!next) return closeDoc();
   await openDoc(next.id);
   if (openTabs.active !== tab) openTabs.remove(tab);
+  keepSession();
 }
 
 // The + : the notes most recently written in that are not open, and the library for the rest.
@@ -1860,10 +1919,18 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 // 16:9: show the whole editor, tools included, in the largest 16:9 window that fits (body.wide in style.css).
+// It is lecture mode: switched on, it also goes full screen if Settings says so (and the camera bubble, in the
+// recording section); switched off, it undoes only what it did itself.
 const wideBtn = $('wide-btn');
+const lectureFull = setting('lec-full', 'lectureFull', false);
+let fullByLecture = false;
 wideBtn.onclick = () => {
-  wideBtn.setAttribute('aria-pressed', document.body.classList.toggle('wide'));
-  refit();
+  const on = document.body.classList.toggle('wide');
+  wideBtn.setAttribute('aria-pressed', on);
+  if (on && lectureFull() && !document.body.classList.contains('full')) fullByLecture = true;
+  else if (on || !fullByLecture) return refit();
+  else fullByLecture = false;
+  setFull(on); // refits
 };
 
 // The small arrow at the toolbar's edge puts the tools away and brings them back (body.tools-off in
@@ -2053,8 +2120,52 @@ if (shellRecorder) {
     recCount.replaceChildren(Object.assign(document.createElement('span'), { textContent: left-- }));
     recCount.hidden = false;
   }
+  // The check before recording: the microphone heard live, the hours of room left at this quality, the battery
+  // (the app reports the last two: a 'recstatus' event). Start goes on to the countdown.
+  const precheck = $('precheck'), pcWaves = $('pc-waves');
+  const precheckOn = setting('precheck-btn', 'precheck', true);
+  const warn = (id, text, bad) => { $(id).textContent = text; $(id).classList.toggle('warn', bad); };
+  function openCheck() {
+    const box = scroller.getBoundingClientRect();
+    Object.assign(precheck.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    pcWaves.hidden = !micOn();
+    warn('pc-mic', micOn() ? '' : 'Off: the video will be silent', !micOn());
+    warn('pc-room', 'Checking…', false);
+    warn('pc-battery', 'Checking…', false);
+    precheck.hidden = false;
+    askMic();
+    shellRecorder.postMessage({ action: 'status' });
+    $('pc-start').focus();
+  }
+  function closeCheck() {
+    precheck.hidden = true;
+    askMic();
+  }
+  addEventListener('recstatus', e => {
+    const { free, battery, charging } = e.detail ?? {};
+    const perHour = parseFloat(/([\d.]+) GB\/h/.exec(recQuality.selectedOptions[0]?.textContent)?.[1]) * 1e9;
+    if (free >= 0 && perHour) {
+      const minutes = Math.floor(free / perHour * 60);
+      warn('pc-room', `${minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`} at ${recQuality.value[0].toUpperCase()}${recQuality.value.slice(1)}`, minutes < 90);
+    } else warn('pc-room', 'Unknown', false);
+    if (battery >= 0) {
+      const low = battery < 0.3 && !charging;
+      warn('pc-battery', `${Math.round(battery * 100)}%${charging ? ', charging' : low ? ': plug in the charger' : ''}`, low);
+    } else warn('pc-battery', 'Unknown', false);
+  });
+  $('pc-cancel').onclick = closeCheck;
+  $('pc-start').onclick = () => {
+    closeCheck();
+    begin();
+  };
+
   recBtn.onclick = () => {
     if (counting) return endCount();
+    if (!precheck.hidden) return closeCheck();
+    if (state === 'idle' && precheckOn() && document.body.classList.contains('editing')) return openCheck();
+    begin();
+  };
+  function begin() {
     if (state !== 'idle' || !countOn()) return ask();
     left = 3;
     morph(() => { $('rec-label').textContent = 'Cancel'; });
@@ -2083,10 +2194,10 @@ if (shellRecorder) {
   // of a setting from another day.
   const BARS = 12; // each 3px wide and 2px apart: the picture's 58px (style.css)
   const levels = []; // the last few heard, the newest last
-  function drawWaves() {
-    const c = recWaves.getContext('2d'), k = recWaves.width / 58, h = recWaves.height; // k: the picture's dots to a px
-    c.clearRect(0, 0, recWaves.width, h);
-    c.fillStyle = getComputedStyle(recWaves).color;
+  function drawWaves(canvas = recWaves) { // the bar's picture, or the one in the check before recording
+    const c = canvas.getContext('2d'), k = canvas.width / 58, h = canvas.height; // k: the picture's dots to a px
+    c.clearRect(0, 0, canvas.width, h);
+    c.fillStyle = getComputedStyle(canvas).color;
     c.beginPath();
     for (let i = 0; i < BARS; i++) {
       const level = levels[levels.length - BARS + i] || 0; // what has not been heard yet is silence
@@ -2106,7 +2217,7 @@ if (shellRecorder) {
   const shellMic = window.webkit.messageHandlers.mic;
   let asked = '';
   function askMic() {
-    const on = recWaves.offsetWidth > 0;
+    const on = recWaves.offsetWidth > 0 || $('pc-waves').offsetWidth > 0;
     const want = JSON.stringify(on ? { on, enhance: enhanceOn() } : { on });
     if (want === asked) return;
     asked = want;
@@ -2122,10 +2233,10 @@ if (shellRecorder) {
     if (e.detail?.on === false) { // the app cannot listen: the microphone refused, say
       setCheck(false);
       if (e.detail.message) notify(e.detail.message);
-    } else if (recWaves.offsetWidth && Array.isArray(e.detail?.levels)) { // out of sight, there is nothing to draw on
+    } else if (Array.isArray(e.detail?.levels)) {
       levels.push(...e.detail.levels.map(Number));
       levels.splice(0, levels.length - BARS);
-      drawWaves();
+      for (const canvas of [recWaves, $('pc-waves')]) if (canvas.offsetWidth) drawWaves(canvas); // out of sight, there is nothing to draw on
     }
   });
 
@@ -2145,6 +2256,19 @@ if (shellRecorder) {
     if (e.detail?.message) notify(e.detail.message);
   });
   shellCamera?.postMessage({ on: false }); // off, to begin with; the answer says which shape it has
+  // Lecture mode (the 16:9 button) has the camera bubble on or off as Settings says; switched off, it closes it only if it opened it.
+  const lectureCam = setting('lec-cam', 'lectureCam', false);
+  let camByLecture = false;
+  wideBtn.addEventListener('click', () => { // after wideBtn.onclick
+    const on = document.body.classList.contains('wide'), camOn = recCam.getAttribute('aria-pressed') === 'true';
+    if (on) {
+      camByLecture = lectureCam() && !camOn;
+      if (lectureCam() !== camOn) shellCamera?.postMessage({ on: lectureCam(), shape: recShape.dataset.shape });
+    } else if (camByLecture) {
+      camByLecture = false;
+      if (camOn) shellCamera?.postMessage({ on: false });
+    }
+  });
 }
 
 /* ---------- Keyboard ---------- */
@@ -2188,5 +2312,5 @@ addEventListener('shared', async e => {
 });
 window.webkit?.messageHandlers?.shared?.postMessage({ ready: true }); // ready for any that were shared before the page was up
 
-showLibrary();
+restoreSession(); // back where the user left off, or the library
 askVideos();
