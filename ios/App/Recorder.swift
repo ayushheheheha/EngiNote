@@ -57,6 +57,7 @@ final class Recorder {
     private var rejoin = false // resumed: the next frame decides the new `offset`
     private var offset = CMTime.zero
     private var lastEnd = CMTime.zero
+    private var sessionStart = CMTime.invalid // the first frame's time: the movie's 0
     private var soundPieces = 0 // pieces of sound written so far
     // Sound the movie was not ready for when it arrived, waiting its turn (see take), and how that went.
     private var held: [CMSampleBuffer] = []
@@ -226,6 +227,7 @@ final class Recorder {
         self.rejoin = false
         self.offset = .zero
         self.lastEnd = .zero
+        self.sessionStart = .invalid
         self.soundPieces = 0
         self.held = []
         self.soundWaited = 0
@@ -406,6 +408,13 @@ final class Recorder {
         if !paused { pausedSince = Sidecar.now() }
         paused = true
         lock.unlock()
+    }
+
+    /// How far the movie has got, in seconds of its own time (pauses left out): where something marked now falls in it.
+    var writtenSeconds: Double {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionStart.isValid ? max(0, CMTimeSubtract(lastEnd, sessionStart).seconds) : 0
     }
 
     func resume() {
@@ -675,7 +684,8 @@ final class Recorder {
             fail(writer.error?.localizedDescription ?? "The recording could not be started.")
             return
         }
-        writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(buffer))
+        sessionStart = CMSampleBufferGetPresentationTimeStamp(buffer)
+        writer.startSession(atSourceTime: sessionStart)
         sidecar.startedAt = Sidecar.now()
     }
 }

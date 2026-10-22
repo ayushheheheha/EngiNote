@@ -191,7 +191,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             recorder.addTrace(points: body["points"] as? [[Double]] ?? [], window: window)
         case "pause" where recorder.isActive:
             recorder.pause()
-            send("recorder", ["state": "paused"])
+            send("recorder", ["state": "paused", "at": recorder.writtenSeconds]) // where the movie stopped: the page can put the intro there
         case "resume" where recorder.isActive:
             recorder.resume()
             send("recorder", ["state": "recording"])
@@ -277,7 +277,10 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         Task.detached(priority: .userInitiated) { [weak self] in
             var note = add ? "Intro and outro added." : "Intro and outro removed."
             do {
-                if add { try await StudioWrap.add(to: file, intro: intro, outro: outro, introAt: introAt) } else { try await StudioWrap.remove(from: file) }
+                if add {
+                    try await StudioWrap.add(to: file, intro: intro, outro: outro, introAt: introAt)
+                    if let at = StudioWrap.marks(for: file)?.at, at > 0 { note = "Intro added at \(Self.clock(at)), outro at the end." }
+                } else { try await StudioWrap.remove(from: file) }
             } catch {
                 note = "The intro and outro could not be \(add ? "added" : "removed"): \(error.localizedDescription). The recording is as it was."
             }
@@ -288,6 +291,12 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 then?()
             }
         }
+    }
+
+    /// Seconds as the recording bar's clock shows them: 0:00:42.
+    nonisolated private static func clock(_ seconds: Double) -> String {
+        let s = Int(seconds)
+        return String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
     }
 
     /// The system's share sheet for a file (a movie, an exported PDF): save to Photos or Files, another app, AirDrop.
@@ -393,7 +402,10 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
                     var entry: [String: Any] = ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
                     if let picture = Self.picture(of: url) { entry["picture"] = "data:image/jpeg;base64," + picture.base64EncodedString() }
-                    if StudioWrap.marks(for: url) != nil { entry["wrapped"] = true }
+                    if let marks = StudioWrap.marks(for: url) {
+                        entry["wrapped"] = true
+                        entry["introAt"] = marks.at ?? 0
+                    }
                     return entry
                 }
             var news: [String: Any] = ["files": files]

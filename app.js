@@ -210,8 +210,6 @@ let videos = [];      // [{ name, size, modified }], newest first, as the app la
 let inVideos = false; // the library is showing them
 // Every message is answered with the list as it then stands.
 const askVideos = (message = { action: 'list' }) => shellVideos?.postMessage(message);
-// Where in a recording its intro goes, in seconds (0: before it): typed in the recording bar, kept on this device.
-const introAt = () => { try { return Math.max(0, Math.floor(+localStorage.getItem('recIntroAt')) || 0); } catch { return 0; } };
 addEventListener('recordings', e => {
   videos = (Array.isArray(e.detail?.files) ? e.detail.files : [])
     .filter(v => v && typeof v.name === 'string')
@@ -225,6 +223,8 @@ const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><pa
 const STUDIO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L14 10M13 5l1-2 1 2 2 1-2 1-1 2-1-2-2-1zM18 13l.7-1.4.7 1.4 1.4.7-1.4.7-.7 1.4-.7-1.4-1.4-.7z"/></svg>';
 const WRAP_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="6" width="8" height="12" rx="1.5"/><path d="M5 8v8M2.5 10v4M19 8v8M21.5 10v4"/></svg>';
 const EDIT_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11 9M8.5 16l11-9"/></svg>';
+// Seconds as the recording bar's clock shows them: 0:00:42.
+const hms = s => `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s) % 60).padStart(2, '0')}`;
 const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
 function showVideos() {
@@ -269,7 +269,8 @@ function makeVideoCard(video) {
   const noted = when && when[1] !== 'EngiNote'; // named for a note
   card.querySelector('.card-name').textContent = noted ? when[1] : began ? began.toLocaleDateString(undefined, { dateStyle: 'medium' }) : title;
   card.querySelector('.card-date').textContent =
-    (noted ? `${stamp} · ` : began ? `${began.toLocaleTimeString(undefined, { timeStyle: 'short' })} · ` : '') + fileSize(video.size);
+    (noted ? `${stamp} · ` : began ? `${began.toLocaleTimeString(undefined, { timeStyle: 'short' })} · ` : '') + fileSize(video.size) +
+    (video.introAt > 0 ? ` · intro at ${hms(video.introAt)}` : '');
 
   const remove = card.querySelector('.card-delete');
   remove.title = 'Delete recording';
@@ -305,10 +306,9 @@ function makeVideoCard(video) {
   wrap.setAttribute('aria-label', wrap.title);
   wrap.setAttribute('aria-pressed', Boolean(video.wrapped));
   wrap.innerHTML = WRAP_ICON;
-  wrap.onclick = () => {
-    const at = introAt();
-    notify(video.wrapped ? 'Taking the intro and outro off...' : at ? `Adding the intro (at ${at} s) and the outro...` : 'Adding the intro and outro...');
-    askVideos({ action: 'wrap', name: video.name, introAt: at });
+  wrap.onclick = () => { // at the start: one part-way in is put there while recording (Intro here), or in Studio
+    notify(video.wrapped ? 'Taking the intro and outro off...' : 'Adding the intro and outro...');
+    askVideos({ action: 'wrap', name: video.name });
   };
   edit.before(wrap);
   return card;
@@ -1938,13 +1938,26 @@ if (shellRecorder) {
   const enhanceOn = option(recEnhance, 'recEnhance');
   const countOn = option($('rec-count-btn'), 'recCount', undefined, true); // 3, 2, 1 before a recording starts
   const wrapOn = option($('rec-wrap'), 'recWrap'); // the intro and outro go onto the recording as it stops; asked at the stop, so it can still be changed while recording
-  const introBox = $('rec-intro-at'); // ...the intro `introBox` seconds into it (0: before it)
-  introBox.value = introAt();
-  const introSeconds = () => Math.max(0, Math.floor(+introBox.value) || 0);
-  introBox.onkeydown = e => { if (e.key === 'Enter') introBox.blur(); }; // Done puts the keyboard away
-  introBox.onchange = () => {
-    introBox.value = introSeconds();
-    try { localStorage.setItem('recIntroAt', introBox.value); } catch { /* lasts for this visit only */ }
+  // Intro here: paused, the intro can be put at that very point of the video (`pausedAt`, seconds into it, as the
+  // app counts them). `introMark` is where it is to go (null: nowhere yet); it goes in, with the outro, when the
+  // recording stops, whether or not Intro is on.
+  const introHere = $('rec-intro-here');
+  let introMark = null, pausedAt = 0;
+  function showMark() {
+    const here = introMark !== null && Math.abs(introMark - pausedAt) < 0.05;
+    morph(() => {
+      introHere.textContent = introMark === null ? 'Intro here' : state === 'paused' && !here ? 'Move intro here' : `Intro at ${hms(introMark)}`;
+      introHere.setAttribute('aria-pressed', introMark !== null);
+    });
+    introHere.title = introMark === null ? 'Put the intro into the video here, where it is paused'
+      : state !== 'paused' ? 'The intro goes in here when you stop. Pause to move it or take it out'
+      : here ? 'Take the intro out' : `Move the intro from ${hms(introMark)} to here`;
+  }
+  introHere.onclick = () => {
+    if (state !== 'paused') return notify(`The intro goes in at ${hms(introMark)} when you stop. Pause to move it or take it out.`);
+    introMark = introMark !== null && Math.abs(introMark - pausedAt) < 0.05 ? null : pausedAt;
+    notify(introMark === null ? 'Intro taken out.' : `The intro goes in at ${hms(introMark)}, the outro at the end.`);
+    showMark();
   };
   // 'idle', 'recording' or 'paused'. The clock counts recorded time only: `done` ms from before the
   // last pause, plus the time since `since` while it runs.
@@ -1958,8 +1971,7 @@ if (shellRecorder) {
   };
 
   const showTime = () => {
-    const s = Math.floor((done + (state === 'recording' ? Date.now() - since : 0)) / 1000);
-    recTime.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    recTime.textContent = hms((done + (state === 'recording' ? Date.now() - since : 0)) / 1000);
   };
   function showState(next) {
     if (state === 'recording') done += Date.now() - since; // the stretch that just ended
@@ -2015,7 +2027,7 @@ if (shellRecorder) {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
       ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), title: nameInput.value, wide: document.body.classList.contains('wide') }
-      : { action: 'stop', wrap: wrapOn(), introAt: introSeconds() });
+      : { action: 'stop', wrap: introMark !== null || wrapOn(), introAt: introMark ?? 0 });
   };
 
   // The countdown: 3, 2, 1 in the middle of the note, and only then is the app asked to record. So
@@ -2056,7 +2068,10 @@ if (shellRecorder) {
   addEventListener('recorder', e => {
     recBtn.disabled = recPause.disabled = false;
     const next = ['recording', 'paused'].includes(e.detail?.state) ? e.detail.state : 'idle';
+    if (next === 'paused') pausedAt = Number.isFinite(e.detail.at) ? e.detail.at : done / 1000; // an app from before builds that say where
     if (next !== state) showState(next); // the app may also speak up mid-recording, with nothing changed
+    if (state === 'idle') introMark = null; // used, or the recording is over
+    showMark();
     if (e.detail?.message) notify(e.detail.message);
     if (state === 'idle') askVideos(); // there may be a new one
   });
