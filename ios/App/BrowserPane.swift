@@ -186,7 +186,9 @@ final class BrowserPane: UIView, WKNavigationDelegate, WKUIDelegate, UITextField
     @objc private func goForward() { web.goForward() }
     @objc private func goHome() { web.load(URLRequest(url: Self.home)) }
     @objc private func closeTapped() { onClose?() }
-    @objc private func reloadOrStop() { web.isLoading ? web.stopLoading() : web.reload() }
+    @objc private func reloadOrStop() {
+        if web.isLoading { web.stopLoading() } else { web.reload() }
+    }
 
     private func loading(_ on: Bool) {
         reload.configuration?.image = UIImage(systemName: on ? "xmark" : "arrow.clockwise")
