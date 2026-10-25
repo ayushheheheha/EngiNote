@@ -8,6 +8,7 @@ import { exportDoc, printDoc, pinUnits } from './export.js';
 import { createThumbs } from './thumbs.js';
 import { createGhost } from './ghost.js';
 import { createCalc } from './calc.js';
+import { createBrowser } from './browser.js';
 import { createTabs, MAX_TABS } from './tabs.js';
 import { detent, undetent, EASE } from './detent.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
@@ -67,7 +68,9 @@ const db = {
 
 /* ---------- Messages ---------- */
 
+let browser = null; // the in-app browser, once made (below): it hides the message, so it is told too
 function notify(text) {
+  browser?.say(text);
   message.textContent = text;
   message.hidden = false;
   clearTimeout(messageTimer);
@@ -980,6 +983,15 @@ const lasso = createLasso(svg, ink, lassoBar, () => {
 const ghost = createGhost(scroller);
 // The scientific calculator (calc.js), floating over the note.
 createCalc({ panel: $('calc'), button: $('calc-btn'), host: $('editor') });
+// The in-app browser (browser.js, BrowserPane.swift): the iPad app lays a web view over the note's window.
+const shellBrowser = window.webkit?.messageHandlers?.browser;
+if (shellBrowser) {
+  browser = createBrowser({
+    button: $('browser-btn'), shell: shellBrowser, scroller, editor: $('editor'), tools: $('toolbar'),
+    bars: [$('toolbar'), $('note-tabs'), $('tools-toggle'), $('rec-bar')],
+    holds: [$('precheck'), $('rec-count')],
+  });
+}
 // "Add space": a blank page put into a paged note, a gap opened in a file (space.js).
 const space = createSpace({ button: $('space-btn'), mover, frame, ink, note: () => current, resize: measure });
 

@@ -22,6 +22,8 @@ import WebKit
 ///    message) and is sent the levels, or why not, as 'mic' events (Recorder.swift).
 ///  - The camera bubble (CameraBubble.swift), switched on and off and given its shape by the page
 ///    (the 'camera' message), which is told the outcome (a 'camera' event).
+///  - The in-app browser (BrowserPane.swift): the page lays it over the note's window, and shows or puts it away
+///    (the 'browser' message, browser.js); its own "Note" button is told to the page as a 'browser' event.
 ///  - Exporting a note as a PDF (Exporter.swift): the page hands over the note with its ink as a
 ///    document (the 'export' message), and is told when the PDF is ready or why not (an 'export' event).
 final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageHandler, UIPencilInteractionDelegate {
@@ -29,6 +31,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     private let recorder = Recorder()
     private let camera = CameraBubble()
     private let exporter = Exporter()
+    private var browser: BrowserPane? // made the first time the page asks for it
 
     // A note-taking surface: no status bar, the home bar stays out of the way, and a swipe from
     // the bottom edge needs a second swipe, so writing near the edge does not leave the app.
@@ -50,6 +53,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "export")
         configuration.userContentController.add(self, name: "paste")
         configuration.userContentController.add(self, name: "shared")
+        configuration.userContentController.add(self, name: "browser")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -113,6 +117,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     @objc private func pencilHovered(_ hover: UIHoverGestureRecognizer) {
         switch hover.state {
         case .began, .changed:
+            if browser?.isOpen == true { return } // the shadow is drawn on the page, which is behind the browser
             let at = hover.location(in: webView)
             let azimuth = hover.azimuthAngle(in: webView), altitude = hover.altitudeAngle, roll = hover.rollAngle, height = hover.zOffset
             // A mouse or trackpad pointer hovers too, and says nothing of a pen: that is no Pencil.
@@ -479,6 +484,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "camera": showCamera(body)
         case "export": export(body)
         case "paste": pastePicture()
+        case "browser": browse(body)
         case "shared": pageReady = true; deliverShared() // the page is up: what was shared to the app can go to it
         default: break
         }
@@ -514,6 +520,35 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         guard pageReady else { return } // the page asks for them as it starts
         for file in waiting { send("shared", file) }
         waiting.removeAll()
+    }
+
+    // MARK: The in-app browser
+
+    /// The page's word on the browser: `on` with the rectangle it is to fill (the page's own coordinates, which are the web
+    /// view's) and `held` if the page needs the screen for a moment; or off; or a `toast`, a message of the page's own that
+    /// the browser would hide.
+    private func browse(_ body: [String: Any]) {
+        if let text = body["toast"] as? String {
+            if browser?.isOpen == true { browser?.say(text) }
+            return
+        }
+        guard body["on"] as? Bool == true,
+              let x = body["x"] as? Double, let y = body["y"] as? Double, let w = body["w"] as? Double, let h = body["h"] as? Double,
+              w >= 100, h >= 100 else {
+            browser?.close()
+            return
+        }
+        if browser == nil {
+            let pane = BrowserPane()
+            pane.presenter = self
+            pane.onClose = { [weak self] in
+                self?.browser?.close()
+                self?.send("browser", ["on": false])
+            }
+            view.insertSubview(pane, belowSubview: camera) // the camera bubble stays on top of it
+            browser = pane
+        }
+        browser?.open(at: CGRect(x: x, y: y, width: w, height: h), held: body["held"] as? Bool ?? false)
     }
 
     // MARK: Exporting a note as a PDF
