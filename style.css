@@ -1474,3 +1474,6 @@ body:not(.full):not(.wide) #tools-toggle { left: auto; right: 12px; }
 .caret { display: inline-block; width: 2px; height: 1.05em; margin: 0 1px; border-radius: 1px; background: var(--accent); vertical-align: middle; animation: caret-blink 1.05s steps(1) infinite; }
 @keyframes caret-blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+
+/* Test hook only (app.js, runProbe): the layers without their compositing hints, to compare how ink is drawn. */
+body.nowc #mover, body.nowc #ink, body.nowc #page { will-change: auto; }

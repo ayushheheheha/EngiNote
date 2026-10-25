@@ -1,4 +1,4 @@
-import { createInk, strokeData, strokeWidth, opacityOf } from './ink.js';
+import { createInk, strokeData, strokeWidth, opacityOf, boxOf } from './ink.js';
 import { createLasso } from './lasso.js';
 import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages, hasCover, setCover } from './pages.js';
 import { COVER_H } from './cover.js';
@@ -2324,5 +2324,18 @@ addEventListener('shared', async e => {
 });
 window.webkit?.messageHandlers?.shared?.postMessage({ ready: true }); // ready for any that were shared before the page was up
 
-restoreSession(); // back where the user left off, or the library
+// Test hook, for looking at the real ink on the device from the PC (see NoteViewController): "#probe=3" opens the
+// note with the most strokes, at that zoom, on the middle stroke. It only reads; "&nowc" drops the compositing hints.
+async function runProbe(args) {
+  document.body.classList.toggle('nowc', args.has('nowc'));
+  const docs = (await db.all()).filter(d => d.strokes?.length).sort((a, b) => b.strokes.length - a.strokes.length);
+  if (!docs[0]) return showLibrary();
+  await openDoc(docs[0].id);
+  await new Promise(done => setTimeout(done, 1500)); // the note settles (it fits itself to the window as it loads) before it is zoomed
+  setZoom(Number(args.get('probe')) || 1);
+  const [x0, y0, x1, y1] = boxOf(docs[0].strokes[docs[0].strokes.length >> 1]);
+  place([scroller.clientWidth / 2 - (x0 + x1) / 2 * zoom, scroller.clientHeight / 2 - (y0 + y1) / 2 * zoom]);
+}
+const probe = new URLSearchParams(location.hash.slice(1));
+if (probe.has('probe')) runProbe(probe); else restoreSession(); // back where the user left off, or the library
 askVideos();

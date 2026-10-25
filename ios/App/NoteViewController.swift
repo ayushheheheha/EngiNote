@@ -93,7 +93,9 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         NotificationCenter.default.addObserver(self, selector: #selector(wentToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(cameBack), name: UIApplication.didBecomeActiveNotification, object: nil)
 
-        webView.load(URLRequest(url: WebFiles.home))
+        // For testing from the PC (a normal launch has no such argument): "-probe=3" opens the note with the most ink at 300% (app.js, runProbe).
+        let probe = CommandLine.arguments.first { $0.hasPrefix("-probe=") }.map { "#" + String($0.dropFirst()) } ?? ""
+        webView.load(URLRequest(url: URL(string: WebFiles.home.absoluteString + probe) ?? WebFiles.home))
     }
 
     // MARK: Apple Pencil
