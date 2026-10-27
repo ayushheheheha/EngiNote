@@ -94,6 +94,7 @@ async function showLibrary() {
   document.body.classList.remove('editing');
   previews.disconnect(); // the cards are about to be made afresh
   document.body.classList.toggle('in-videos', inVideos);
+  document.body.classList.toggle('in-bin', inVideos && videoView === 'bin');
   let all;
   try {
     all = await db.all();
@@ -108,6 +109,8 @@ async function showLibrary() {
   if (folder) folder = folders.find(f => f.id === folder.id) || null; // fresh copy; null if it was deleted
   drawSide(folders, notes, home);
   if (inVideos) return showVideos();
+  vidBar.hidden = true; // the recordings' bar is for the recordings only
+  document.body.classList.remove('selecting');
   // A search shows the notes with the typed words in their name and nothing else: no import tile.
   // From the main library it looks in every folder too; in a folder, in that folder.
   // (Read here, after the wait for storage: typing fast, every call then shows the latest words.)
@@ -153,6 +156,8 @@ function drawSide(folders, notes, home) {
 function goTo(where, videosToo) {
   folder = where;
   inVideos = videosToo;
+  videoView = 'recordings';
+  chosen(false);
   search.value = ''; // a search would be looking in the wrong place
   if (videosToo) askVideos();
   leaveSide();
@@ -211,12 +216,20 @@ $('search-clear').onclick = () => {
 const shellVideos = window.webkit?.messageHandlers?.recordings;
 let videos = [];      // [{ name, size, modified }], newest first, as the app last listed them
 let inVideos = false; // the library is showing them
+let binned = [];      // Recently deleted, as the app last listed them: [{ name, size, modified, deleted, picture? }], the longest waiting first
+let binDays = 30;     // how long the app keeps a deleted recording
+let videoView = 'recordings'; // or 'bin'
+let selecting = false; // taps on recordings choose them instead of playing them (in the bin they always do)
+const picked = new Set(); // the names chosen
 // Every message is answered with the list as it then stands.
 const askVideos = (message = { action: 'list' }) => shellVideos?.postMessage(message);
 addEventListener('recordings', e => {
   videos = (Array.isArray(e.detail?.files) ? e.detail.files : [])
     .filter(v => v && typeof v.name === 'string')
     .sort((a, b) => b.modified - a.modified);
+  binned = (Array.isArray(e.detail?.bin) ? e.detail.bin : []).filter(v => v && typeof v.name === 'string').sort((a, b) => a.deleted - b.deleted);
+  if (e.detail?.binDays > 0) binDays = e.detail.binDays;
+  for (const name of [...picked]) if (![...videos, ...binned].some(v => v.name === name)) picked.delete(name); // gone since it was chosen
   if (!current) showLibrary();
   if (e.detail?.message) notify(e.detail.message); // how something asked of a recording went
 });
@@ -231,24 +244,80 @@ const hms = s => `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padS
 const fileSize = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
 function showVideos() {
+  const bin = videoView === 'bin', list = bin ? binned : videos;
   document.body.classList.add('in-folder');
-  folderName.value = 'Recordings';
+  folderName.value = bin ? 'Recently deleted' : 'Recordings';
   folderName.readOnly = true;
-  grid.replaceChildren(...videos.map(makeVideoCard));
-  empty.textContent = 'No recordings yet. Open a note, turn on 16:9 and tap Record.';
-  empty.hidden = videos.length > 0;
+  grid.replaceChildren(...list.map(video => makeVideoCard(video, bin)));
+  empty.textContent = bin ? `Nothing here. A recording you delete waits here for ${binDays} days, and can be restored.` : 'No recordings yet. Open a note, turn on 16:9 and tap Record.';
+  empty.hidden = list.length > 0;
+  drawVideoBar();
 }
 
+/* Choosing several recordings, and the bin. "Select" turns choosing on: a tap then chooses a recording instead of
+   playing it, and a bar at the foot says what can be done to the chosen ones (share, delete). Delete only moves them
+   to Recently deleted, where they wait (the app keeps them binDays days) and can be restored or deleted for good. */
+const vidBar = $('vid-bar'), vidCount = $('vid-count'), vidAll = $('vid-all'), vidShare = $('vid-share'), vidRestore = $('vid-restore'), vidDelete = $('vid-delete');
+const vidSelect = $('vid-select'), vidBin = $('vid-bin'), vidBinCount = $('vid-bin-count'), vidEmpty = $('vid-empty');
+
+// Choosing on or off (off forgets what was chosen).
+function chosen(on) {
+  selecting = on;
+  if (!on) picked.clear();
+}
+
+function drawVideoBar() {
+  const bin = videoView === 'bin', list = bin ? binned : videos, choosing = inVideos && (selecting || bin);
+  document.body.classList.toggle('selecting', choosing);
+  vidBar.hidden = !choosing || !list.length;
+  vidCount.textContent = picked.size ? `${picked.size} selected` : bin ? 'Tap recordings to choose them' : 'Choose recordings';
+  for (const button of [vidShare, vidRestore, vidDelete]) button.disabled = picked.size === 0;
+  vidAll.textContent = picked.size && picked.size === list.length ? 'Select none' : 'Select all';
+  vidDelete.textContent = bin ? 'Delete forever' : 'Delete';
+  vidSelect.textContent = selecting ? 'Done' : 'Select';
+  vidBinCount.textContent = binned.length || '';
+}
+
+// Tick or untick a recording's card.
+function pick(name, card) {
+  if (picked.has(name)) picked.delete(name); else picked.add(name);
+  card.classList.toggle('picked', picked.has(name));
+  drawVideoBar();
+}
+
+vidSelect.onclick = () => { chosen(!selecting); showVideos(); };
+vidBin.onclick = () => { videoView = 'bin'; chosen(false); showLibrary(); };
+vidAll.onclick = () => {
+  const list = videoView === 'bin' ? binned : videos, all = picked.size !== list.length;
+  picked.clear();
+  if (all) for (const video of list) picked.add(video.name);
+  for (const card of grid.querySelectorAll('.card.video')) card.classList.toggle('picked', picked.has(card.dataset.name));
+  drawVideoBar();
+};
+const forChosen = (action, then) => { askVideos({ action, names: [...picked] }); picked.clear(); then?.(); };
+vidShare.onclick = () => { if (picked.size) askVideos({ action: 'share', names: [...picked] }); };
+vidRestore.onclick = () => { if (picked.size) forChosen('restore'); };
+vidDelete.onclick = () => {
+  if (!picked.size) return;
+  if (videoView !== 'bin') return forChosen('delete', () => chosen(false));
+  if (confirm(`Delete ${picked.size === 1 ? 'this recording' : `these ${picked.size} recordings`} for good? This cannot be undone.`)) forChosen('purge');
+};
+vidEmpty.onclick = () => {
+  if (binned.length && confirm(`Delete ${binned.length === 1 ? 'the recording' : `all ${binned.length} recordings`} in Recently deleted for good? This cannot be undone.`)) askVideos({ action: 'emptyBin' });
+};
+
 // One recording: tap to play it; save or share it; delete it.
-function makeVideoCard(video) {
+function makeVideoCard(video, inBin = false) {
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
+  card.dataset.name = video.name;
+  card.classList.toggle('picked', picked.has(video.name));
   const title = video.name.replace(/\.(mov|mp4)$/i, '');
   const act = action => askVideos({ action, name: video.name });
   const open = card.querySelector('.card-open');
   card.classList.add('video');
   wireMore(card);
   open.title = `Play "${title}"`;
-  open.onclick = () => act('play');
+  open.onclick = () => (inBin || selecting ? pick(video.name, card) : act('play'));
   const thumb = card.querySelector('.card-thumb');
   thumb.innerHTML = VIDEO_ICON;
   if (typeof video.picture === 'string' && video.picture.startsWith('data:image/jpeg;base64,')) {
@@ -278,7 +347,8 @@ function makeVideoCard(video) {
   const remove = card.querySelector('.card-delete');
   remove.title = 'Delete recording';
   remove.setAttribute('aria-label', 'Delete recording');
-  remove.onclick = () => { if (confirm(`Delete the recording "${title}"? This cannot be undone.`)) act('delete'); };
+  remove.title = 'Delete recording (it can be restored for a while)';
+  remove.onclick = () => act('delete'); // into Recently deleted, not for good
 
   const save = document.createElement('button');
   save.type = 'button';
@@ -314,6 +384,13 @@ function makeVideoCard(video) {
     askVideos({ action: 'wrap', name: video.name });
   };
   edit.before(wrap);
+  if (inBin) { // a deleted recording is only chosen, restored or deleted for good: none of the card's own buttons
+    card.querySelector('.card-more')?.remove();
+    card.querySelector('.card-actions')?.remove();
+    open.title = `Choose "${title}"`;
+    const ago = Math.floor((Date.now() - video.deleted) / 864e5), left = Math.max(0, Math.ceil(binDays - (Date.now() - video.deleted) / 864e5));
+    card.querySelector('.card-date').textContent = `${fileSize(video.size)} · deleted ${ago < 1 ? 'today' : ago === 1 ? 'yesterday' : `${ago} days ago`} · ${left} ${left === 1 ? 'day' : 'days'} left`;
+  }
   return card;
 }
 
@@ -503,8 +580,14 @@ $('new-notebook').onclick = async () => {
 };
 
 $('folder-back').onclick = () => {
+  if (inVideos && videoView === 'bin') { // from Recently deleted back to the recordings
+    videoView = 'recordings';
+    chosen(false);
+    return showLibrary();
+  }
   folder = null;
   inVideos = false;
+  chosen(false);
   showLibrary();
 };
 
@@ -1948,6 +2031,32 @@ option(toolsBtn, 'toolsOff', off => {
 // A page cannot record the screen; the iPad app can (ios/App/Recorder.swift). The page asks it to
 // start and stop, and is told how it went by 'recorder' events on the window. The video is the
 // 16:9 window; these controls sit outside it (style.css, #rec-bar).
+// The app's signature (iPad app). An app installed with a free Apple ID stops opening when its signature ends, 7 days
+// after it was made. Only the PC can make a new one (it needs the Apple ID: the "Update EngiNote" page, with the iPad on
+// the cable), so the app says how long is left, warns when it is nearly out, and says what to do. The signature's date
+// is read by the app (NoteViewController.sendSignature) and comes as a 'signature' event.
+const shellSignature = window.webkit?.messageHandlers?.signature;
+if (shellSignature) {
+  const sigText = $('sig-text'), sigBtn = $('sig-btn');
+  let left = null; // days, once known
+  const RENEW = 'To keep EngiNote from stopping: plug the iPad into the PC and run "Update EngiNote" there. It takes about a minute and keeps your notes.';
+  addEventListener('signature', e => {
+    if (!e.detail?.known) { sigText.textContent = 'Signature not known'; return; }
+    const ms = e.detail.expires - Date.now();
+    left = Math.ceil(ms / 864e5);
+    const until = new Date(e.detail.expires).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    sigText.textContent = ms <= 0 ? 'Signature has ended' : `Runs until ${until} (${left} ${left === 1 ? 'day' : 'days'})`;
+    sigText.style.color = left <= 2 ? 'var(--danger)' : '';
+    if (left <= 2) notify(`EngiNote ${ms <= 0 ? 'has stopped being valid' : `stops working ${left <= 1 ? 'within a day' : 'in 2 days'}`}. ${RENEW}`);
+  });
+  sigBtn.onclick = () => notify(RENEW);
+  shellSignature.postMessage({});
+}
+$('reload-btn').onclick = () => {
+  if (document.body.classList.contains('recording')) return notify('Stop the recording first: reloading would end it.');
+  location.reload(); // notes are kept in the web view's storage and saved as they change
+};
+
 const shellRecorder = window.webkit?.messageHandlers?.recorder;
 if (shellRecorder) {
   const recBtn = $('rec-btn'), recPause = $('rec-pause'), recTime = $('rec-time'), recQuality = $('rec-quality');

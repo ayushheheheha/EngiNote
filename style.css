@@ -1477,3 +1477,25 @@ body:not(.full):not(.wide) #tools-toggle { left: auto; right: 12px; }
 
 /* Test hook only (app.js, runProbe): the layers without their compositing hints, to compare how ink is drawn. */
 body.nowc #mover, body.nowc #ink, body.nowc #page { will-change: auto; }
+
+/* ---------- Recordings: choosing several, and Recently deleted (app.js) ---------- */
+
+#vid-tools { display: none; align-items: center; gap: 6px; }
+body.in-videos #vid-tools { display: flex; }
+body.in-bin #vid-select, body:not(.in-bin) #vid-empty, body.in-bin #vid-bin { display: none; }
+#vid-bin { position: relative; }
+#vid-bin-count { position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 17px; text-align: center; }
+#vid-bin-count:empty { display: none; }
+.btn-secondary.danger { color: var(--danger); }
+/* The bar floats at the foot of the library while recordings are being chosen. */
+#vid-bar { position: sticky; bottom: 14px; z-index: 5; display: flex; align-items: center; gap: 8px; width: -webkit-fit-content; width: fit-content; max-width: calc(100% - 24px); margin: 8px auto 16px; padding: 6px 8px 6px 18px; border-radius: 999px; background: var(--glass-thick); -webkit-backdrop-filter: blur(var(--blur, 20px)); backdrop-filter: blur(var(--blur, 20px)); box-shadow: 0 6px 24px rgb(0 0 0 / .22), inset 0 0 0 1px var(--border); }
+#vid-bar[hidden] { display: none; }
+#vid-count { margin-right: 4px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+#vid-bar .btn-secondary { height: 38px; padding: 0 14px; background: var(--fill); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+#vid-bar .btn-secondary:disabled { opacity: .4; }
+body:not(.in-bin) #vid-restore, body.in-bin #vid-share { display: none; }
+/* A chosen recording: outlined, with a tick; while choosing, the others have an empty ring. */
+body.selecting .card.video .card-more { display: none; }
+body.selecting .card.video .card-thumb::after { content: ''; position: absolute; top: 8px; left: 8px; box-sizing: border-box; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; background: rgb(0 0 0 / .25); box-shadow: 0 1px 4px rgb(0 0 0 / .35); pointer-events: none; }
+.card.video.picked .card-thumb { box-shadow: inset 0 0 0 3px var(--accent); }
+body.selecting .card.video.picked .card-thumb::after { border-color: var(--accent); background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4 8-9'/%3E%3C/svg%3E") center / 18px no-repeat; }

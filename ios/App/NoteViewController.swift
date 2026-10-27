@@ -54,6 +54,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "paste")
         configuration.userContentController.add(self, name: "shared")
         configuration.userContentController.add(self, name: "browser")
+        configuration.userContentController.add(self, name: "signature")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -317,9 +318,11 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
     }
 
     /// The system's share sheet for a file (a movie, an exported PDF): save to Photos or Files, another app, AirDrop.
-    private func share(_ file: URL) {
+    private func share(_ file: URL) { share([file]) }
+
+    private func share(_ files: [URL]) {
         guard presentedViewController == nil else { return }
-        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        let sheet = UIActivityViewController(activityItems: files, applicationActivities: nil)
         sheet.popoverPresentationController?.sourceView = view
         sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 40, width: 1, height: 1)
         present(sheet, animated: true)
@@ -366,67 +369,195 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         return file
     }
 
-    /// Play, share or delete one recording, as the page asks; then, whatever was asked (also just
-    /// "list"), send the page the list as it now stands.
+    // MARK: Recently Deleted
+
+    /// How long a deleted recording waits before it goes for good.
+    private static let binKeepDays = 30.0
+
+    /// A deleted recording waits in a folder of its own, "Recently Deleted", in the recordings' folder (the Files app shows
+    /// it). When each was deleted is kept in a hidden file beside them.
+    private func binFolder() -> URL? {
+        guard let root = try? Recorder.folder() else { return nil }
+        let folder = root.appendingPathComponent("Recently Deleted", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    private func binLog(_ folder: URL) -> [String: Double] {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(".deleted.json")),
+              let log = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return log
+    }
+
+    private func saveBinLog(_ log: [String: Double], in folder: URL) {
+        guard let data = try? JSONEncoder().encode(log) else { return }
+        try? data.write(to: folder.appendingPathComponent(".deleted.json"), options: .atomic)
+    }
+
+    /// The recording in the bin that the page means by `name`: a movie in that folder and nothing else.
+    private func binned(named name: Any?) -> URL? {
+        guard let name = name as? String, let folder = binFolder() else { return nil }
+        let file = folder.appendingPathComponent((name as NSString).lastPathComponent)
+        guard file.pathExtension.lowercased() == "mov", FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return file
+    }
+
+    /// Into the bin. Its Studio notes (the pen's path, the intro marks) stay where they are, under its name, so that a restore finds them.
+    private func moveToBin(_ file: URL) -> Bool {
+        guard let folder = binFolder() else { return false }
+        var target = folder.appendingPathComponent(file.lastPathComponent)
+        if FileManager.default.fileExists(atPath: target.path) {
+            target = folder.appendingPathComponent(String(UUID().uuidString.prefix(6)) + " " + file.lastPathComponent)
+        }
+        do { try FileManager.default.moveItem(at: file, to: target) } catch { return false }
+        var log = binLog(folder)
+        log[target.lastPathComponent] = Date().timeIntervalSince1970 * 1000
+        saveBinLog(log, in: folder)
+        return true
+    }
+
+    /// Out of the bin, back among the recordings (under a new name if that one is taken).
+    private func restoreFromBin(_ file: URL) -> Bool {
+        guard let root = try? Recorder.folder(), let folder = binFolder() else { return false }
+        var target = root.appendingPathComponent(file.lastPathComponent)
+        if FileManager.default.fileExists(atPath: target.path) {
+            target = root.appendingPathComponent(target.deletingPathExtension().lastPathComponent + " (restored)").appendingPathExtension(file.pathExtension)
+        }
+        do { try FileManager.default.moveItem(at: file, to: target) } catch { return false }
+        var log = binLog(folder)
+        log[file.lastPathComponent] = nil
+        saveBinLog(log, in: folder)
+        return true
+    }
+
+    /// Gone for good: the movie, and everything kept about it.
+    private func eraseForever(_ file: URL) {
+        try? FileManager.default.removeItem(at: file)
+        StudioWrap.forget(file)
+        if let notes = Sidecar.url(for: file) { try? FileManager.default.removeItem(at: notes) }
+        if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
+            try? FileManager.default.removeItem(at: caches.appendingPathComponent("RecordingPictures/" + file.lastPathComponent + ".jpg"))
+        }
+        if let folder = binFolder() {
+            var log = binLog(folder)
+            log[file.lastPathComponent] = nil
+            saveBinLog(log, in: folder)
+        }
+    }
+
+    /// What is in the bin, and when each was deleted. Anything that has waited its time goes first.
+    private func binContents() -> [(file: URL, deleted: Double)] {
+        guard let folder = binFolder() else { return [] }
+        var log = binLog(folder)
+        let now = Date().timeIntervalSince1970 * 1000
+        let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        var kept: [(file: URL, deleted: Double)] = []
+        var changed = false
+        for file in found where file.pathExtension.lowercased() == "mov" {
+            if log[file.lastPathComponent] == nil { // put there by something else: it starts waiting now
+                log[file.lastPathComponent] = now
+                changed = true
+            }
+            let deleted = log[file.lastPathComponent] ?? now
+            if now - deleted > Self.binKeepDays * 86_400_000 {
+                eraseForever(file)
+                log[file.lastPathComponent] = nil
+                changed = true
+                continue
+            }
+            kept.append((file, deleted))
+        }
+        if changed { saveBinLog(log, in: folder) }
+        return kept
+    }
+
+    /// "1 recording", "3 recordings".
+    private static func count(_ n: Int) -> String { n == 1 ? "1 recording" : "\(n) recordings" }
+
+    /// What the page asks of recordings, then, whatever was asked (also just "list"), the list as it now stands:
+    /// the recordings, and those in Recently Deleted. One at a time: play, edit, studio, wrap. Several at once (`names`):
+    /// share, delete (into the bin), restore, purge (gone for good); and "emptyBin".
     private func recordings(_ body: [String: Any], note: String? = nil) {
-        if let file = recording(named: body["name"]) {
-            switch body["action"] as? String {
-            case "play":
-                if presentedViewController == nil {
-                    let player = AVPlayerViewController()
-                    player.player = AVPlayer(url: file)
-                    present(player, animated: true) { player.player?.play() }
+        let names: [Any] = (body["names"] as? [Any]) ?? (body["name"].map { [$0] } ?? [])
+        var message = note
+        switch body["action"] as? String {
+        case "delete": // the page has already asked: it goes to Recently Deleted, not for good
+            let moved = names.compactMap { recording(named: $0) }.filter { moveToBin($0) }
+            if !moved.isEmpty { message = "\(Self.count(moved.count)) moved to Recently Deleted. \(moved.count == 1 ? "It stays" : "They stay") there for \(Int(Self.binKeepDays)) days." }
+        case "restore":
+            let back = names.compactMap { binned(named: $0) }.filter { restoreFromBin($0) }
+            if !back.isEmpty { message = "\(Self.count(back.count)) restored." }
+        case "purge": // the page has already asked: gone for good
+            let gone = names.compactMap { binned(named: $0) }
+            gone.forEach { eraseForever($0) }
+            if !gone.isEmpty { message = "\(Self.count(gone.count)) deleted for good." }
+        case "emptyBin":
+            let all = binContents().map { $0.file }
+            all.forEach { eraseForever($0) }
+            if !all.isEmpty { message = "Recently Deleted is empty." }
+        case "share":
+            let files = names.compactMap { recording(named: $0) }
+            if !files.isEmpty { share(files) }
+        default:
+            if let file = recording(named: body["name"]) {
+                switch body["action"] as? String {
+                case "play":
+                    if presentedViewController == nil {
+                        let player = AVPlayerViewController()
+                        player.player = AVPlayer(url: file)
+                        present(player, animated: true) { player.player?.play() }
+                    }
+                case "edit": // trim and cut: VideoEditor.swift saves the result as a new recording
+                    if presentedViewController == nil {
+                        let editor = VideoEditor(file: file, busy: recorder.activeFile?.lastPathComponent)
+                        editor.onSaved = { [weak self] in self?.recordings([:]) }
+                        present(editor, animated: true)
+                    }
+                case "studio": // zoom on the writing, polish the voice, intro and outro, a vertical short: Studio.swift
+                    if presentedViewController == nil {
+                        let studio = StudioViewController(movie: file)
+                        studio.onSaved = { [weak self] in self?.recordings([:]) }
+                        present(studio, animated: true)
+                    }
+                case "wrap": // the intro and outro, on if they are off and off if they are on
+                    wrap(file, add: StudioWrap.marks(for: file) == nil, introAt: body["introAt"] as? Double ?? 0)
+                default:
+                    break
                 }
-            case "share":
-                share(file)
-            case "edit": // trim and cut: VideoEditor.swift saves the result as a new recording
-                if presentedViewController == nil {
-                    let editor = VideoEditor(file: file, busy: recorder.activeFile?.lastPathComponent)
-                    editor.onSaved = { [weak self] in self?.recordings([:]) }
-                    present(editor, animated: true)
-                }
-            case "studio": // zoom on the writing, polish the voice, intro and outro, a vertical short: Studio.swift
-                if presentedViewController == nil {
-                    let studio = StudioViewController(movie: file)
-                    studio.onSaved = { [weak self] in self?.recordings([:]) }
-                    present(studio, animated: true)
-                }
-            case "wrap": // the intro and outro, on if they are off and off if they are on
-                wrap(file, add: StudioWrap.marks(for: file) == nil, introAt: body["introAt"] as? Double ?? 0)
-            case "delete": // the page has already asked the user if they are sure
-                try? FileManager.default.removeItem(at: file)
-                StudioWrap.forget(file)
-                if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
-                    try? FileManager.default.removeItem(at: caches.appendingPathComponent("RecordingPictures/" + file.lastPathComponent + ".jpg"))
-                }
-            default:
-                break
             }
         }
 
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let active = recorder.activeFile?.lastPathComponent
+        let waiting = binContents() // on this thread: it may delete what has waited its time
+        let said = message
         // Picking a frame from each movie takes a moment the first time: off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var found: [URL] = []
             if let folder = try? Recorder.folder() {
                 found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
             }
+            let describe = { (url: URL, deleted: Double?) -> [String: Any] in
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                var item: [String: Any] = ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
+                if let picture = Self.picture(of: url) { item["picture"] = "data:image/jpeg;base64," + picture.base64EncodedString() }
+                if let deleted = deleted { item["deleted"] = deleted }
+                return item
+            }
             let files: [[String: Any]] = found
                 .filter { $0.pathExtension.lowercased() == "mov" && $0.lastPathComponent != active }
                 .map { url in
-                    let values = try? url.resourceValues(forKeys: Set(keys))
-                    let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                    var entry: [String: Any] = ["name": url.lastPathComponent, "size": values?.fileSize ?? 0, "modified": modified * 1000]
-                    if let picture = Self.picture(of: url) { entry["picture"] = "data:image/jpeg;base64," + picture.base64EncodedString() }
+                    var item = describe(url, nil)
                     if let marks = StudioWrap.marks(for: url) {
-                        entry["wrapped"] = true
-                        entry["introAt"] = marks.at ?? 0
+                        item["wrapped"] = true
+                        item["introAt"] = marks.at ?? 0
                     }
-                    return entry
+                    return item
                 }
-            var news: [String: Any] = ["files": files]
-            if let note = note { news["message"] = note }
+            let bin: [[String: Any]] = waiting.map { describe($0.file, $0.deleted) }
+            var news: [String: Any] = ["files": files, "bin": bin, "binDays": Self.binKeepDays]
+            if let said = said { news["message"] = said }
             DispatchQueue.main.async { self?.send("recordings", news) }
         }
     }
@@ -487,6 +618,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "export": export(body)
         case "paste": pastePicture()
         case "browser": browse(body)
+        case "signature": sendSignature()
         case "shared": pageReady = true; deliverShared() // the page is up: what was shared to the app can go to it
         default: break
         }
@@ -522,6 +654,22 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         guard pageReady else { return } // the page asks for them as it starts
         for file in waiting { send("shared", file) }
         waiting.removeAll()
+    }
+
+    // MARK: How long the app's signature lasts
+
+    /// When the signature that lets this app open runs out: the expiry date in the provisioning profile the app was
+    /// installed with (a free Apple ID's lasts 7 days). The page is told as a 'signature' event, or that it is not known.
+    private func sendSignature() {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let start = data.range(of: Data("<?xml".utf8)), let end = data.range(of: Data("</plist>".utf8), options: .backwards),
+              let plist = try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound..<end.upperBound), options: [], format: nil) as? [String: Any],
+              let expires = plist["ExpirationDate"] as? Date else {
+            send("signature", ["known": false])
+            return
+        }
+        send("signature", ["known": true, "expires": expires.timeIntervalSince1970 * 1000])
     }
 
     // MARK: The in-app browser

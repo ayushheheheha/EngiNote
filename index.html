@@ -84,6 +84,15 @@
           </button>
         </div>
         <div class="lib-actions">
+          <!-- Recordings only (the iPad app): choose several at once; the bin of deleted ones; and, inside the bin, emptying it. -->
+          <div id="vid-tools">
+            <button id="vid-select" class="btn-secondary" type="button">Select</button>
+            <button id="vid-empty" class="btn-secondary danger" type="button">Empty</button>
+            <button id="vid-bin" class="icon-btn" type="button" title="Recently deleted" aria-label="Recently deleted">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+              <b id="vid-bin-count"></b>
+            </button>
+          </div>
           <!-- Find a note by its name. -->
           <div id="lib-find">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
@@ -129,6 +138,14 @@
         </div>
         <p id="empty" hidden>No notes yet. Tap Create to start a notebook, or import an HTML or PDF file with the + at the top.</p>
       </main>
+      <!-- What can be done to the chosen recordings; shown while choosing, and in Recently deleted. -->
+      <div id="vid-bar" role="toolbar" aria-label="Chosen recordings" hidden>
+        <span id="vid-count"></span>
+        <button id="vid-all" class="btn-secondary" type="button">Select all</button>
+        <button id="vid-share" class="btn-secondary" type="button">Share</button>
+        <button id="vid-restore" class="btn-secondary" type="button">Restore</button>
+        <button id="vid-delete" class="btn-secondary danger" type="button">Delete</button>
+      </div>
     </div>
     <input id="file-input" type="file" accept=".html,.htm,text/html,.pdf,application/pdf" multiple hidden>
     <input id="backup-input" type="file" accept=".json,application/json" hidden>
@@ -335,6 +352,10 @@
               <div class="set-row app-only"><span>Camera bubble</span><button id="lec-cam" class="icon-btn chip" type="button" aria-pressed="false" title="Open the camera bubble with lecture mode">Off</button></div>
               <div class="set-row"><span>Full screen</span><button id="lec-full" class="icon-btn chip" type="button" aria-pressed="false" title="Go full screen with lecture mode">Off</button></div>
               <div class="set-row app-only"><span>Check before recording</span><button id="precheck-btn" class="icon-btn chip" type="button" aria-pressed="true" title="Before the countdown, show the microphone, the room left and the battery">On</button></div>
+              <!-- The app itself (iPad app): how long its signature lasts, and a reload for a screen that hangs. -->
+              <p class="set-head app-only">The app</p>
+              <div class="set-row app-only"><span id="sig-text">Signature</span><button id="sig-btn" class="icon-btn chip" type="button" title="How to keep the app from stopping">Renew</button></div>
+              <div class="set-row app-only"><span>If the screen hangs</span><button id="reload-btn" class="icon-btn chip" type="button" title="Load the app's screen again. Your notes are kept; not while recording">Reload</button></div>
             </div>
           </div>
           <button class="icon-btn fit-btn rail-only" type="button" title="Fit width" aria-label="Fit width">
