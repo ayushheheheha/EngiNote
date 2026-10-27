@@ -1,4 +1,4 @@
-import { createInk, strokeData, strokeWidth, opacityOf, boxOf } from './ink.js';
+import { createInk, strokeData, strokeWidth, opacityOf, boxOf, setSmoothing } from './ink.js';
 import { createLasso } from './lasso.js';
 import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages, hasCover, setCover } from './pages.js';
 import { COVER_H } from './cover.js';
@@ -10,7 +10,7 @@ import { createGhost } from './ghost.js';
 import { createCalc } from './calc.js';
 import { createBrowser } from './browser.js';
 import { createTabs, MAX_TABS } from './tabs.js';
-import { detent, undetent, EASE } from './detent.js';
+import { inBand } from './fitband.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -800,42 +800,24 @@ function setZoom(value, cx, cy, hold) {
 // it already has. So a pinch redraws nothing and lays out nothing, and the point the fingers hold
 // stays under them to a fraction of a pixel. The note is redrawn sharp once, when they lift.
 //
-// The fit-width zoom holds the sheet a little (detent.js): as the fingers come to it the sheet slows,
-// stops while they pass it, and speeds up again as they leave, with no jump anywhere. The zoom label
-// says "Fit" while it is held. `dd` is how far the sheet's zoom is from fit-width (log), `d` how far the
-// fingers' is; the two differ only once the hold is on. A pinch that starts within its reach (a note
-// opens at fit-width) moves freely at first, or a small pinch would be swallowed: the hold takes over once
-// the sheet has left its reach.
+// Fit-width is easy to land on, as in Freenotes (fitband.js): the sheet skips a band of zoom around it. Pinching in,
+// the sheet follows the fingers until they reach the band's lower edge, jumps to fit-width and stays there while
+// the fingers cross the band, then jumps on to the fingers' zoom when they leave it. Pinching out is the same the
+// other way round. Nothing is animated. `v` is the fingers' zoom, `rest` what the sheet shows inside the band:
+// fit-width, or, for a pinch that began inside the band on some other zoom, that zoom until the fingers leave the band.
 let pinch = null;
 
 function pinchMove(factor, x, y, hold) {
-  const fit = clampZoom(fitZoom()), step = Math.log(factor);
-  if (!pinch) {
-    const dd = Math.log(zoom / fit);
-    pinch = { dd, d: Math.abs(dd) > EASE ? undetent(dd) : null };
-  }
-  if (pinch.d !== null) {
-    pinch.d += step;
-    pinch.dd = detent(pinch.d);
-  } else {
-    pinch.dd += step;
-    if (Math.abs(pinch.dd) > EASE) pinch.d = undetent(pinch.dd);
-  }
-  let z = fit * Math.exp(pinch.dd);
-  const bounded = clampZoom(z);
-  if (bounded !== z) { // the zoom limits: the fingers' zoom comes back to the sheet's, so that pinching the other way moves it at once
-    z = bounded;
-    pinch.dd = Math.log(z / fit);
-    if (pinch.d !== null) pinch.d = undetent(pinch.dd);
-  }
+  const fit = clampZoom(fitZoom());
+  if (!pinch) pinch = { v: zoom, rest: inBand(zoom, fit) ? zoom : fit };
+  pinch.v = clampZoom(pinch.v * factor); // at a zoom limit the fingers' zoom stays with the sheet's, so pinching back moves it at once
+  const inside = inBand(pinch.v, fit);
+  if (!inside) pinch.rest = fit;
+  const z = inside ? pinch.rest : pinch.v, held = inside && z === fit;
   pinch.zoom = z;
-  const held = pinch.d !== null && pinch.dd === 0;
   const [left, top] = origin();
   pinch.at = [x - left - hold[0] * z, y - top - hold[1] * z];
-  if (pinch.d !== null) { // near fit-width the sheet also draws in to the middle of the window, the more the nearer it is
-    const t = Math.min(1, Math.abs(pinch.dd) / 0.08), centred = (scroller.clientWidth - PAGE_WIDTH * z) / 2, pull = 1 - t * t * (3 - 2 * t);
-    pinch.at[0] += (centred - pinch.at[0]) * pull;
-  }
+  if (held) pinch.at[0] = (scroller.clientWidth - PAGE_WIDTH * z) / 2; // held at fit-width, the sheet sits in the middle of the window
   mover.style.transition = '';
   mover.style.transform = `translate(${pinch.at[0]}px, ${pinch.at[1]}px) scale(${z / zoom})`;
   showZoom(z);
@@ -2328,10 +2310,12 @@ window.webkit?.messageHandlers?.shared?.postMessage({ ready: true }); // ready f
 // note with the most strokes, at that zoom, on the middle stroke. It only reads; "&nowc" drops the compositing hints.
 async function runProbe(args) {
   document.body.classList.toggle('nowc', args.has('nowc'));
+  if (args.has('raw')) setSmoothing(false); // the strokes as drawn, to compare
   const docs = (await db.all()).filter(d => d.strokes?.length).sort((a, b) => b.strokes.length - a.strokes.length);
   if (!docs[0]) return showLibrary();
+  if (args.has('dump')) try { localStorage.setItem('probeDump', JSON.stringify(docs[0].strokes)); } catch { /* too big or blocked */ } // for tuning ink on the PC
   await openDoc(docs[0].id);
-  await new Promise(done => setTimeout(done, 1500)); // the note settles (it fits itself to the window as it loads) before it is zoomed
+  await new Promise(done => setTimeout(done, 5000)); // the note settles (it fits itself to the window as it loads) before it is zoomed
   setZoom(Number(args.get('probe')) || 1);
   const [x0, y0, x1, y1] = boxOf(docs[0].strokes[docs[0].strokes.length >> 1]);
   place([scroller.clientWidth / 2 - (x0 + x1) / 2 * zoom, scroller.clientHeight / 2 - (y0 + y1) / 2 * zoom]);

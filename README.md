@@ -31,7 +31,7 @@ Import your notes as HTML or PDF files, or start a blank notebook, and write ove
 
 **Getting around**
 - Fingers scroll and pinch to zoom; only the stylus (or mouse) draws, so a resting palm never leaves a mark. A toggle lets fingers draw instead.
-- Pinch-zoom holds at fit-width when you get close to it: the page slows, stops while your fingers pass it and speeds up again with no jump, and the zoom label says "Fit" while it is held (`detent.js`, checked by `node detent.test.mjs`).
+- Pinch-zoom skips a band of zoom around fit-width, as Freenotes does: pinching in, the note follows your fingers to the band's lower edge, jumps to fit-width, stays there while your fingers cross the band, then jumps on to where they are; pinching out is the same the other way. No animation, no slowing. The zoom label says "Fit" while it is held (`fitband.js`, checked by `node fitband.test.mjs`).
 - Light and dark themes.
 - Full screen, with the tools in a thin rail at the side.
 - A small arrow hides the toolbar and brings it back.

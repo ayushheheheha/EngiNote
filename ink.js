@@ -61,11 +61,79 @@ const isFlow = stroke => stroke.tool === 'flow' || stroke.points[0].length > 2;
 /** How see-through a stroke is drawn, 0..1. The highlighter's default is for strokes saved before pens had their own. */
 export const opacityOf = stroke => stroke.opacity ?? (stroke.tool === 'highlighter' ? HIGHLIGHTER_OPACITY : 1);
 
+// ---------- smoothing a stroke's points ----------
+// A hand is never steady, and the points it leaves are not a clean curve: they shake by a pixel or two, and a pointer
+// that reports whole pixels leaves steps. Drawn as they are, that is a wobbly, "grainy" line, most plainly zoomed in.
+// So a stroke is drawn through a smoothed copy of its points: each point is pulled towards its neighbours a few times
+// over (a binomial blur, which unlike a spline never overshoots), except at the sharp corners of the writing, which
+// stay sharp. The stroke as saved is never changed: it is the points that were drawn, and this only draws them.
+const SMOOTH_PASSES = 4;     // each pass spreads a point's noise over its neighbours; more is smoother and rounds curves a little more
+const CORNER_TURN = 1.15;    // radians (about 66 degrees): a turn this sharp, seen over three points either side, is a corner
+const CORNER_LOOK = 3;       // points either side of a candidate corner
+const CORNER_MIN = 1.2;      // page px: the arms of a corner must be longer than this, or it is only tremor at rest
+let smoothing = true;
+/** Turn the smoothing off (a test hook: compare the line as drawn with the smoothed one). */
+export const setSmoothing = on => { smoothing = !!on; };
+
+/** `a` blurred `passes` times with its two ends fixed; [from, to] is the stretch worked on, ends included. */
+function blur(a, from, to, passes) {
+  for (let t = 0; t < passes; t++) {
+    let before = a[from];
+    for (let i = from + 1; i < to; i++) {
+      const here = a[i];
+      a[i] = (before + 2 * here + a[i + 1]) / 4;
+      before = here;
+    }
+  }
+}
+
+const smoothed = new WeakMap(); // a finished stroke's points -> their smoothed copy: a stroke is never changed once committed
+function smoothFresh(points) {
+  const n = points.length;
+  const x = points.map(p => p[0]), y = points.map(p => p[1]);
+  // Corners: where the line turns sharply, and no sharper turn lies within a few points of it.
+  const turn = new Array(n).fill(0);
+  for (let i = CORNER_LOOK; i < n - CORNER_LOOK; i++) {
+    const ax = x[i] - x[i - CORNER_LOOK], ay = y[i] - y[i - CORNER_LOOK], bx = x[i + CORNER_LOOK] - x[i], by = y[i + CORNER_LOOK] - y[i];
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    if (la > CORNER_MIN && lb > CORNER_MIN) turn[i] = Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb))));
+  }
+  const stops = [0];
+  for (let i = CORNER_LOOK; i < n - CORNER_LOOK; i++) {
+    if (turn[i] < CORNER_TURN) continue;
+    let best = true;
+    for (let k = Math.max(0, i - CORNER_LOOK); k <= Math.min(n - 1, i + CORNER_LOOK); k++) if (turn[k] > turn[i] || (turn[k] === turn[i] && k < i)) best = false;
+    if (best) stops.push(i);
+  }
+  stops.push(n - 1);
+  for (let k = 0; k + 1 < stops.length; k++) { // each stretch between corners is smoothed on its own
+    blur(x, stops[k], stops[k + 1], SMOOTH_PASSES);
+    blur(y, stops[k], stops[k + 1], SMOOTH_PASSES);
+  }
+  const out = points.map((p, i) => [round2(x[i]), round2(y[i])]);
+  if (points[0].length > 2) { // pressure is smoothed over the whole stroke, corners included, and more: width must change gently
+    const pr = points.map(p => p[2]);
+    blur(pr, 0, n - 1, SMOOTH_PASSES * 2);
+    out.forEach((q, i) => q.push(round2(pr[i])));
+  }
+  return out;
+}
+
+/** `points` as they are drawn: smoothed. `done`: a finished stroke, whose result is kept. */
+function drawn(points, done) {
+  if (!smoothing || points.length < 7) return points;
+  if (!done) return smoothFresh(points);
+  let result = smoothed.get(points);
+  if (!result) smoothed.set(points, result = smoothFresh(points));
+  return result;
+}
+
 // Path data for the outline of a flow stroke. Its points are [x, y] or, from a stylus that reports
 // it, [x, y, pressure]; without pressure the width follows the speed of the hand instead.
 // `done` is false while the stroke is still being drawn (its end then trails the pointer a little).
 function flowData(stroke, done) {
-  const edge = getStroke(stroke.points, { ...FLOW, size: stroke.size, simulatePressure: stroke.points[0].length < 3, last: done });
+  const points = drawn(stroke.points, done);
+  const edge = getStroke(points, { ...FLOW, size: stroke.size, simulatePressure: points[0].length < 3, last: done });
   const n = edge.length;
   if (n < 4) return '';
   // Curves through the midpoints of the outline's points, as the library's notes suggest.
@@ -77,7 +145,7 @@ function flowData(stroke, done) {
 
 /** Path data for any stroke: an outline to fill for a flow stroke, a line to stroke otherwise. */
 export function strokeData(stroke, done = true) {
-  return isFlow(stroke) ? flowData(stroke, done) : pathData(stroke.points);
+  return isFlow(stroke) ? flowData(stroke, done) : pathData(drawn(stroke.points, done));
 }
 
 const boxes = new WeakMap();
