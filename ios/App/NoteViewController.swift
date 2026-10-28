@@ -55,6 +55,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         configuration.userContentController.add(self, name: "shared")
         configuration.userContentController.add(self, name: "browser")
         configuration.userContentController.add(self, name: "signature")
+        configuration.userContentController.add(self, name: "refresh")
 
         webView = WKWebView(frame: view.bounds, configuration: configuration)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -619,6 +620,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
         case "paste": pastePicture()
         case "browser": browse(body)
         case "signature": sendSignature()
+        case "refresh": refreshRequest(body)
         case "shared": pageReady = true; deliverShared() // the page is up: what was shared to the app can go to it
         default: break
         }
@@ -670,6 +672,34 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             return
         }
         send("signature", ["known": true, "expires": expires.timeIntervalSince1970 * 1000])
+    }
+
+    // MARK: Asking the PC to refresh the app
+
+    /// The Refresh button cannot sign the app itself (that takes the Apple ID and a signing tool, which only the PC has), and
+    /// the iPad cannot call the PC over the cable. But the PC can read the app's files over the cable: so a tap leaves a small
+    /// file in Documents, and the updater on the PC, which looks for it every few seconds, deletes it and does the refresh.
+    /// The page asks again a little later whether the file is still there: if it is, nobody answered.
+    private var refreshFile: URL? {
+        try? Recorder.folder().appendingPathComponent(".refresh-request")
+    }
+
+    private func refreshRequest(_ body: [String: Any]) {
+        guard let file = refreshFile else { return send("refresh", ["answer": "request", "pending": false, "problem": "the app's folder cannot be reached"]) }
+        switch body["action"] as? String {
+        case "request":
+            do {
+                try String(Date().timeIntervalSince1970).write(to: file, atomically: true, encoding: .utf8)
+                send("refresh", ["answer": "request", "pending": true])
+            } catch {
+                send("refresh", ["answer": "request", "pending": false, "problem": error.localizedDescription])
+            }
+        case "giveup": // nobody answered: take the request back, so that it does not fire later
+            try? FileManager.default.removeItem(at: file)
+            send("refresh", ["answer": "giveup", "pending": false])
+        default: // "status"
+            send("refresh", ["answer": "status", "pending": FileManager.default.fileExists(atPath: file.path)])
+        }
     }
 
     // MARK: The in-app browser

@@ -2039,7 +2039,7 @@ const shellSignature = window.webkit?.messageHandlers?.signature;
 if (shellSignature) {
   const sigText = $('sig-text'), sigBtn = $('sig-btn');
   let left = null; // days, once known
-  const RENEW = 'To keep EngiNote from stopping: plug the iPad into the PC and run "Update EngiNote" there. It takes about a minute and keeps your notes.';
+  const RENEW = 'To keep EngiNote from stopping: plug the iPad into the PC, make sure "Update EngiNote" is running there, and tap Refresh in Settings.';
   addEventListener('signature', e => {
     if (!e.detail?.known) { sigText.textContent = 'Signature not known'; return; }
     const ms = e.detail.expires - Date.now();
@@ -2049,7 +2049,25 @@ if (shellSignature) {
     sigText.style.color = left <= 2 ? 'var(--danger)' : '';
     if (left <= 2) notify(`EngiNote ${ms <= 0 ? 'has stopped being valid' : `stops working ${left <= 1 ? 'within a day' : 'in 2 days'}`}. ${RENEW}`);
   });
-  sigBtn.onclick = () => notify(RENEW);
+  // Refresh: asks the PC (the updater, over the cable) to renew the app. The app cannot do it itself, and cannot call the PC:
+  // it leaves a request that the PC finds (NoteViewController.refreshRequest), and checks a little later that the PC took it.
+  const shellRefresh = window.webkit?.messageHandlers?.refresh;
+  let asked = 0;
+  sigBtn.onclick = () => {
+    if (document.body.classList.contains('recording')) return notify('Stop the recording first: refreshing closes the app for a minute.');
+    if (!shellRefresh) return notify(RENEW);
+    shellRefresh.postMessage({ action: 'request' });
+    notify('Asking the PC to refresh EngiNote... keep the iPad plugged in and unlocked.');
+    clearTimeout(asked);
+    asked = setTimeout(() => shellRefresh.postMessage({ action: 'status' }), 12000);
+  };
+  addEventListener('refresh', e => {
+    if (e.detail?.problem) return notify(`Could not ask the PC: ${e.detail.problem}.`);
+    if (e.detail?.answer !== 'status') return; // only the check a little later says how it went
+    if (!e.detail.pending) return notify('The PC has taken it. EngiNote closes for a minute while it is renewed: open it again after.');
+    shellRefresh.postMessage({ action: 'giveup' });
+    notify('The PC did not answer. Plug the iPad into the PC, open "Update EngiNote" there (leave it open), and tap Refresh again.');
+  });
   shellSignature.postMessage({});
 }
 $('reload-btn').onclick = () => {
