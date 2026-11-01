@@ -1445,16 +1445,17 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
   -webkit-user-select: none;
   touch-action: manipulation;
 }
-#note-tab-list { display: flex; gap: 3px; min-width: 0; }
-.note-tab { display: flex; align-items: center; flex: 0 1 auto; width: 190px; min-width: 84px; height: 36px; border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--muted); }
-.note-tab.on { background: rgb(255 255 255 / .95); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgb(20 25 40 / .16), 0 0 0 1px rgb(120 128 150 / .16); }
-:root[data-theme="dark"] .note-tab.on { background: rgb(255 255 255 / .16); box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), 0 0 0 1px rgb(255 255 255 / .08); }
-.note-tab-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 36px; padding: 0 2px 0 13px; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; text-align: left; }
-.note-tab-open .icon { flex: none; width: 16px; height: 16px; }
+#note-tab-list { display: flex; flex: 1; gap: 4px; min-width: 0; }
+/* Like Freenotes: a flat bar, the tabs share its width, a small round cross at the left, the name centred; the open one a soft block. */
+#note-tabs.strip { right: 84px; max-width: none; padding: 3px; border-radius: 14px; }
+.note-tab { position: relative; display: flex; align-items: center; flex: 1 1 0; min-width: 84px; height: 36px; border-radius: 10px; font-size: 15px; font-weight: 400; color: var(--muted); }
+.note-tab.on { background: rgb(0 0 0 / .08); color: var(--text); }
+:root[data-theme="dark"] .note-tab.on { background: rgb(255 255 255 / .14); box-shadow: none; }
+.note-tab-open { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; min-width: 0; height: 36px; padding: 0 34px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: center; }
+.note-tab-open .icon { display: none; }
 .note-tab-open span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note-tab-x { display: grid; place-items: center; flex: none; width: 34px; height: 34px; margin-right: 1px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; }
-.note-tab-x .icon { width: 11px; height: 11px; stroke-width: 2.4; }
-.note-tab.on .note-tab-x { color: var(--muted); }
+.note-tab-x { position: absolute; left: 3px; top: 3px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; }
+.note-tab-x .icon { width: 18px; height: 18px; border-radius: 50%; background: rgb(128 128 140 / .4); stroke-width: 3; stroke: var(--muted); }
 .note-tab-rec { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #e03131; }
 #tab-add-wrap { flex: none; }
 #tab-add-wrap .flyout { top: calc(100% + 8px); left: 0; --at: translate(0); transform-origin: 0 0; max-width: min(320px, 80vw); }
@@ -1467,7 +1468,6 @@ body.wide #note-tabs, body.full #note-tabs, body.tools-off #note-tabs { display:
 body:not(.full):not(.wide) #tools-toggle { left: auto; right: 12px; }
 @media (hover: hover) {
   .note-tab:not(.on):hover { background: var(--fill); }
-  .note-tab-x:hover { background: var(--fill); }
 }
 .k.span3 { grid-column: span 3; }
 /* The cursor: a bar that blinks, in the sum, inside a fraction or a power when that is where the next digit goes. */
