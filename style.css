@@ -1447,7 +1447,7 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 }
 #note-tab-list { display: flex; flex: 1; gap: 4px; min-width: 0; }
 /* Like Freenotes: a flat bar, the tabs share its width, a small round cross at the left, the name centred; the open one a soft block. */
-#note-tabs.strip { right: 84px; max-width: none; padding: 3px; border-radius: 14px; }
+#note-tabs.strip { right: 12px; max-width: none; padding: 3px; border-radius: 14px; }
 .note-tab { position: relative; display: flex; align-items: center; flex: 1 1 0; min-width: 84px; height: 36px; border-radius: 10px; font-size: 15px; font-weight: 400; color: var(--muted); }
 .note-tab.on { background: rgb(0 0 0 / .08); color: var(--text); }
 :root[data-theme="dark"] .note-tab.on { background: rgb(255 255 255 / .14); box-shadow: none; }
@@ -1464,7 +1464,7 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 #tab-menu .btn-secondary.all { color: var(--accent); }
 
 /* With the tabs under the toolbar the arrow is at its right end, not in the middle, where the tabs would pass beneath it. */
-body:not(.full) #tools-toggle { left: auto; right: 12px; }
+
 @media (hover: hover) {
   .note-tab:not(.on):hover { background: var(--fill); }
 }

@@ -799,15 +799,15 @@ const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 // full screen the tools are a rail beside the window, and nothing is in the way.
 const toolbar = $('toolbar'), noteTabs = $('note-tabs');
 // The strip of open notes hangs under the toolbar and is as much in the way (it is not there in the 16:9 window: style.css).
-const tabsHeight = () => (noteTabs.offsetHeight ? noteTabs.offsetHeight + 6 : 0);
-// Under the toolbar; in full screen at the top, left of the rail.
+const inFull = () => document.body.matches('.full');
+// The bar of tabs runs the whole width: under the toolbar and the arrow that puts the tools away (22px), or in full screen at the top, left of the rail.
+const tabsTop = () => (inFull() ? 8 : toolbar.offsetHeight + 28);
+const tabsBottom = () => (noteTabs.offsetHeight ? tabsTop() + noteTabs.offsetHeight + 6 : 0);
 const layoutTabs = () => {
-  const full = document.body.matches('.full');
-  const off = document.body.matches('.tools-off');
-  noteTabs.style.top = full || off ? '8px' : `${toolbar.offsetHeight + 6}px`;
-  noteTabs.style.right = full ? `${toolbar.offsetWidth + (off ? 40 : 12)}px` : ''; // the arrow that brings the rail back sits left of it
+  noteTabs.style.top = `${tabsTop()}px`;
+  noteTabs.style.right = inFull() ? `${toolbar.offsetWidth + 12}px` : '';
 };
-const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? tabsHeight() : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
+const restTop = () => MARGIN + (tabsBottom() || (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight)); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const zoomLabel = $('zoom-label');
@@ -1767,7 +1767,7 @@ function pageAt() {
 }
 // Below the toolbar, or at the top where the toolbar is a rail or put away.
 function layoutPages() {
-  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? tabsHeight() + 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
+  pagesPanel.style.top = `${tabsBottom() ? tabsBottom() + 4 : document.body.matches('.full, .tools-off') ? 10 : toolbar.offsetHeight + 8}px`;
 }
 function showPages() {
   const paged = !!current?.pages;
