@@ -1688,9 +1688,9 @@ async function swapTo(id) {
   keepSession();
 }
 
-// To the library. A lone note is closed (as it always was); with others open, the tabs wait there.
-// `keep`: the tabs wait in any case, a lone one too.
-async function closeDoc(keep = false) {
+// To the library. The open notes stay as tabs and wait there, so the next note opened joins them (the cross of a tab closes one).
+// `keep` false: the note is closed too (the cross of the last tab).
+async function closeDoc(keep = true) {
   nameInput.blur();
   await settle();
   remember();
@@ -1711,7 +1711,7 @@ async function closeTab(tab) {
     return keepSession();
   }
   const list = openTabs.list(), i = list.indexOf(tab), next = list[i + 1] ?? list[i - 1];
-  if (!next) return closeDoc();
+  if (!next) return closeDoc(false);
   await openDoc(next.id);
   if (openTabs.active !== tab) openTabs.remove(tab);
   keepSession();
