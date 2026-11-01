@@ -800,8 +800,13 @@ const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 const toolbar = $('toolbar'), noteTabs = $('note-tabs');
 // The strip of open notes hangs under the toolbar and is as much in the way (it is not there in the 16:9 window, the rail, or with the tools put away: style.css).
 const tabsHeight = () => (noteTabs.offsetHeight ? noteTabs.offsetHeight + 6 : 0);
-const layoutTabs = () => { noteTabs.style.top = `${toolbar.offsetHeight + 6}px`; };
-const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? 0 : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
+// Under the toolbar; in full screen at the top, left of the rail.
+const layoutTabs = () => {
+  const full = document.body.matches('.full');
+  noteTabs.style.top = full ? '8px' : `${toolbar.offsetHeight + 6}px`;
+  noteTabs.style.right = full ? `${toolbar.offsetWidth + 12}px` : '';
+};
+const restTop = () => MARGIN + (document.body.matches('.full') ? tabsHeight() : document.body.matches('.tools-off') ? 0 : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const zoomLabel = $('zoom-label');
@@ -1711,28 +1716,6 @@ async function closeTab(tab) {
   keepSession();
 }
 
-// The + : the notes most recently written in that are not open, and the library for the rest.
-const tabMenu = $('tab-menu'), tabAddFly = flyout($('tab-add-wrap'), $('tab-add'));
-$('tab-add').onclick = async () => {
-  if ($('tab-add-wrap').classList.contains('open')) return tabAddFly.set(false);
-  const all = await db.all().catch(() => []);
-  const open = new Set(openTabs.list().map(t => t.id));
-  const choice = (text, cls, go) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = `btn-secondary ${cls}`;
-    b.textContent = text;
-    b.onclick = () => { tabAddFly.set(false); go(); };
-    return b;
-  };
-  tabMenu.replaceChildren(
-    ...all.filter(d => d.type !== 'folder' && !open.has(d.id)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map(d => choice(d.name, '', () => openDoc(d.id))),
-    choice('All notes…', 'all', () => closeDoc(true)));
-  tabMenu.classList.remove('flip');
-  tabAddFly.set(true);
-  tabMenu.classList.toggle('flip', tabMenu.getBoundingClientRect().right > innerWidth - 8); // too far right: open towards the left
-};
-
 // A recording shows which tab it began in.
 {
   let was = false;
@@ -1783,7 +1766,7 @@ function pageAt() {
 }
 // Below the toolbar, or at the top where the toolbar is a rail or put away.
 function layoutPages() {
-  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
+  pagesPanel.style.top = `${document.body.matches('.tools-off') ? 10 : document.body.matches('.full') ? tabsHeight() + 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
 }
 function showPages() {
   const paged = !!current?.pages;
@@ -2442,6 +2425,7 @@ async function runProbe(args) {
   if (!docs[0]) return showLibrary();
   if (args.has('dump')) try { localStorage.setItem('probeDump', JSON.stringify(docs[0].strokes)); } catch { /* too big or blocked */ } // for tuning ink on the PC
   await openDoc(docs[0].id);
+  if (args.has('full')) setFull(true); // "&full": the full-screen layout
   await new Promise(done => setTimeout(done, 5000)); // the note settles (it fits itself to the window as it loads) before it is zoomed
   setZoom(Number(args.get('probe')) || 1);
   const [x0, y0, x1, y1] = boxOf(docs[0].strokes[docs[0].strokes.length >> 1]);

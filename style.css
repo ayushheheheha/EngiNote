@@ -1463,7 +1463,7 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
 #tab-menu .btn-secondary { overflow: hidden; text-overflow: ellipsis; }
 #tab-menu .btn-secondary.all { color: var(--accent); }
 /* Not in what is recorded: the 16:9 window, the full-screen rail, or with the tools put away. */
-body.wide #note-tabs, body.full #note-tabs, body.tools-off #note-tabs { display: none; }
+body.wide #note-tabs, body.tools-off #note-tabs { display: none; }
 /* With the tabs under the toolbar the arrow is at its right end, not in the middle, where the tabs would pass beneath it. */
 body:not(.full):not(.wide) #tools-toggle { left: auto; right: 12px; }
 @media (hover: hover) {
