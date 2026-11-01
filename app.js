@@ -2427,6 +2427,7 @@ async function runProbe(args) {
   if (args.has('dump')) try { localStorage.setItem('probeDump', JSON.stringify(docs[0].strokes)); } catch { /* too big or blocked */ } // for tuning ink on the PC
   await openDoc(docs[0].id);
   if (args.has('off')) toolsBtn.click(); // "&off": the tools put away
+  if (args.has('wide') && !document.body.classList.contains('wide')) wideBtn.click(); // "&wide": the 16:9 window
   if (args.has('full')) setFull(true); // "&full": the full-screen layout
   await new Promise(done => setTimeout(done, 5000)); // the note settles (it fits itself to the window as it loads) before it is zoomed
   setZoom(Number(args.get('probe')) || 1);
