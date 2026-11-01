@@ -798,15 +798,16 @@ const MARGIN = GUTTER / 2; // the grey band kept around the sheet
 // (style.css). So the sheet's resting place, at the start of the note, is below the toolbar. In
 // full screen the tools are a rail beside the window, and nothing is in the way.
 const toolbar = $('toolbar'), noteTabs = $('note-tabs');
-// The strip of open notes hangs under the toolbar and is as much in the way (it is not there in the 16:9 window, the rail, or with the tools put away: style.css).
+// The strip of open notes hangs under the toolbar and is as much in the way (it is not there in the 16:9 window: style.css).
 const tabsHeight = () => (noteTabs.offsetHeight ? noteTabs.offsetHeight + 6 : 0);
 // Under the toolbar; in full screen at the top, left of the rail.
 const layoutTabs = () => {
   const full = document.body.matches('.full');
-  noteTabs.style.top = full ? '8px' : `${toolbar.offsetHeight + 6}px`;
-  noteTabs.style.right = full ? `${toolbar.offsetWidth + 12}px` : '';
+  const off = document.body.matches('.tools-off');
+  noteTabs.style.top = full || off ? '8px' : `${toolbar.offsetHeight + 6}px`;
+  noteTabs.style.right = full ? `${toolbar.offsetWidth + (off ? 40 : 12)}px` : ''; // the arrow that brings the rail back sits left of it
 };
-const restTop = () => MARGIN + (document.body.matches('.full') ? tabsHeight() : document.body.matches('.tools-off') ? 0 : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
+const restTop = () => MARGIN + (document.body.matches('.full, .tools-off') ? tabsHeight() : toolbar.offsetHeight + tabsHeight()); // .tools-off: the toolbar is put away
 
 const clampZoom = value => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const zoomLabel = $('zoom-label');
@@ -1766,7 +1767,7 @@ function pageAt() {
 }
 // Below the toolbar, or at the top where the toolbar is a rail or put away.
 function layoutPages() {
-  pagesPanel.style.top = `${document.body.matches('.tools-off') ? 10 : document.body.matches('.full') ? tabsHeight() + 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
+  pagesPanel.style.top = `${document.body.matches('.full, .tools-off') ? tabsHeight() + 10 : toolbar.offsetHeight + tabsHeight() + 8}px`;
 }
 function showPages() {
   const paged = !!current?.pages;
@@ -2425,6 +2426,7 @@ async function runProbe(args) {
   if (!docs[0]) return showLibrary();
   if (args.has('dump')) try { localStorage.setItem('probeDump', JSON.stringify(docs[0].strokes)); } catch { /* too big or blocked */ } // for tuning ink on the PC
   await openDoc(docs[0].id);
+  if (args.has('off')) toolsBtn.click(); // "&off": the tools put away
   if (args.has('full')) setFull(true); // "&full": the full-screen layout
   await new Promise(done => setTimeout(done, 5000)); // the note settles (it fits itself to the window as it loads) before it is zoomed
   setZoom(Number(args.get('probe')) || 1);
