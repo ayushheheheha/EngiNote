@@ -3,7 +3,7 @@
 // a menu (duplicate, add a page after it, delete, its own colour and template). Plain ES module.
 // What changes the note is app.js's business: this file shows, and calls `act` with what was asked.
 import { makeEl, boxOf } from './ink.js';
-import { PAGE_WIDTH, TEMPLATES, pageTops, pagePaper, paperCss } from './pages.js';
+import { PAGE_WIDTH, TEMPLATES, pageTops, pagePaper, paperCss, isPicture } from './pages.js';
 import { coverFrame } from './cover.js';
 
 const THUMB_W = 120;               // px: how wide a picture is
@@ -17,10 +17,10 @@ const NAMES = { plain: 'Plain', rule: 'Rule', grid: 'Grid', dot: 'Dot', cornell:
 const MORE = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
 
 // `panel` holds `list`; `menu` is the box the "more" menu is made in. note() is the open note (it
-// has `pages`), strokes() and items() what is drawn on it, go(i) takes the view to page i, and
+// has `pages`), picture(i) the small picture of page i as an <img> URL (a promise; null if there is none), strokes() and items() what is drawn on it, go(i) takes the view to page i, and
 // act(name, ...args) does what was asked: 'move' (from, to), 'duplicate' (i), 'remove' (i), 'add' (i),
 // 'paper' (i, { bg?, tpl? }; a key given as null goes back to the notebook's).
-export function createThumbs({ panel, list, menu, note, strokes, items, go, act }) {
+export function createThumbs({ panel, list, menu, note, picture, strokes, items, go, act }) {
   const sheets = [];     // page index -> the picture's box
   const shown = new Set(); // the pictures now in sight, which are the ones that are drawn
   let current = -1;
@@ -40,11 +40,12 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
     const paper = document.createElement('div');
     paper.className = 'thumb-paper';
     paper.style.cssText = `height:${page.h}px;transform:scale(${K});${paperCss(pagePaper(doc.paper, page), 0.8 / K)}`;
-    if (page.img) {
+    if (isPicture(page)) {
       const img = new Image();
       img.className = 'thumb-bg';
       img.alt = '';
-      img.src = page.img;
+      if (page.img) img.src = page.img;
+      else picture(i).then(url => { if (url && box.contains(paper)) img.src = url; }); // made if it is not yet: the column fills in as they come
       paper.append(img);
     }
     if (page.cover) paper.insertAdjacentHTML('beforeend', coverFrame()); // the promo cover (cover.js)
@@ -130,7 +131,7 @@ export function createThumbs({ panel, list, menu, note, strokes, items, go, act 
     menuFor = i;
     const row = (label, name, extra = '') => `<button class="btn-secondary${extra}" type="button" data-do="${name}">${label}</button>`;
     // Colour and template: only where the page is paper (a page of a PDF is a picture, and covers it).
-    const paper = page.img || page.cover ? '' :
+    const paper = isPicture(page) || page.cover ? '' :
       '<div class="menu-head">Page colour</div><div class="menu-swatches">' +
       `<button class="icon-btn chip" type="button" data-bg="" aria-pressed="${!page.bg}">Same</button>` +
       COLOURS.map(([c, name]) => `<button class="icon-btn swatch" type="button" data-bg="${c}" style="--c:${c}" title="${name}" aria-label="${name}" aria-pressed="${page.bg === c}"></button>`).join('') +

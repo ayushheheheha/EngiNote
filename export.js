@@ -1,7 +1,7 @@
 // export.js — a note with its ink as one document, to be made into a PDF: the iPad app makes the
 // file from it; a browser prints it, and its print dialog can save a PDF. Plain ES module.
 import { makeEl, boxOf } from './ink.js';
-import { noteHtml, pageTops, inkedPages, paperCss, pageStyle, PAGE_WIDTH } from './pages.js';
+import { noteHtml, pageTops, inkedPages, paperCss, pageStyle, isPicture, PAGE_WIDTH } from './pages.js';
 import { itemHtml } from './items.js';
 import { coverFrame } from './cover.js';
 
@@ -38,7 +38,7 @@ function pagedDoc(doc, strokes) {
   const tops = pageTops(doc), inked = inkedPages(doc, strokes, doc.items);
   // A notebook keeps a blank page ready at its end: blank pages nobody wrote on are left off the end.
   let count = doc.pages.length;
-  while (count > 1 && !doc.pages[count - 1].img && !inked[count - 1]) count--;
+  while (count > 1 && !isPicture(doc.pages[count - 1]) && !inked[count - 1]) count--;
   const pages = doc.pages.slice(0, count).map(p => ({ ...p, h: Number(p.h) }));
   const sizes = [...new Set(pages.map(p => p.h))]; // a kind of printed page for each height there is
   return {

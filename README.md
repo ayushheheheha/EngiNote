@@ -161,7 +161,8 @@ Open <http://localhost:5173/ink.test.html>. It runs 79 checks on the ink engine 
 | `pages.js` | Paged notes: the page model and the HTML made from it |
 | `notebook.js` | The "New notebook" dialog |
 | `space.js` | "Add space": a blank page in a paged note, a gap in an HTML note |
-| `pdfimport.js` | PDF import: each page drawn to an image, as a paged note |
+| `pdfimport.js` | PDF import: the file is kept and each page measured, as a paged note |
+| `pics.js` | The page pictures of PDF notes: kept apart from the note, drawn from the PDF when a page is first looked at |
 | `pdfjs.min.js`, `pdfjs.worker.min.js` | [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0, see `pdfjs.LICENSE.txt`), which reads PDFs |
 | `cover.js`, `cover-fonts.js` | The promo cover, and the site's three typefaces cut down and embedded in it |
 | `ios/App/Studio*.swift` | Studio: the screen, the zoom plan, the voice polish, the frame drawing and the writing of the movie. All but `Studio.swift` are free of UIKit, so `ios/StudioTests` can run them on a Mac (`.github/workflows/studio.yml`), with a made-up recording, and keep the pictures |

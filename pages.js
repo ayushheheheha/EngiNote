@@ -6,9 +6,12 @@
 // A paged note (a blank notebook; a file imported page by page) is an ordinary note
 // ({ id, name, html, strokes, updatedAt, folder? }) with two more fields, and no HTML of its own:
 //
-//   pages: [{ h }, { h, img }, ...]   One entry per page, top to bottom. `h` is the page's height in
-//                                     page px (every page is PAGE_WIDTH wide). `img`, if there, is a
-//                                     data:image/ URL drawn to fill the page; a page without one
+//   pages: [{ h }, { h, n }, ...]     One entry per page, top to bottom. `h` is the page's height in
+//                                     page px (every page is PAGE_WIDTH wide). `n`, if there, says the page is
+//                                     a picture: page n of the PDF `doc.pdf` names, which pics.js keeps apart
+//                                     from the note and shows only for the pages in sight. (`img`, a data:image/
+//                                     URL, is the same thing carried in the page: an old record, a backup,
+//                                     an export. pics.absorb() turns it into `n`.) A page with neither
 //                                     shows the paper. `bg` and `tpl`, if there, are that page's own
 //                                     colour and template, over the notebook's (pagePaper). `cover: true`
 //                                     marks the promo cover (cover.js), which is only ever the first page.
@@ -60,7 +63,7 @@ export function cleanPages(list) {
   for (const p of list) {
     if (!p || !Number.isFinite(p.h) || p.h <= 0) return null;
     if (p.cover === true) { pages.push({ h: COVER_H, cover: true }); continue; } // its own size, whatever the file says
-    const page = typeof p.img === 'string' && p.img.startsWith('data:image/') ? { h: p.h, img: p.img } : { h: p.h };
+    const page = typeof p.img === 'string' && p.img.startsWith('data:image/') ? { h: p.h, img: p.img } : Number.isInteger(p.n) && p.n > 0 ? { h: p.h, n: p.n } : { h: p.h };
     if (colour(p.bg, '')) page.bg = colour(p.bg, '');
     if (TEMPLATES.includes(p.tpl)) page.tpl = p.tpl;
     pages.push(page);
@@ -73,6 +76,9 @@ export function paperHeight(paper) {
   const { size, direction } = cleanPaper(paper);
   return Math.round(direction === 'horizontal' ? PAGE_WIDTH / SIZES[size] : PAGE_WIDTH * SIZES[size]);
 }
+
+/** Whether a page is a picture (of a PDF's page) rather than paper. */
+export const isPicture = page => !!(page && (page.n || page.img));
 
 /** Where each page starts, and where the last one ends: one more number than there are pages. */
 export function pageTops(doc) {
@@ -140,7 +146,7 @@ export function pagesHtml(doc, live) {
     loading the note into the frame again would blank it for a moment. */
 export function addPage(doc, index = doc.pages.length, shown) {
   const above = doc.pages[index - 1];
-  const page = { h: above?.img ? above.h : paperHeight(doc.paper) };
+  const page = { h: isPicture(above) ? above.h : paperHeight(doc.paper) };
   doc.pages.splice(index, 0, page);
   const before = shown?.body?.children[index];
   if (before) before.insertAdjacentHTML('beforebegin', pageHtml(page, doc.paper));
@@ -202,7 +208,7 @@ export function inkedPages(doc, strokes, items = []) {
 /** A notebook always has a blank page ahead: true when its last page is a blank one that has been
     written on. (A last page that is a picture, the end of an imported file, is the end.) */
 export function needsPage(doc, strokes, items = []) {
-  return !doc.pages[doc.pages.length - 1].img && inkedPages(doc, strokes, items)[doc.pages.length - 1];
+  return !isPicture(doc.pages[doc.pages.length - 1]) && inkedPages(doc, strokes, items)[doc.pages.length - 1];
 }
 
 /* ---------- Gaps in an HTML note ---------- */

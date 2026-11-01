@@ -1,6 +1,7 @@
 import { createInk, strokeData, strokeWidth, opacityOf, boxOf, setSmoothing } from './ink.js';
 import { createLasso } from './lasso.js';
-import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages, hasCover, setCover } from './pages.js';
+import { noteHtml, pagesHeight, paperHeight, addPage, needsPage, cleanPages, cleanPaper, cleanGaps, pageTops, pageStyle, rearrange, inkedPages, hasCover, setCover, isPicture } from './pages.js';
+import { createPics, newPicsId } from './pics.js';
 import { COVER_H } from './cover.js';
 import { askNotebook } from './notebook.js';
 import { createSpace } from './space.js';
@@ -33,6 +34,7 @@ let restoreView = null;  // { pos }: where an open note (a tab coming back) is t
 let zoom = 1;
 let pageHeight = MIN_HEIGHT;
 let saveTimer = 0;
+let picsTimer = 0, picsWant = new Set(); // page pictures: see "Page pictures" in the view section
 let messageTimer = 0;
 
 /* ---------- Storage: IndexedDB "enginote" / store "docs" ---------- */
@@ -40,18 +42,21 @@ let messageTimer = 0;
 let dbPromise;
 function openDb() {
   return dbPromise ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open('enginote', 1);
-    req.onupgradeneeded = () => req.result.createObjectStore('docs', { keyPath: 'id' });
+    const req = indexedDB.open('enginote', 2);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains('docs')) req.result.createObjectStore('docs', { keyPath: 'id' });
+      if (!req.result.objectStoreNames.contains('pics')) req.result.createObjectStore('pics'); // the page pictures of PDF notes, apart from the notes (pics.js)
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function withStore(mode, run) {
+async function withStore(mode, run, name = 'docs') {
   const idb = await openDb();
   return new Promise((resolve, reject) => {
-    const tx = idb.transaction('docs', mode);
-    const req = run(tx.objectStore('docs'));
+    const tx = idb.transaction(name, mode);
+    const req = run(tx.objectStore(name));
     tx.oncomplete = () => resolve(req.result);
     tx.onerror = tx.onabort = () => reject(tx.error);
   });
@@ -65,6 +70,8 @@ const db = {
   put: doc => withStore('readwrite', s => s.put(doc)),
   del: id => withStore('readwrite', s => s.delete(id)),
 };
+// The page pictures of PDF notes (pics.js), drawn from the PDF kept with the note when a page is first looked at.
+const pics = createPics((mode, run) => withStore(mode, run, 'pics'), () => ink.busy());
 
 /* ---------- Messages ---------- */
 
@@ -413,6 +420,14 @@ const previews = new IntersectionObserver(entries => {
   }
 }, { rootMargin: '300px' });
 
+// What a card shows of a note: for a PDF note, only its first pages, with their small pictures (the rest are not needed, and a card is one of many).
+async function previewDoc(doc) {
+  if (!doc.pages) return doc;
+  const pages = [];
+  for (const p of doc.pages.slice(0, 2)) pages.push(p.n && doc.pdf ? { ...p, img: await pics.smallData(doc, p.n) } : p);
+  return { ...doc, pages };
+}
+
 function fillPreview(box, doc) {
   const frame = document.createElement('iframe');
   frame.setAttribute('sandbox', ''); // an imported file is not trusted: no scripts, no access to anything
@@ -420,7 +435,7 @@ function fillPreview(box, doc) {
   frame.tabIndex = -1;
   frame.title = '';
   frame.onload = () => box.classList.add('ready');
-  frame.srcdoc = noteHtml(doc); // the note as it is shown (pages.js): a notebook's pages, a file with its gaps
+  previewDoc(doc).then(shown => { frame.srcdoc = noteHtml(shown); }); // the note as it is shown (pages.js): a notebook's pages, a file with its gaps
 
   // The ink: only strokes that begin in the part of the note the card shows, drawn plainly
   // (a glow stroke without its halo). The viewBox is the frame's own size, so it lines up with it at any card size.
@@ -478,6 +493,7 @@ function makeCard(doc, folders) {
   card.querySelector('.card-delete').onclick = async () => {
     if (!confirm(`Delete "${doc.name}"? This cannot be undone.`)) return;
     await db.del(doc.id).catch(() => notify('Could not delete the note.'));
+    pics.drop(doc.pdf);
     const tab = openTabs.find(doc.id);
     if (tab) openTabs.remove(tab);
     showLibrary();
@@ -527,6 +543,7 @@ async function duplicate(doc) {
     const taken = new Set((await db.all()).map(d => d.name));
     copy.name = `${doc.name} copy`;
     for (let n = 2; taken.has(copy.name); n++) copy.name = `${doc.name} copy ${n}`;
+    if (doc.pdf) { copy.pdf = newPicsId(); await pics.copy(doc.pdf, copy.pdf); } // its pictures are its own: deleting one note must not take the other's
     await db.put(copy);
   } catch {
     return notify('Could not duplicate the note.');
@@ -619,6 +636,15 @@ $('backup-save').onclick = async () => {
   } catch {
     return notify('Could not read the notes to back them up.');
   }
+  try { // a PDF note takes its PDF file into the backup (which stands alone)
+    for (let i = 0; i < docs.length; i++) {
+      if (!docs[i].pdf) continue;
+      docs[i] = await pics.packed(docs[i], (done, of) => notify(`Backing up ${docs[i].name}: page ${done + 1} of ${of}`));
+    }
+  } catch {
+    return notify('Could not read the notes to back them up.');
+  }
+  message.hidden = true;
   const text = JSON.stringify({ app: 'EngiNote', version: 1, savedAt: new Date().toISOString(), docs });
   const name = `EngiNote backup ${new Date().toLocaleDateString('en-CA')}.json`; // en-CA writes the local date as 2026-10-11
   // In the iPad app a page cannot save a file by itself: the shell does it (ios/App/NoteViewController.swift).
@@ -644,7 +670,7 @@ function fromBackup(d) {
   const items = cleanItems(d.items);
   if (items.length) note.items = items;
   const pages = cleanPages(d.pages), gaps = cleanGaps(d.gaps);
-  if (pages) Object.assign(note, { html: '', pages }, d.paper ? { paper: cleanPaper(d.paper) } : {});
+  if (pages) Object.assign(note, { html: '', pages }, d.paper ? { paper: cleanPaper(d.paper) } : {}, typeof d.pdfFile === 'string' && d.pdfFile.startsWith('data:') ? { pdfFile: d.pdfFile } : {});
   else {
     if (gaps) note.gaps = gaps;
     if (d.cover === true) note.cover = true;
@@ -677,6 +703,8 @@ backupInput.onchange = async () => {
     for (const record of records) {
       const mine = here.get(record.id);
       if (mine && mine.updatedAt >= record.updatedAt) continue;
+      await pics.unpacked(record); // the PDF of a PDF note, and any pictures it carries, go where they are kept
+      await pics.absorb(record);
       await db.put(record);
       if (record.type === 'folder') folders++;
       else notes++;
@@ -711,7 +739,7 @@ function askName(name, folders, into) {
 $('rn-skip').onclick = () => renameDialog.close();
 renameDialog.addEventListener('click', e => { if (e.target === renameDialog) renameDialog.close(); }); // a tap outside it
 
-async function importFiles(fileList) {
+async function importFiles(fileList, quiet = false) { // `quiet`: the names are kept, nobody is asked (the test hook)
   const files = [...fileList].filter(f => /\.(html?|pdf)$/i.test(f.name));
   if (!files.length) return notify('Only .html and .pdf files can be imported.');
   const failed = [];
@@ -722,7 +750,7 @@ async function importFiles(fileList) {
     try {
       const pdf = /\.pdf$/i.test(file.name);
       $('rn-skip').textContent = files.length > 1 ? 'Skip' : 'Cancel';
-      const asked = await askName(file.name.replace(/\.(html?|pdf)$/i, ''), folders, into);
+      const base = file.name.replace(/\.(html?|pdf)$/i, ''), asked = quiet ? { name: base, folder: into } : await askName(base, folders, into);
       if (asked === null) continue; // left out
       const { name } = asked;
       into = asked.folder; // the next file of this import starts from this choice
@@ -735,15 +763,16 @@ async function importFiles(fileList) {
       };
       if (pdf) {
         slow = true;
-        const { pdfPages } = await import('./pdfimport.js');
-        doc.pages = await pdfPages(file, (n, of) => notify(`Importing ${file.name}: page ${n} of ${of}`));
+        const { importPdf } = await import('./pdfimport.js');
+        doc.pages = await importPdf(pics, doc, file, (n, of) => notify(`Importing ${file.name}: page ${n} of ${of}`));
       }
       if (promo()) setCover(doc, true); // the promo cover (cover.js), until it is switched off
       if (into) doc.folder = into; // imported into a folder: it belongs there
       await db.put(doc); // only now, whole: a PDF that fails part way leaves nothing behind
       last = doc;
     } catch (error) {
-      failed.push(error?.name === 'PasswordException' ? `${file.name} (it has a password)` : file.name);
+      console.warn('import failed', error);
+      failed.push(error?.name === 'PasswordException' ? `${file.name} (it has a password)` : `${file.name}${error ? ` (${error.name || error})` : ''}`);
     }
   }
   if (failed.length) notify(`Could not import: ${failed.join(', ')}`);
@@ -843,6 +872,7 @@ function place(at = pos, glide = false) {
   bar.style.height = length + 'px';
   bar.style.transform = `translateY(${(top - pos[1]) / (h - vh) * (vh - length)}px)`;
   if (pagesOpen) thumbs.setCurrent(pageAt());
+  if (current?.pages && !picsTimer) picsTimer = setTimeout(syncPics, 80); // the pictures of the pages in sight, once the view has settled a moment
 }
 
 // Move the view by a scroll amount: positive goes right / down the note.
@@ -991,13 +1021,58 @@ frame.addEventListener('load', () => {
   space.loaded(); // the Add space mode (space.js) finds the note's gaps in it
   measure();
   if (restoreView) { place(restoreView.pos); restoreView = null; } // a tab coming back: only now is the note as tall as it was
+  syncPics();
 });
+
+/* ---------- Page pictures ---------- */
+
+// A paged note's frame holds only its pages' boxes. The picture of a page (pics.js) is put in as the
+// page comes within PICS_AHEAD pages of the view, and taken out again when it goes, so a note of 200 pages
+// costs what the pages in sight cost: to open, to hold and to draw. A page not yet drawn shows its paper.
+const PICS_AHEAD = 2, PICS_MOST = 12;
+function syncPics() {
+  clearTimeout(picsTimer);
+  picsTimer = 0;
+  const doc = current, body = frame.contentDocument?.body;
+  if (!doc?.pages || !body || body.children.length !== doc.pages.length) return;
+  const n = doc.pages.length, tops = pageTops(doc);
+  const from = -pos[1] / zoom, to = (scroller.clientHeight - pos[1]) / zoom;
+  let first = 0;
+  while (first < n - 1 && tops[first + 1] <= from) first++;
+  let last = first;
+  while (last < n - 1 && tops[last + 1] < to) last++;
+  const middle = (first + last) / 2, want = [];
+  for (let i = Math.max(0, first - PICS_AHEAD); i <= Math.min(n - 1, last + PICS_AHEAD); i++) if (doc.pages[i].n) want.push(i);
+  want.sort((a, b) => Math.abs(a - middle) - Math.abs(b - middle)); // the middle first
+  want.length = Math.min(want.length, PICS_MOST); // zoomed far out, a screenful is many pages: the nearest ones
+  picsWant = new Set(want);
+  const has = new Set();
+  [...body.children].forEach((el, i) => {
+    const img = el.firstElementChild;
+    if (img?.tagName !== 'IMG') return;
+    if (picsWant.has(i)) has.add(i);
+    else img.remove(); // out of sight: its decoded picture goes with it
+  });
+  for (const i of want) {
+    if (has.has(i)) continue;
+    const page = doc.pages[i];
+    pics.full(doc, page.n, () => current === doc && picsWant.has(i)).then(url => {
+      const el = current === doc && picsWant.has(i) && frame.contentDocument?.body?.children[i];
+      if (!url || !el || doc.pages[i] !== page || el.firstElementChild?.tagName === 'IMG') return;
+      const img = el.ownerDocument.createElement('img');
+      img.alt = '';
+      img.src = url;
+      el.prepend(img);
+    });
+  }
+}
 
 // Make the sheet as tall as the open note is: a paged note, its pages; a file, what is in it. Also
 // called when the note grows or shrinks while it is open (a page added, a gap opened or closed).
 function measure() {
   if (current.pages) {
     setPageHeight(pagesHeight(current));
+    syncPics();
     return syncPages();
   }
   const doc = frame.contentDocument;
@@ -1641,10 +1716,15 @@ async function swapTo(id) {
   const had = openTabs.find(id);
   if (current && had === openTabs.active) return;
   nameInput.blur(); // a name being typed is kept before the note goes
-  const doc = await db.get(id).catch(() => null);
+  let why = '';
+  const doc = await db.get(id).catch(e => { why = ` (${e?.name || e || 'storage error'})`; return null; });
   if (!doc) {
     if (had) openTabs.remove(had);
-    return notify('That note could not be opened.');
+    return notify('That note could not be opened.' + why);
+  }
+  if (doc.pages?.some(p => typeof p.img === 'string')) { // a PDF note saved the old way: its pictures go where they are kept
+    await pics.absorb(doc);
+    db.put(doc).catch(() => {});
   }
   if (current) await settle(); // the note being left is saved; from here to the swap below nothing waits, so nothing can be written and lost
   remember();
@@ -1750,6 +1830,7 @@ let pagesStale = true;   // its pictures are of another note, or of pages that h
 const thumbs = createThumbs({
   panel: pagesPanel, list: $('pages-list'), menu: $('page-menu'),
   note: () => current,
+  picture: i => { const doc = current, p = doc?.pages[i]; return p?.n && doc.pdf ? pics.small(doc, p.n) : Promise.resolve(null); },
   strokes: () => current?.strokes ?? [],
   items: () => current?.items ?? [],
   go: i => place([pos[0], restTop() - pageTops(current)[i] * zoom], true),
@@ -1809,7 +1890,7 @@ function pageAct(what, i, extra) {
   else if (what === 'move') order.splice(extra, 0, order.splice(i, 1)[0]);
   else if (what === 'remove') {
     const page = current.pages[i];
-    if ((page.img || inkedPages(current, ink.getStrokes(), ink.getItems())[i]) && !confirm(`Delete page ${i + 1}? Its ink goes with it, and undo cannot bring it back.`)) return;
+    if ((isPicture(page) || inkedPages(current, ink.getStrokes(), ink.getItems())[i]) && !confirm(`Delete page ${i + 1}? Its ink goes with it, and undo cannot bring it back.`)) return;
     order.splice(i, 1);
   }
   restructure(order);
@@ -1926,7 +2007,8 @@ exportBtn.onclick = async () => {
   await new Promise(done => setTimeout(done, 50)); // let that be seen first: a long note takes a moment
   let waiting = false;
   try {
-    const { html, pages } = exportDoc(current, current.strokes || [], { document: frame.contentDocument, height: pageHeight, screen: MIN_HEIGHT });
+    const doc = current.pdf ? await pics.inline(current, 1200, (done, of) => notify(`Preparing the PDF: page ${done + 1} of ${of}`)) : current; // the pictures go in the file
+    const { html, pages } = exportDoc(doc, current.strokes || [], { document: frame.contentDocument, height: pageHeight, screen: MIN_HEIGHT });
     if (shellExport) {
       shellExport.postMessage({ name: current.name, html, pages });
       waiting = true; // for the app's answer
@@ -2435,5 +2517,45 @@ async function runProbe(args) {
   place([scroller.clientWidth / 2 - (x0 + x1) / 2 * zoom, scroller.clientHeight / 2 - (y0 + y1) / 2 * zoom]);
 }
 const probe = new URLSearchParams(location.hash.slice(1));
-if (probe.has('probe')) runProbe(probe); else restoreSession(); // back where the user left off, or the library
+// PDF notes saved before the pictures had a store of their own carry them in the note: moved out one note
+// at a time (a note can be 100 MB), once. Until then such a note is slow to list and to open.
+async function moveOldPictures() {
+  try { if (localStorage.getItem('picsMoved') === '1') return; } catch { /* storage blocked: it is looked for each time */ }
+  const ids = await withStore('readonly', s => s.getAllKeys());
+  let moved = 0, stuck = null;
+  try { stuck = localStorage.getItem('picsMoving'); } catch { /* nothing remembered */ }
+  for (const id of ids) {
+    if (id === stuck) continue; // the last try at this one never came back (too big for this device's memory): not again
+    try { localStorage.setItem('picsMoving', id); } catch { /* storage blocked */ }
+    const doc = await db.get(id);
+    if (doc?.pages?.some(p => typeof p.img === 'string')) {
+      if (!moved++) notify('Making your PDF notes faster, once…');
+      await pics.absorb(doc);
+      await db.put(doc);
+    }
+    try { localStorage.removeItem('picsMoving'); } catch { /* storage blocked */ }
+  }
+  if (moved) message.hidden = true;
+  try { localStorage.setItem('picsMoved', '1'); } catch { /* looked for again next time */ }
+}
+
+// Test hook: "#probe=1&importpdf=name.pdf" imports that file (put with the web files, dev-web) as a note and
+// opens it, and says how long that took.
+async function runImportProbe(args) {
+  const t0 = performance.now(), blob = await (await fetch('./' + args.get('importpdf'))).blob();
+  await importFiles([new File([blob], args.get('importpdf'), { type: 'application/pdf' })], true);
+  notify(`Imported and opened in ${Math.round(performance.now() - t0)} ms`);
+  if (!args.has('keep')) { // the test note does not stay in the library
+    await new Promise(done => setTimeout(done, 40000));
+    for (const made of (await db.all()).filter(d => d.name === args.get('importpdf').replace(/\.pdf$/i, ''))) { await db.del(made.id); pics.drop(made.pdf); }
+    closeDoc(false);
+  }
+}
+
+(async () => {
+  await moveOldPictures().catch(() => {});
+  if (probe.has('importpdf')) runImportProbe(probe);
+  else if (probe.has('probe')) runProbe(probe);
+  else restoreSession(); // back where the user left off, or the library
+})();
 askVideos();

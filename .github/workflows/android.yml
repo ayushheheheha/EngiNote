@@ -36,7 +36,7 @@ jobs:
       - name: Put the web app inside the Android project
         run: |
           mkdir -p android/app/src/main/assets android/app/src/main/res/mipmap-xxxhdpi
-          cp index.html style.css app.js ink.js lasso.js shapes.js pages.js notebook.js space.js export.js pdfimport.js pdfjs.min.js pdfjs.worker.min.js pdfjs.LICENSE.txt perfect-freehand.js icon.svg apple-touch-icon.png android/app/src/main/assets/
+          cp index.html style.css app.js ink.js lasso.js shapes.js pages.js notebook.js space.js export.js pdfimport.js pics.js pdfjs.min.js pdfjs.worker.min.js pdfjs.LICENSE.txt perfect-freehand.js icon.svg apple-touch-icon.png android/app/src/main/assets/
           cp apple-touch-icon.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           ls -l android/app/src/main/assets
 
