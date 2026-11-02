@@ -26,13 +26,18 @@ enum BackupImport {
             progress("Importing \(n + 1) of \(notes.count): \(name)")
             await Task.yield()
             if store.hasNotebook(id) { existing += 1; continue }
-            guard let pages = d["pages"] as? [[String: Any]], !pages.isEmpty else { web += 1; continue }
             if let list = d["items"] as? [Any], !list.isEmpty { items += list.count }
-            if convert(d, id: id, name: name, pages: pages, store: store) { made += 1 }
+            if let pages = d["pages"] as? [[String: Any]], !pages.isEmpty {
+                if convert(d, id: id, name: name, pages: pages, store: store) { made += 1 }
+            } else if let html = d["html"] as? String, !html.isEmpty {
+                if await convertHTML(d, id: id, name: name, html: html, store: store) { made += 1 } else { web += 1 }
+            } else {
+                web += 1
+            }
         }
         var lines = ["Imported \(made) notebook\(made == 1 ? "" : "s") and \(folders) folder\(folders == 1 ? "" : "s")."]
         if existing > 0 { lines.append("\(existing) already here, left as they are.") }
-        if web > 0 { lines.append("\(web) note\(web == 1 ? "" : "s") made from imported web pages could not be converted.") }
+        if web > 0 { lines.append("\(web) note\(web == 1 ? "" : "s") made from web pages could not be read.") }
         if items > 0 { lines.append("\(items) text box\(items == 1 ? "" : "es") or picture\(items == 1 ? "" : "s") placed on notes were left out.") }
         return lines.joined(separator: "\n")
     }
@@ -81,18 +86,39 @@ enum BackupImport {
             scales.append(page.bounds(for: .mediaBox).width / Paper.width)
             top += h
         }
-        var perPage = [[PKStroke]](repeating: [], count: pages.count)
-        for s in (d["strokes"] as? [[String: Any]]) ?? [] {
-            guard let pts = s["points"] as? [[Double]], let y0 = pts.first, y0.count >= 2 else { continue }
-            var idx = tops.lastIndex { $0 <= y0[1] } ?? 0
-            idx = min(idx, pages.count - 1)
-            if let stroke = makeStroke(s, points: pts, top: tops[idx], scale: scales[idx]) { perPage[idx].append(stroke) }
-        }
-        let drawings = perPage.map { $0.isEmpty ? Data() : PKDrawing(strokes: $0).dataRepresentation() }
+        let drawings = inkData(d, tops: tops, scales: scales)
         let ms = (d["updatedAt"] as? Double) ?? Date().timeIntervalSince1970 * 1000
         let folder = (d["folder"] as? String).flatMap { store.hasFolder($0) ? $0 : nil }
         return store.add(id: id, name: name, paper: p, folderID: folder, updatedAt: Date(timeIntervalSince1970: ms / 1000),
                          document: out, drawings: drawings) != nil
+    }
+
+
+    /// The note's strokes, each put on the page it starts on, as one PencilKit drawing per page.
+    private static func inkData(_ d: [String: Any], tops: [Double], scales: [Double]) -> [Data] {
+        var perPage = [[PKStroke]](repeating: [], count: tops.count)
+        for s in (d["strokes"] as? [[String: Any]]) ?? [] {
+            guard let pts = s["points"] as? [[Double]], let y0 = pts.first, y0.count >= 2 else { continue }
+            let idx = min(tops.lastIndex { $0 <= y0[1] } ?? 0, tops.count - 1)
+            if let stroke = makeStroke(s, points: pts, top: tops[idx], scale: scales[idx]) { perPage[idx].append(stroke) }
+        }
+        return perPage.map { $0.isEmpty ? Data() : PKDrawing(strokes: $0).dataRepresentation() }
+    }
+
+    /// A note made from an imported web page: the page is drawn into PDF pages and the ink laid over it.
+    @MainActor
+    static func convertHTML(_ d: [String: Any], id: String, name: String, html: String, store: Store) async -> Bool {
+        let gaps = (d["gaps"] as? [[String: Any]]) ?? []
+        guard let doc = await HTMLRenderer.document(html: html, base: nil, gaps: gaps) else { return false }
+        let n = doc.pageCount
+        let tops = (0..<n).map { Double($0) * Double(HTMLRenderer.pageHeight) }
+        let drawings = inkData(d, tops: tops, scales: [Double](repeating: 1, count: n))
+        var p = Paper()
+        p.template = "plain"
+        let ms = (d["updatedAt"] as? Double) ?? Date().timeIntervalSince1970 * 1000
+        let folder = (d["folder"] as? String).flatMap { store.hasFolder($0) ? $0 : nil }
+        return store.add(id: id, name: name, paper: p, folderID: folder, updatedAt: Date(timeIntervalSince1970: ms / 1000),
+                         document: doc, drawings: drawings) != nil
     }
 
     private static func makeStroke(_ s: [String: Any], points: [[Double]], top: Double, scale: Double) -> PKStroke? {

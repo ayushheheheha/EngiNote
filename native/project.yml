@@ -51,6 +51,10 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.adobe.pdf]
+          - CFBundleTypeName: Web page
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.html]
           - CFBundleTypeName: EngiNote backup
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate

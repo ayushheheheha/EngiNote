@@ -48,7 +48,7 @@ struct LibraryView: View {
                 if let info = store.create(name: name, paper: paper, pages: pages, folder: currentFolder) { opened = info }
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .json], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .json, .html], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { Task { for u in urls { await handle(u) } } }
         }
         .onOpenURL { url in Task { await handle(url) } }
@@ -140,7 +140,7 @@ struct LibraryView: View {
         return Group {
             if shown.isEmpty {
                 ContentUnavailableView(query.isEmpty ? "No notebooks yet" : "No matches", systemImage: "square.and.pencil",
-                                       description: Text(query.isEmpty ? "Tap + to make one, or import a PDF or an EngiNote backup." : "Try another name."))
+                                       description: Text(query.isEmpty ? "Tap + to make one, or import a PDF, a web page or an EngiNote backup." : "Try another name."))
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 28, alignment: .top)], spacing: 32) {
@@ -156,7 +156,7 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { showNew = true } label: { Label("New notebook", systemImage: "square.and.pencil") }
-                    Button { importing = true } label: { Label("Import PDF or backup", systemImage: "square.and.arrow.down") }
+                    Button { importing = true } label: { Label("Import PDF, web page or backup", systemImage: "square.and.arrow.down") }
                 } label: { Image(systemName: "plus") }
             }
         }
@@ -193,6 +193,23 @@ struct LibraryView: View {
     private func handle(_ url: URL) async {
         if url.pathExtension.lowercased() == "pdf" {
             if let info = store.importPDF(at: url, folder: currentFolder) { opened = info } else { message = "That PDF could not be opened." }
+            return
+        }
+        if ["html", "htm"].contains(url.pathExtension.lowercased()) {
+            busy = "Converting the page…"
+            defer { busy = nil }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url),
+                  let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+                  let doc = await HTMLRenderer.document(html: html, base: url.deletingLastPathComponent()) else {
+                message = "That page could not be opened."
+                return
+            }
+            var paper = Paper()
+            paper.template = "plain"
+            if let info = store.add(id: nil, name: url.deletingPathExtension().lastPathComponent, paper: paper,
+                                    folderID: currentFolder, updatedAt: Date(), document: doc, drawings: []) { opened = info }
             return
         }
         busy = "Reading the backup…"
