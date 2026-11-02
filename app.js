@@ -1537,6 +1537,8 @@ $('settings-btn').onclick = settingsFly.toggle;
 const FOLLOW_LOW = 0.75, FOLLOW_TO = 0.4; // of the window's height: where writing counts as low, and where it is brought to
 const FOLLOW_WAIT = 700, FOLLOW_GLIDE = 0.45; // ms with the pen up first; s the slide takes
 const followOn = setting('follow-btn', 'followPen', true);
+// Note tabs: Off hides the strip (body.tabs-off in style.css); the sheet is re-fitted once the script has loaded.
+setting('tabs-btn', 'noteTabs', true, on => { document.body.classList.toggle('tabs-off', !on); setTimeout(refit); });
 let followTimer = 0, lowest = -Infinity, slidingUntil = 0;
 scroller.addEventListener('pointerdown', e => {
   if (e.pointerType !== 'pen') return;

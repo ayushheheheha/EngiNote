@@ -1445,6 +1445,7 @@ body.full #toolbar #settings-wrap .flyout { top: auto; bottom: 0; right: calc(10
   -webkit-user-select: none;
   touch-action: manipulation;
 }
+body.tabs-off #note-tabs { display: none; }
 #note-tab-list { display: flex; flex: 1; gap: 4px; min-width: 0; }
 /* Like Freenotes: a flat bar, the tabs share its width, a small round cross at the left, the name centred; the open one a soft block. */
 #note-tabs.strip { right: 12px; max-width: none; padding: 3px; border-radius: 14px; }
