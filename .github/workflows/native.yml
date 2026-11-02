@@ -1,0 +1,65 @@
+# Builds the truly native iPad app (native/) on a cloud Mac and publishes it as a release named
+# native-build-N. It is NOT marked "latest", so the web-based app's download link (ios.yml) is untouched.
+# The .ipa is unsigned: the sideloading tool signs it when it installs it.
+name: iPad native app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: native
+        run: xcodegen generate
+
+      - name: Build
+        working-directory: native
+        run: |
+          xcodebuild \
+            -project EngiNoteNative.xcodeproj -scheme EngiNoteNative -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "error:|warning:|BUILD" | sort -u | head -60
+          test ${PIPESTATUS[0]} -eq 0
+
+      - name: Package the .ipa
+        working-directory: native
+        run: |
+          app=build/Build/Products/Release-iphoneos/EngiNoteNative.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleVersion' -c 'Print :MinimumOSVersion' "$app/Info.plist"
+          mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry EngiNoteNative.ipa Payload
+          ls -l EngiNoteNative.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EngiNoteNative-ipa
+          path: native/EngiNoteNative.ipa
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "native-build-${{ github.run_number }}" native/EngiNoteNative.ipa \
+            --title "EngiNote Native for iPad, build ${{ github.run_number }}" \
+            --notes "Unsigned build of commit ${{ github.sha }}. Sideload this .ipa. Installs beside the web-based EngiNote." \
+            --latest=false
