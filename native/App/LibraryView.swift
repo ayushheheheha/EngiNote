@@ -52,6 +52,12 @@ struct LibraryView: View {
             if case .success(let urls) = result { Task { for u in urls { await handle(u) } } }
         }
         .onOpenURL { url in Task { await handle(url) } }
+        .task {
+            // the simulator check starts the app with -selftest: open a fresh notebook, to prove the editor stands up
+            if CommandLine.arguments.contains("-selftest"), store.notebooks.isEmpty {
+                opened = store.create(name: "Self test", paper: Paper(), pages: 2, folder: nil)
+            }
+        }
         .alert("Rename", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
             TextField("Name", text: $renameText)
             Button("Cancel", role: .cancel) {}
