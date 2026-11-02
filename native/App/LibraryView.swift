@@ -54,7 +54,16 @@ struct LibraryView: View {
         .onOpenURL { url in Task { await handle(url) } }
         .task {
             // the simulator check starts the app with -selftest: open a fresh notebook, to prove the editor stands up
-            if CommandLine.arguments.contains("-selftest"), store.notebooks.isEmpty {
+            if CommandLine.arguments.contains("-selftest-html"), store.notebooks.isEmpty {
+                var body = "<h1>Signals and Systems</h1>"
+                for i in 1...60 { body += "<p>Lecture line \(i): the quick brown fox jumps over the lazy dog, again and again.</p>" }
+                let html = "<html><body style='font-family:sans-serif;margin:40px'>" + body + "</body></html>"
+                if let doc = await HTMLRenderer.document(html: html, base: nil) {
+                    var paper = Paper()
+                    paper.template = "plain"
+                    opened = store.add(id: nil, name: "HTML test", paper: paper, folderID: nil, updatedAt: Date(), document: doc, drawings: [])
+                }
+            } else if CommandLine.arguments.contains("-selftest"), store.notebooks.isEmpty {
                 opened = store.create(name: "Self test", paper: Paper(), pages: 2, folder: nil)
             }
         }

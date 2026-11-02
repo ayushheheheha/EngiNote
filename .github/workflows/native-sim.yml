@@ -44,7 +44,7 @@ jobs:
         run: |
           mkdir out
           xcrun simctl install "$UDID" native/build/Build/Products/Debug-iphonesimulator/EngiNoteNative.app
-          xcrun simctl launch "$UDID" com.engikode.enginote.native -selftest
+          xcrun simctl launch "$UDID" com.engikode.enginote.native -selftest-html
           sleep 25
           xcrun simctl io "$UDID" screenshot out/library.png
           xcrun simctl spawn "$UDID" log show --last 2m --style compact --predicate 'process == "EngiNoteNative"' > out/app.log 2>&1 || true
