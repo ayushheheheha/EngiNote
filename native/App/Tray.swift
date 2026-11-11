@@ -154,7 +154,9 @@ struct Tray: View {
     @AppStorage("fingerDraws") private var fingers = false
     @AppStorage("autoErase") private var autoErase = false
     @State private var panel: String?        // the pen whose settings are open
-    @State private var eraserPanel = false, textPanel = false, settings = false
+    @State private var eraserPanel = false
+    @State private var textPanel = false
+    @State private var settings = false
     @State private var photos = false
     @State private var photo: PhotosPickerItem?
     @State private var busy = false
@@ -187,7 +189,7 @@ struct Tray: View {
             sep
         }
         ForEach(prefs.pens) { pen in penButton(pen) }
-        if prefs.pens.count < Pen.max {
+        if prefs.pens.count < Pen.most {
             Menu {
                 ForEach(Pen.types, id: \.self) { type in
                     Button(Pen.names[type] ?? type) {

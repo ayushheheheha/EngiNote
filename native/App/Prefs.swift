@@ -11,7 +11,7 @@ struct Pen: Codable, Identifiable, Equatable {
 
     static let types = ["pen", "flow", "glow", "highlighter", "laser"]
     static let names = ["pen": "Pen", "flow": "Flow pen", "glow": "Glow pen", "highlighter": "Highlighter", "laser": "Laser"]
-    static let max = 12
+    static let most = 12
 
     init(type: String, color: String) {
         self.type = type
@@ -61,7 +61,7 @@ final class Prefs: ObservableObject {
         if let d = UserDefaults.standard.data(forKey: "pens"), let saved = try? JSONDecoder().decode([Pen].self, from: d) {
             list = saved.filter { Pen.types.contains($0.type) }
         }
-        pens = list.isEmpty ? first.map { Pen(type: $0.0, color: $0.1) } : Array(list.prefix(Pen.max))
+        pens = list.isEmpty ? first.map { Pen(type: $0.0, color: $0.1) } : Array(list.prefix(Pen.most))
         recent = UserDefaults.standard.stringArray(forKey: "recentColors") ?? []
     }
 

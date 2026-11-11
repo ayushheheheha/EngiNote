@@ -2,7 +2,7 @@ import AVKit
 import SwiftUI
 
 /// A recording on disk: a .mov in Documents, or one waiting in "Recently Deleted".
-struct Clip: Identifiable, Hashable {
+struct Take: Identifiable, Hashable {
     let url: URL
     let size: Int
     let modified: Date
@@ -16,8 +16,8 @@ struct Clip: Identifiable, Hashable {
 @MainActor
 final class Clips: ObservableObject {
     static let keepDays = 30.0
-    @Published var files: [Clip] = []
-    @Published var bin: [Clip] = []
+    @Published var files: [Take] = []
+    @Published var bin: [Take] = []
 
     private var root: URL? { try? Recorder.folder() }
     private var binFolder: URL? {
@@ -31,13 +31,13 @@ final class Clips: ObservableObject {
         set { if let u = logURL, let d = try? JSONEncoder().encode(newValue) { try? d.write(to: u, options: .atomic) } }
     }
 
-    private func movies(in folder: URL?) -> [Clip] {
+    private func movies(in folder: URL?) -> [Take] {
         guard let folder else { return [] }
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
         return found.filter { $0.pathExtension.lowercased() == "mov" }.map { u in
             let v = try? u.resourceValues(forKeys: Set(keys))
-            return Clip(url: u, size: v?.fileSize ?? 0, modified: v?.contentModificationDate ?? .distantPast)
+            return Take(url: u, size: v?.fileSize ?? 0, modified: v?.contentModificationDate ?? .distantPast)
         }
     }
 
@@ -49,7 +49,7 @@ final class Clips: ObservableObject {
             return c
         }.sorted { $0.modified > $1.modified }
         var marks = log, now = Date().timeIntervalSince1970 * 1000
-        var kept: [Clip] = []
+        var kept: [Take] = []
         for var c in movies(in: binFolder) {
             let name = c.url.lastPathComponent
             let at = marks[name] ?? now
@@ -67,7 +67,7 @@ final class Clips: ObservableObject {
     }
 
     /// Into the bin. Its Studio notes stay where they are, under its name, so that a restore finds them.
-    func delete(_ clips: [Clip]) {
+    func delete(_ clips: [Take]) {
         guard let folder = binFolder else { return }
         var marks = log
         for c in clips {
@@ -80,7 +80,7 @@ final class Clips: ObservableObject {
         Notice.shared.say("\(clips.count == 1 ? "1 recording" : "\(clips.count) recordings") moved to Recently Deleted, kept there for \(Int(Clips.keepDays)) days.")
     }
 
-    func restore(_ clips: [Clip]) {
+    func restore(_ clips: [Take]) {
         guard let root else { return }
         var marks = log
         for c in clips {
@@ -92,7 +92,7 @@ final class Clips: ObservableObject {
         reload()
     }
 
-    func purge(_ clips: [Clip]) {
+    func purge(_ clips: [Take]) {
         var marks = log
         for c in clips {
             erase(c.url)
@@ -136,10 +136,10 @@ struct RecordingsView: View {
     @State private var inBin = false
     @State private var selecting = false
     @State private var picked: Set<String> = []
-    @State private var confirmPurge: [Clip]?
+    @State private var confirmPurge: [Take]?
 
-    private var shown: [Clip] { inBin ? clips.bin : clips.files }
-    private var chosen: [Clip] { shown.filter { picked.contains($0.id) } }
+    private var shown: [Take] { inBin ? clips.bin : clips.files }
+    private var chosen: [Take] { shown.filter { picked.contains($0.id) } }
 
     var body: some View {
         Group {
@@ -192,7 +192,7 @@ struct RecordingsView: View {
         .onAppear { clips.reload() }
     }
 
-    private func card(_ c: Clip) -> some View {
+    private func card(_ c: Take) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ClipThumb(url: c.url)
                 .aspectRatio(16 / 9, contentMode: .fit)
@@ -232,19 +232,19 @@ struct RecordingsView: View {
         }
     }
 
-    private func play(_ c: Clip) {
+    private func play(_ c: Take) {
         let player = AVPlayerViewController()
         player.player = AVPlayer(url: c.url)
         UIApplication.top?.present(player, animated: true) { player.player?.play() }
     }
 
-    private func edit(_ c: Clip) {
+    private func edit(_ c: Take) {
         let editor = VideoEditor(file: c.url, busy: Recording.shared.recorder.activeFile?.lastPathComponent)
         editor.onSaved = { Task { @MainActor in clips.reload() } }
         UIApplication.top?.present(editor, animated: true)
     }
 
-    private func studio(_ c: Clip) {
+    private func studio(_ c: Take) {
         let studio = StudioViewController(movie: c.url)
         studio.onSaved = { Task { @MainActor in clips.reload() } }
         UIApplication.top?.present(studio, animated: true)
