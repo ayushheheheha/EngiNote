@@ -36,9 +36,14 @@ enum PaperPDF {
             ctx.beginPage()
             draw(paper, template: template ?? paper.template, color: color ?? paper.color, in: rect, ctx.cgContext)
         }
-        let page = PDFDocument(data: data)?.page(at: 0)
-        return (page?.copy() as? PDFPage) ?? PDFPage()
+        guard let doc = PDFDocument(data: data), let page = doc.page(at: 0) else { return PDFPage() }
+        keep.append(doc)
+        return page
     }
+
+    /// A page drawn from a PDF is empty once that PDF is gone (seen in the simulator: an added page came out
+    /// blank, and was saved blank). So the one-page PDFs made here are kept while the app runs; they are tiny.
+    private static var keep: [PDFDocument] = []
 
     static func draw(_ p: Paper, template: String, color: String, in rect: CGRect, _ c: CGContext) {
         UIColor(hex: color).setFill()

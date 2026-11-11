@@ -53,6 +53,7 @@ jobs:
             sleep 2
           }
           look 1-ink -selftest -demo-ink
+          look 1b-added-page -demo-panes -demo-full
           look 2-panes -demo-panes
           look 3-wide -demo-wide
           look 4-full -demo-full

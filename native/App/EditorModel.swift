@@ -376,7 +376,9 @@ final class EditorModel: NSObject, ObservableObject, Identifiable, PDFPageOverla
 
     // MARK: zoom
 
-    @objc private func scaleChanged() {
+    @objc private func scaleChanged() { DispatchQueue.main.async { [weak self] in self?.scaled() } }
+
+    private func scaled() {
         let fit = view.scaleFactorForSizeToFit
         zoom = fit > 0 ? view.scaleFactor / fit : 1
         isFit = abs(zoom - 1) < 0.005
@@ -392,7 +394,7 @@ final class EditorModel: NSObject, ObservableObject, Identifiable, PDFPageOverla
     }
     private var magnet: Task<Void, Never>?
 
-    @objc private func pageTurned() { pageIndex = currentIndex }
+    @objc private func pageTurned() { DispatchQueue.main.async { [weak self] in if let self { self.pageIndex = self.currentIndex } } }
 
     func fitWidth() { UIView.animate(withDuration: 0.2) { self.view.scaleFactor = self.view.scaleFactorForSizeToFit } }
     func zoom(by f: CGFloat) {
@@ -568,6 +570,8 @@ final class EditorModel: NSObject, ObservableObject, Identifiable, PDFPageOverla
 
     // MARK: the promo cover: EngiKode's title page in front of the note (the web app's cover.js, drawn once into a PDF page)
 
+    private var coverSource: PDFDocument?
+
     func toggleCover() async {
         if hasCover {
             if document.pageCount > 1, let p = document.page(at: 0) {
@@ -583,7 +587,8 @@ final class EditorModel: NSObject, ObservableObject, Identifiable, PDFPageOverla
             js.evaluateScript(EditorModel.plainScript(cover))
             guard let html = js.evaluateScript("doc(false)")?.toString(), html.hasPrefix("<!doctype"),
                   let made = await HTMLRenderer.document(html: html, base: nil, height: 506),
-                  let page = made.page(at: 0)?.copy() as? PDFPage else { return Notice.shared.say("The cover could not be made.") }
+                  let page = made.page(at: 0) else { return Notice.shared.say("The cover could not be made.") }
+            coverSource = made   // the page needs its PDF alive
             document.insert(page, at: 0)
             hasCover = true
         }

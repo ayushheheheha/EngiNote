@@ -121,7 +121,7 @@ struct WorkspaceView: View {
             ZStack {
                 (chrome.wide ? Color.black : Color(uiColor: .systemGray6)).ignoresSafeArea()
                 if let model = work.front {
-                    editor(model, top: chrome.wide ? 0 : geo.safeAreaInsets.top)
+                    editor(model, top: chrome.wide ? 0 : geo.safeAreaInsets.top, narrow: geo.size.width < 1000)
                         .frame(width: geo.size.width, height: chrome.wide ? min(geo.size.height, geo.size.width * 9 / 16) : geo.size.height)
                         .clipped()
                 }
@@ -162,10 +162,10 @@ struct WorkspaceView: View {
         .task { await SelfTest.run(work, chrome) }
     }
 
-    private func editor(_ model: EditorModel, top: CGFloat) -> some View {
+    private func editor(_ model: EditorModel, top: CGFloat, narrow: Bool) -> some View {
         VStack(spacing: 6) {
             if !chrome.full, !chrome.toolsOff {
-                TopBar(model: model, chrome: chrome, back: work.toLibrary)
+                TopBar(model: model, chrome: chrome, narrow: narrow, back: work.toLibrary)
                     .padding(.horizontal, 10).padding(.top, top + 8)
             }
             if tabsOn, !chrome.wide, !chrome.toolsOff, !work.open.isEmpty {
@@ -187,6 +187,10 @@ struct WorkspaceView: View {
                 if model.hasSelection {
                     LassoBar(model: model).padding(.bottom, 84).frame(maxHeight: .infinity, alignment: .bottom)
                 }
+                if narrow, !chrome.full, !chrome.toolsOff {
+                    ZoomStrip(model: model).scaleEffect(0.8, anchor: .topLeading).padding(.leading, 10).padding(.top, 2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
                 if chrome.calc { CalcPane(open: $chrome.calc) }
                 // the small arrow that puts the tools away, and brings them back
                 Button { withAnimation(.spring(duration: 0.3)) { chrome.toolsOff.toggle() } } label: {
@@ -207,6 +211,7 @@ struct WorkspaceView: View {
 struct TopBar: View {
     @ObservedObject var model: EditorModel
     @ObservedObject var chrome: Chrome
+    let narrow: Bool   // the iPad upright: the name and the zoom give their room to the tools
     let back: () -> Void
     @State private var name = ""
 
@@ -215,13 +220,13 @@ struct TopBar: View {
             HStack(spacing: 2) {
                 IconButton(symbol: "chevron.left", label: "Back to library", action: back)
                 TextField("Name", text: $name)
-                    .font(.callout.weight(.semibold)).frame(width: 190).submitLabel(.done)
+                    .font(.callout.weight(.semibold)).frame(width: narrow ? 96 : 190).submitLabel(.done)
                     .onSubmit { model.rename(name); name = model.info.name }
             }
             .tint(.primary)
             .padding(.leading, 6).padding(.trailing, 14).frame(height: 52)
             .glass()
-            ZoomStrip(model: model)
+            if !narrow { ZoomStrip(model: model) }
             Tray(model: model, chrome: chrome, vertical: false)
                 .frame(height: 52)
                 .clipShape(Capsule())

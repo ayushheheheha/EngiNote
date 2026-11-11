@@ -22,7 +22,7 @@ struct Chip: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.semibold))
-            .padding(.horizontal, 12).frame(minWidth: 36, minHeight: 34)
+            .lineLimit(1).padding(.horizontal, 10).frame(minWidth: 36, minHeight: 34)
             .foregroundStyle(on ? Color.white : .primary)
             .background(on ? Color.accentColor : Color.primary.opacity(configuration.isPressed ? 0.18 : 0.08), in: Capsule())
     }
@@ -234,7 +234,7 @@ struct Tray: View {
         if !vertical {
             IconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen") { chrome.full = true }
         }
-        Button("16:9") { chrome.setWide(!chrome.wide) }.buttonStyle(Chip(on: chrome.wide)).accessibilityLabel("Lecture mode, 16 by 9 window")
+        Button { chrome.setWide(!chrome.wide) } label: { Text("16:9").font(.system(size: vertical ? 11 : 15, weight: .semibold)).fixedSize() }.buttonStyle(Chip(on: chrome.wide)).accessibilityLabel("Lecture mode, 16 by 9 window")
         IconButton(symbol: "plus.rectangle.portrait", label: "Add space: a blank page after this one") { model.addPage() }
         IconButton(symbol: "rectangle.and.text.magnifyingglass", label: "Promo cover", on: model.hasCover) {
             guard !busy else { return }

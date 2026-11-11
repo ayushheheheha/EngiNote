@@ -43,7 +43,7 @@ extension EditorModel {
         for (i, pen) in Prefs.shared.pens.enumerated() where pen.type != "laser" { wave(120 + CGFloat(i) * 60, pen) }
         let rough = (0...40).map { i -> CGPoint in
             let a = CGFloat(i) / 40 * 2 * .pi
-            return CGPoint(x: (300 + (110 + 5 * sin(a * 7)) * cos(a)) * k, y: (640 + (80 + 4 * cos(a * 5)) * sin(a)) * k)
+            return CGPoint(x: (300 + (110 + 2 * sin(a * 7)) * cos(a)) * k, y: (640 + (80 + 1.5 * cos(a * 5)) * sin(a)) * k)
         }
         let ink = PKInk(.pen, color: .systemBlue)
         if let clean = Shapes.recognise(rough, min: 24 * Double(k)) { strokes.append(EditorModel.stroke(clean, ink: ink, width: 4 * k)) } else {
