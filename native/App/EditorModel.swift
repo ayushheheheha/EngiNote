@@ -115,6 +115,8 @@ final class EditorModel: NSObject, ObservableObject, Identifiable, PDFPageOverla
         return o
     }
 
+    var firstOverlay: PageOverlay? { document.page(at: 0).flatMap { overlays[$0] } }
+
     private func overlay(of canvas: PKCanvasView) -> PageOverlay? { canvas.superview as? PageOverlay }
 
     // MARK: tools

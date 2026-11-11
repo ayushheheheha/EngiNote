@@ -79,6 +79,7 @@ final class Calc: ObservableObject {
         let keys = js?.evaluateScript("calcKeys()")?.toString().flatMap { $0.data(using: .utf8) }
         rows = keys.flatMap { try? JSONDecoder().decode([[Key]].self, from: $0) } ?? []
         take(js?.evaluateScript("calcState()"))
+        if SelfTest.has("-demo-panes") { for (r, c) in [(3, 3), (0, 6), (3, 5), (4, 6)] { press(r, c) } }   // 1 ÷ 3 =
     }
 
     func press(_ r: Int, _ c: Int) { take(js?.evaluateScript("calcPress(\(r), \(c))")) }

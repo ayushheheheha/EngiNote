@@ -377,7 +377,7 @@ final class PageOverlay: UIView, UITextViewDelegate {
         s.path.interpolatedPoints(by: .distance(10)).map { $0.location.applying(s.transform) }
     }
 
-    private func select(in path: UIBezierPath) {
+    func select(in path: UIBezierPath) {
         let strokes = canvas.drawing.strokes
         selStrokes = strokes.indices.filter { i in
             let pts = points(of: strokes[i])

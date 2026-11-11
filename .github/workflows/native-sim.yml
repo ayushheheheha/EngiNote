@@ -44,9 +44,23 @@ jobs:
         run: |
           mkdir out
           xcrun simctl install "$UDID" native/build/Build/Products/Debug-iphonesimulator/EngiNoteNative.app
-          xcrun simctl launch "$UDID" com.engikode.enginote.native -selftest-html
-          sleep 25
-          xcrun simctl io "$UDID" screenshot out/library.png
+          look() { # name, then the launch flags
+            name=$1; shift
+            xcrun simctl launch "$UDID" com.engikode.enginote.native "$@"
+            sleep 14
+            xcrun simctl io "$UDID" screenshot "out/$name.png"
+            xcrun simctl terminate "$UDID" com.engikode.enginote.native || true
+            sleep 2
+          }
+          look 1-ink -selftest -demo-ink
+          look 2-panes -demo-panes
+          look 3-wide -demo-wide
+          look 4-full -demo-full
+          look 5-cover -demo-cover
+          look 6-library -demo-library
+          xcrun simctl launch "$UDID" com.engikode.enginote.native
+          sleep 6
+          xcrun simctl io "$UDID" screenshot out/7-reopened.png
           xcrun simctl spawn "$UDID" log show --last 2m --style compact --predicate 'process == "EngiNoteNative"' > out/app.log 2>&1 || true
           echo "--- faults and errors the app logged:"; grep -E " (F|E) " out/app.log | head -40 || true
           echo "--- crash reports:"; ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i enginote || echo none

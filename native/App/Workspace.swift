@@ -159,6 +159,7 @@ struct WorkspaceView: View {
         }
         .onChange(of: work.frontID, initial: true) { _, _ in rec.title = work.front?.info.name ?? "" }
         .onDisappear { if chrome.wide { chrome.setWide(false) } }
+        .task { await SelfTest.run(work, chrome) }
     }
 
     private func editor(_ model: EditorModel, top: CGFloat) -> some View {
