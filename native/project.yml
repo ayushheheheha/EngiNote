@@ -15,6 +15,22 @@ targets:
     scheme: {}
     sources:
       - path: App
+      # the web-based app's own recorder, camera bubble, browser, video editor and Studio: the same files, not copies
+      - path: ../ios/App
+        includes:
+          - Recorder.swift
+          - CameraBubble.swift
+          - BrowserPane.swift
+          - VideoEditor.swift
+          - "Studio*.swift"
+          - "studio-*.mp4"
+      # run as plain scripts (no web view): the calculator's sums, and the promo cover's page
+      - path: ../calc.js
+        buildPhase: resources
+      - path: ../cover.js
+        buildPhase: resources
+      - path: ../cover-fonts.js
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.engikode.enginote.native
@@ -44,6 +60,9 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: EngiNote records your voice with the screen when you make a recording.
+        NSPhotoLibraryAddUsageDescription: EngiNote saves a recording to Photos when you choose to.
+        NSCameraUsageDescription: EngiNote shows you in a camera bubble over your note when you switch it on.
         UIFileSharingEnabled: true # the notebooks are visible in the Files app
         LSSupportsOpeningDocumentsInPlace: true
         CFBundleDocumentTypes:

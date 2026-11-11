@@ -32,6 +32,7 @@ struct NotebookInfo: Codable, Identifiable, Hashable {
     var folderID: String?
     var updatedAt: Date
     var paper: Paper
+    var imported: Bool?   // made from a PDF or a web page, not a blank notebook
 }
 
 struct LibraryIndex: Codable {

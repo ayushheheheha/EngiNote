@@ -118,7 +118,7 @@ enum BackupImport {
         let ms = (d["updatedAt"] as? Double) ?? Date().timeIntervalSince1970 * 1000
         let folder = (d["folder"] as? String).flatMap { store.hasFolder($0) ? $0 : nil }
         return store.add(id: id, name: name, paper: p, folderID: folder, updatedAt: Date(timeIntervalSince1970: ms / 1000),
-                         document: doc, drawings: drawings) != nil
+                         document: doc, drawings: drawings, imported: true) != nil
     }
 
     private static func makeStroke(_ s: [String: Any], points: [[Double]], top: Double, scale: Double) -> PKStroke? {

@@ -74,12 +74,12 @@ final class Store: ObservableObject {
     }
 
     @discardableResult
-    func add(id: String?, name: String, paper: Paper, folderID: String?, updatedAt: Date, document: PDFDocument, drawings: [Data]) -> NotebookInfo? {
+    func add(id: String?, name: String, paper: Paper, folderID: String?, updatedAt: Date, document: PDFDocument, drawings: [Data], imported: Bool = false) -> NotebookInfo? {
         let nid = safeID(id)
         try? FileManager.default.createDirectory(at: dir(nid), withIntermediateDirectories: true)
         guard document.write(to: pdfURL(nid)) else { return nil }
         if !drawings.isEmpty { writeDrawings(nid, drawings) }
-        let info = NotebookInfo(id: nid, name: name, folderID: folderID, updatedAt: updatedAt, paper: paper)
+        let info = NotebookInfo(id: nid, name: name, folderID: folderID, updatedAt: updatedAt, paper: paper, imported: imported ? true : nil)
         notebooks.append(info)
         save()
         return info
@@ -95,7 +95,7 @@ final class Store: ObservableObject {
         do { try FileManager.default.copyItem(at: url, to: pdfURL(nid)) } catch { return nil }
         var paper = Paper()
         paper.template = "plain"
-        let info = NotebookInfo(id: nid, name: url.deletingPathExtension().lastPathComponent, folderID: folder, updatedAt: Date(), paper: paper)
+        let info = NotebookInfo(id: nid, name: url.deletingPathExtension().lastPathComponent, folderID: folder, updatedAt: Date(), paper: paper, imported: true)
         notebooks.append(info)
         save()
         return info
@@ -138,6 +138,49 @@ final class Store: ObservableObject {
         save()
     }
 
+    // MARK: backup: every notebook and folder in one file, and back
+
+    /// ponytail: the whole library is held in memory while the file is made or read; a library of several GB
+    /// of PDFs needs a streamed archive instead.
+    func backupFile() -> URL? {
+        var all: [String: Data] = [:]
+        let fm = FileManager.default
+        guard let walk = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
+        for case let file as URL in walk where (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            let parts = file.pathComponents.suffix(file.deletingLastPathComponent().lastPathComponent == root.lastPathComponent ? 1 : 2)
+            if let d = try? Data(contentsOf: file) { all[parts.joined(separator: "/")] = d }
+        }
+        let enc = PropertyListEncoder()
+        enc.outputFormat = .binary
+        let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withFullDate])
+        let url = fm.temporaryDirectory.appendingPathComponent("EngiNote backup \(stamp).enginote")
+        guard let data = try? enc.encode(all), (try? data.write(to: url)) != nil else { return nil }
+        return url
+    }
+
+    /// Adds what the backup holds and this library does not. Nothing here is overwritten or deleted.
+    func restore(from url: URL) -> String {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              let all = try? PropertyListDecoder().decode([String: Data].self, from: data),
+              let idx = all["index.json"].flatMap({ try? dec.decode(LibraryIndex.self, from: $0) }) else { return "That file is not an EngiNote backup." }
+        var made = 0
+        for f in idx.folders where !hasFolder(f.id) { folders.append(f) }
+        for n in idx.notebooks where !hasNotebook(n.id) && n.id == safeID(n.id) {
+            try? FileManager.default.createDirectory(at: dir(n.id), withIntermediateDirectories: true)
+            for (path, d) in all where path.hasPrefix(n.id + "/") {
+                try? d.write(to: dir(n.id).appendingPathComponent((path as NSString).lastPathComponent))
+            }
+            notebooks.append(n)
+            made += 1
+        }
+        save()
+        return "Restored \(made) notebook\(made == 1 ? "" : "s"). \(idx.notebooks.count - made) were already here."
+    }
+
     func hasNotebook(_ id: String) -> Bool { notebooks.contains { $0.id == id } }
     func hasFolder(_ id: String) -> Bool { folders.contains { $0.id == id } }
 
@@ -152,6 +195,19 @@ final class Store: ObservableObject {
         let enc = PropertyListEncoder()
         enc.outputFormat = .binary
         if let d = try? enc.encode(drawings) { try? d.write(to: inkURL(id), options: .atomic) }
+    }
+
+    func itemsURL(_ id: String) -> URL { dir(id).appendingPathComponent("items.json") }
+
+    /// The text boxes and pictures of each page.
+    func readItems(_ id: String) -> [[Item]] {
+        guard let d = try? Data(contentsOf: itemsURL(id)) else { return [] }
+        return (try? JSONDecoder().decode([[Item]].self, from: d)) ?? []
+    }
+
+    func writeItems(_ id: String, _ items: [[Item]]) {
+        if items.allSatisfy(\.isEmpty) { try? FileManager.default.removeItem(at: itemsURL(id)); return }
+        if let d = try? JSONEncoder().encode(items) { try? d.write(to: itemsURL(id), options: .atomic) }
     }
 
     /// Written beside the old file and swapped in, because the open document may be reading the old one.

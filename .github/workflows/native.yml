@@ -9,6 +9,10 @@ on:
     branches: [main]
     paths:
       - 'native/**'
+      - 'ios/App/**'
+      - 'calc.js'
+      - 'cover.js'
+      - 'cover-fonts.js'
       - '.github/workflows/native.yml'
 
 permissions:
@@ -37,7 +41,7 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee build.log | grep -E "error:|warning:|BUILD" | sort -u | head -60
+            build 2>&1 | tee build.log | grep -E "error:|BUILD" | sort -u | head -150
           test ${PIPESTATUS[0]} -eq 0
 
       - name: Package the .ipa

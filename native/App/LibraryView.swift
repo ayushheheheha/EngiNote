@@ -6,7 +6,12 @@ struct LibraryView: View {
     @EnvironmentObject private var store: Store
     @State private var selection: String? = "all"          // "all", or a folder's id
     @State private var query = ""
-    @State private var opened: NotebookInfo?
+    @StateObject private var work = Workspace()
+    @ObservedObject private var notice = Notice.shared
+    @AppStorage("sort") private var sort = "edited"
+    @AppStorage("theme") private var theme = ""
+    @Environment(\.colorScheme) private var scheme
+    @State private var kind = "all"                       // all, notebook, import
     @State private var showNew = false
     @State private var importing = false
     @State private var busy: String?
@@ -25,13 +30,14 @@ struct LibraryView: View {
         let isFolder: Bool
     }
 
-    private var currentFolder: String? { selection == "all" ? nil : selection }
+    private var currentFolder: String? { selection == "all" || selection == "recordings" ? nil : selection }
 
     private var shown: [NotebookInfo] {
         store.notebooks
             .filter { selection == "all" || selection == nil || $0.folderID == selection }
             .filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { kind == "all" || ($0.imported == true) == (kind == "import") }
+            .sorted { sort == "name" ? $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending : $0.updatedAt > $1.updatedAt }
     }
 
     var body: some View {
@@ -40,15 +46,18 @@ struct LibraryView: View {
         } detail: {
             detail
         }
-        .fullScreenCover(item: $opened) { info in
-            EditorView(info: info, store: store)
+        .fullScreenCover(isPresented: $work.showing) {
+            WorkspaceView(work: work).preferredColorScheme(theme == "dark" ? .dark : theme == "light" ? .light : nil)
         }
+        .preferredColorScheme(theme == "dark" ? .dark : theme == "light" ? .light : nil)
+        .onAppear { work.restore(store) }
+        .onChange(of: notice.text) { _, t in if let t, !work.showing { message = t; notice.text = nil } }
         .sheet(isPresented: $showNew) {
             NewNotebookSheet { name, paper, pages in
-                if let info = store.create(name: name, paper: paper, pages: pages, folder: currentFolder) { opened = info }
+                if let info = store.create(name: name, paper: paper, pages: pages, folder: currentFolder) { work.show(info) }
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .json, .html], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .json, .html, .data], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { Task { for u in urls { await handle(u) } } }
         }
         .onOpenURL { url in Task { await handle(url) } }
@@ -61,10 +70,10 @@ struct LibraryView: View {
                 if let doc = await HTMLRenderer.document(html: html, base: nil) {
                     var paper = Paper()
                     paper.template = "plain"
-                    opened = store.add(id: nil, name: "HTML test", paper: paper, folderID: nil, updatedAt: Date(), document: doc, drawings: [])
+                    if let info = store.add(id: nil, name: "HTML test", paper: paper, folderID: nil, updatedAt: Date(), document: doc, drawings: [], imported: true) { work.show(info) }
                 }
             } else if CommandLine.arguments.contains("-selftest"), store.notebooks.isEmpty {
-                opened = store.create(name: "Self test", paper: Paper(), pages: 2, folder: nil)
+                if let info = store.create(name: "Self test", paper: Paper(), pages: 2, folder: nil) { work.show(info) }
             }
         }
         .alert("Rename", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
@@ -86,7 +95,7 @@ struct LibraryView: View {
             }
         }
         .confirmationDialog("Delete this notebook?", isPresented: Binding(get: { deleteNotebook != nil }, set: { if !$0 { deleteNotebook = nil } }), titleVisibility: .visible) {
-            Button("Delete \(deleteNotebook?.name ?? "")", role: .destructive) { if let n = deleteNotebook { store.delete(n.id) } }
+            Button("Delete \(deleteNotebook?.name ?? "")", role: .destructive) { if let n = deleteNotebook { work.close(n.id); store.delete(n.id) } }
         } message: { Text("This cannot be undone.") }
         .confirmationDialog("Delete this folder?", isPresented: Binding(get: { deleteFolder != nil }, set: { if !$0 { deleteFolder = nil } }), titleVisibility: .visible) {
             Button("Delete \(deleteFolder?.name ?? "")", role: .destructive) {
@@ -119,6 +128,7 @@ struct LibraryView: View {
     private var sidebar: some View {
         List(selection: $selection) {
             Label("All notebooks", systemImage: "books.vertical").tag("all" as String?)
+            Label("Recordings", systemImage: "video").tag("recordings" as String?)
             Section("Folders") {
                 ForEach(store.folders) { f in
                     Label(f.name, systemImage: "folder")
@@ -136,8 +146,15 @@ struct LibraryView: View {
         }
         .navigationTitle("EngiNote")
         .toolbar {
-            ToolbarItem(placement: .bottomBar) {
+            ToolbarItemGroup(placement: .bottomBar) {
                 Button { newFolderName = ""; newFolderAsk = true } label: { Label("New folder", systemImage: "folder.badge.plus") }
+                Menu {
+                    Button("Save a backup file") {
+                        if let url = store.backupFile() { UIApplication.share([url]) } else { message = "The backup could not be made." }
+                    }
+                    Button("Restore from a file") { importing = true }
+                } label: { Label("Backup", systemImage: "externaldrive") }
+                Button { theme = scheme == .dark ? "light" : "dark" } label: { Label("Light or dark", systemImage: "circle.lefthalf.filled") }
             }
         }
     }
@@ -147,28 +164,59 @@ struct LibraryView: View {
     private var detail: some View {
         let title = selection == "all" || selection == nil ? "All notebooks" : (store.folders.first { $0.id == selection }?.name ?? "Folder")
         return Group {
-            if shown.isEmpty {
-                ContentUnavailableView(query.isEmpty ? "No notebooks yet" : "No matches", systemImage: "square.and.pencil",
-                                       description: Text(query.isEmpty ? "Tap + to make one, or import a PDF, a web page or an EngiNote backup." : "Try another name."))
+            if selection == "recordings" {
+                RecordingsView()
+            } else if shown.isEmpty && !query.isEmpty {
+                ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try another name."))
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 28, alignment: .top)], spacing: 32) {
+                        createTile
                         ForEach(shown) { info in card(info) }
                     }
                     .padding(28)
                 }
             }
         }
-        .navigationTitle(title)
+        .navigationTitle(selection == "recordings" ? "Recordings" : title)
         .searchable(text: $query, prompt: "Search")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if selection != "recordings" {
+                    Picker("Show", selection: $kind) {
+                        Text("All").tag("all")
+                        Text("Notebooks").tag("notebook")
+                        Text("Imported").tag("import")
+                    }
+                    .pickerStyle(.segmented).frame(width: 280)
+                    Menu {
+                        Picker("Order", selection: $sort) {
+                            Text("Last edited").tag("edited")
+                            Text("Name").tag("name")
+                        }
+                    } label: { Image(systemName: "arrow.up.arrow.down") }
+                }
                 Menu {
                     Button { showNew = true } label: { Label("New notebook", systemImage: "square.and.pencil") }
                     Button { importing = true } label: { Label("Import PDF, web page or backup", systemImage: "square.and.arrow.down") }
                 } label: { Image(systemName: "plus") }
             }
         }
+    }
+
+    /// The first card: a new notebook.
+    private var createTile: some View {
+        Button { showNew = true } label: {
+            VStack(spacing: 10) {
+                Image(systemName: "plus").font(.system(size: 34, weight: .light))
+                Text("Create").font(.headline)
+            }
+            .frame(maxWidth: .infinity).frame(height: 250)
+            .background(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 6])).foregroundStyle(.secondary))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("New notebook")
     }
 
     private func card(_ info: NotebookInfo) -> some View {
@@ -182,11 +230,11 @@ struct LibraryView: View {
             Text(info.updatedAt, style: .date).font(.caption).foregroundStyle(.secondary)
         }
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
-        .onTapGesture { opened = info }
+        .onTapGesture { work.show(info) }
         .accessibilityAddTraits(.isButton)
         .draggable(info.id)
         .contextMenu {
-            Button { opened = info } label: { Label("Open", systemImage: "book") }
+            Button { work.show(info) } label: { Label("Open", systemImage: "book") }
             Button { renameText = info.name; renameTarget = Rename(id: info.id, isFolder: false) } label: { Label("Rename", systemImage: "pencil") }
             Button { store.duplicate(info.id) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
             Menu {
@@ -200,8 +248,15 @@ struct LibraryView: View {
     // MARK: importing
 
     private func handle(_ url: URL) async {
+        if url.pathExtension.lowercased() == "enginote" {
+            busy = "Restoring…"
+            await Task.yield()
+            message = store.restore(from: url)
+            busy = nil
+            return
+        }
         if url.pathExtension.lowercased() == "pdf" {
-            if let info = store.importPDF(at: url, folder: currentFolder) { opened = info } else { message = "That PDF could not be opened." }
+            if let info = store.importPDF(at: url, folder: currentFolder) { work.show(info) } else { message = "That PDF could not be opened." }
             return
         }
         if ["html", "htm"].contains(url.pathExtension.lowercased()) {
@@ -218,7 +273,7 @@ struct LibraryView: View {
             var paper = Paper()
             paper.template = "plain"
             if let info = store.add(id: nil, name: url.deletingPathExtension().lastPathComponent, paper: paper,
-                                    folderID: currentFolder, updatedAt: Date(), document: doc, drawings: []) { opened = info }
+                                    folderID: currentFolder, updatedAt: Date(), document: doc, drawings: [], imported: true) { work.show(info) }
             return
         }
         busy = "Reading the backup…"
@@ -241,8 +296,8 @@ struct NewNotebookSheet: View {
 
     private let colours: [(String, String, String)] = [
         ("White", "#ffffff", "#c8ccd6"),
-        ("Cream", "#fdf6e3", "#d9cfa8"),
-        ("Dark", "#1e1e22", "#44444c"),
+        ("Cream", "#fbf2d8", "#d9cfa8"),
+        ("Black", "#111111", "#44444c"),
     ]
 
     var body: some View {
