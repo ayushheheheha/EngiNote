@@ -492,6 +492,9 @@
     <!-- On: when the recording stops, the EngiKode intro goes before it and the outro after it, by copying (no
          new video is made: ios/App/StudioWrap.swift). It can be taken off again from the recording's card. -->
     <button id="rec-wrap" class="icon-btn chip" type="button" aria-pressed="false" title="Intro and outro: put the EngiKode intro before the recording and the outro after it, as soon as you stop" aria-label="Add the intro and outro when the recording stops">Intro</button>
+    <!-- On: when the recording stops it is made again as HEVC, which takes about half the room with the same picture,
+         60 frames a second and the same sound (ios/App/StudioShrink.swift). It takes a few minutes for an hour of lecture. -->
+    <button id="rec-shrink" class="icon-btn chip" type="button" aria-pressed="false" title="Shrink: when you stop, make the video smaller (about half the size, the same picture and 60 frames a second). It takes a few minutes: keep EngiNote open" aria-label="Shrink the recording when it stops">Shrink</button>
     <!-- Intro here: there while paused. Tapped, the intro goes into the video at the very point it was paused
          (the app says where that is: Recorder.swift, writtenSeconds), and the button shows that time from then on. -->
     <button id="rec-intro-here" class="icon-btn chip" type="button" aria-pressed="false" title="Put the intro into the video here, where it is paused">Intro here</button>

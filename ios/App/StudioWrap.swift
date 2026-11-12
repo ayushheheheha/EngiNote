@@ -52,6 +52,8 @@ enum StudioWrap {
         guard marks(for: movie) == nil, intro != nil || outro != nil else { return }
         let asset = AVURLAsset(url: movie)
         guard let video = try await asset.loadTracks(withMediaType: .video).first else { throw StudioRender.error("there is no picture in this recording") }
+        // The clips are H.264 and are copied into the recording's own picture track: a shrunk (HEVC) recording cannot take them.
+        guard !StudioShrink.isShrunk(movie) else { throw StudioRender.error("this recording is already shrunk. Put the intro and outro on before shrinking, or use Studio") }
         let size = try await video.load(.naturalSize), turn = try await video.load(.preferredTransform)
         // ponytail: a recording stored turned on its side cannot take an upright clip into the same track. Studio can
         // (it draws every frame); clips made turned the same way, if such recordings turn out to be common.

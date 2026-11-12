@@ -205,7 +205,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
             recorder.resume()
             send("recorder", ["state": "recording"])
         case "stop":
-            stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false, introAt: body["introAt"] as? Double ?? 0)
+            stopRecording(because: nil, wrap: body["wrap"] as? Bool ?? false, introAt: body["introAt"] as? Double ?? 0, shrink: body["shrink"] as? Bool ?? false)
         case "status": // the check before recording (app.js): the room left on the iPad, and the battery
             let device = UIDevice.current
             device.isBatteryMonitoringEnabled = true
@@ -238,7 +238,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
 
     /// Stop, finish the movie and tell the page. `problem`: why, if it was not the user's choice.
     /// `wrap`: the bar's Intro switch is on, so the intro and outro go onto the recording at once; `introAt`: how many seconds in the intro goes.
-    private func stopRecording(because problem: String?, wrap: Bool = false, introAt: Double = 0) {
+    /// `shrink`: the bar's Shrink switch is on, so the recording is made again as HEVC, which takes about half the room (after the intro and outro, which need H.264).
+    private func stopRecording(because problem: String?, wrap: Bool = false, introAt: Double = 0, shrink: Bool = false) {
         bubbleTimer?.invalidate()
         bubbleTimer = nil
         guard recorder.isActive else {
@@ -274,12 +275,17 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 finished()
                 if let file = file, UIApplication.shared.applicationState == .active { self.share(file) }
             }
-            guard wrap, let file = file else {
+            guard wrap || shrink, let file = file else {
                 self.send("recorder", ["state": "idle", "message": message])
                 return offer()
             }
+            let next = { if shrink { self.shrink(file, then: offer) } else { offer() } }
+            guard wrap else {
+                self.send("recorder", ["state": "idle", "message": message + " Shrinking it: keep EngiNote open."])
+                return next()
+            }
             self.send("recorder", ["state": "idle", "message": message + " Adding the intro and outro: keep EngiNote open for a moment."])
-            self.wrap(file, add: true, introAt: introAt, then: offer)
+            self.wrap(file, add: true, introAt: introAt, then: next)
         }
     }
 
@@ -310,6 +316,51 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                 then?()
             }
         }
+    }
+
+    // MARK: Shrinking
+
+    private var shrinking: Set<String> = [] // the recordings being made smaller just now
+
+    /// Make a recording smaller: the same picture, frame times and sound, as HEVC (StudioShrink.swift). It takes a while
+    /// (a few minutes for an hour of lecture), and the page is told how far it has got. The recording is only replaced when
+    /// the new file is clearly smaller and whole; the page is then sent the list of recordings, with how it went.
+    private func shrink(_ file: URL, then: (() -> Void)? = nil) {
+        let name = file.lastPathComponent
+        guard shrinking.insert(name).inserted else { return }
+        UIApplication.shared.isIdleTimerDisabled = true // the screen locking would stop the work
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var note: String
+            var lastPercent = -1
+            do {
+                let outcome = try await StudioShrink.shrink(file) { fraction in
+                    let percent = Int(fraction * 20) * 5
+                    guard percent > lastPercent else { return }
+                    lastPercent = percent
+                    DispatchQueue.main.async { self?.send("shrink", ["percent": percent]) }
+                }
+                if outcome.shrunk {
+                    note = "Shrunk from \(Self.megabytes(outcome.before)) to \(Self.megabytes(outcome.after)): \(100 - outcome.after * 100 / max(1, outcome.before))% smaller."
+                } else {
+                    note = "Not shrunk: \(outcome.why ?? "nothing to gain")."
+                }
+            } catch {
+                note = "The recording could not be shrunk: \(error.localizedDescription). It is as it was."
+            }
+            let said = note
+            await MainActor.run {
+                guard let self = self else { return }
+                self.shrinking.remove(name)
+                if self.shrinking.isEmpty, !self.recorder.isActive { UIApplication.shared.isIdleTimerDisabled = false }
+                self.recordings([:], note: said)
+                then?()
+            }
+        }
+    }
+
+    /// "850 MB", "1.2 GB".
+    nonisolated private static func megabytes(_ bytes: Int) -> String {
+        bytes >= 1_000_000_000 ? String(format: "%.1f GB", Double(bytes) / 1e9) : "\(max(1, bytes / 1_000_000)) MB"
     }
 
     /// Seconds as the recording bar's clock shows them: 0:00:42.
@@ -522,6 +573,8 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                     }
                 case "wrap": // the intro and outro, on if they are off and off if they are on
                     wrap(file, add: StudioWrap.marks(for: file) == nil, introAt: body["introAt"] as? Double ?? 0)
+                case "shrink": // the same recording as HEVC, about half the size: StudioShrink.swift
+                    shrink(file)
                 default:
                     break
                 }
@@ -554,6 +607,7 @@ final class NoteViewController: UIViewController, WKUIDelegate, WKScriptMessageH
                         item["wrapped"] = true
                         item["introAt"] = marks.at ?? 0
                     }
+                    if StudioShrink.isShrunk(url) { item["shrunk"] = true }
                     return item
                 }
             let bin: [[String: Any]] = waiting.map { describe($0.file, $0.deleted) }

@@ -425,6 +425,63 @@ if FileManager.default.fileExists(atPath: realIntro.path), FileManager.default.f
     StudioWrap.forget(second)
 }
 
+// Shrink (StudioShrink.swift): the recording made again as HEVC with the same picture, frame times and sound.
+do {
+    print("shrink:")
+    let source = work.appendingPathComponent("Shrinkable 2026-11-12 10.00.00.mov")
+    try FileManager.default.copyItem(at: movie, to: source)
+    let sourceFrames = try await frames(in: source)
+    let sourceSize = try await AVURLAsset(url: source).loadTracks(withMediaType: .video)[0].load(.naturalSize)
+    let sourceColour = try average(AVURLAsset(url: source), at: 3.0)
+    let sourceBytes = StudioShrink.size(of: source)
+    check(!StudioShrink.isShrunk(source), "a recording from the recorder is not taken for a shrunk one")
+    let rate = StudioShrink.bitRate(was: 14_000_000, width: 1920, height: 1080, fps: 60), low = StudioShrink.bitRate(was: 1_000_000, width: 1920, height: 1080, fps: 60)
+    check(rate == 7_000_000 && low > 3_000_000 && low < rate, "half the old rate, but never so little that handwriting smears (\(rate), \(low))")
+
+    let hevc = work.appendingPathComponent("hevc.mov")
+    do {
+        let length = try await StudioShrink.encode(source, to: hevc, cancel: StudioCancel()) { _ in }
+        let made = AVURLAsset(url: hevc)
+        let madeFrames = try await frames(in: hevc)
+        let madeSize = try await made.loadTracks(withMediaType: .video)[0].load(.naturalSize)
+        let madeLength = try await made.load(.duration).seconds
+        let madeSounds = try await made.loadTracks(withMediaType: .audio).count
+        let madeColour = try average(made, at: 3.0)
+        print(String(format: "as HEVC: %d KB (was %d KB), %d frames of %d, %.2f s", StudioShrink.size(of: hevc) / 1000, sourceBytes / 1000, madeFrames, sourceFrames, madeLength))
+        check(StudioShrink.isShrunk(hevc), "the new file is HEVC")
+        check(madeFrames == sourceFrames, "every frame is still there (\(madeFrames) of \(sourceFrames))")
+        check(abs(madeLength - seconds) < 0.1 && abs(length - seconds) < 0.1, "as long as it was (\(madeLength) s)")
+        check(madeSize == sourceSize, "the same size (\(madeSize))")
+        check(madeSounds == 1, "the sound is still there")
+        check(abs(madeColour.r - sourceColour.r) < 0.03 && abs(madeColour.g - sourceColour.g) < 0.03 && abs(madeColour.b - sourceColour.b) < 0.03, "the colours are the same")
+        _ = try png(made, at: 3.0, to: "shrink-hevc.png")
+
+        // A shrunk recording cannot take the H.264 intro and outro, and says why rather than make a broken file.
+        let shrunkCopy = work.appendingPathComponent("Shrunk 2026-11-12 10.05.00.mov")
+        try FileManager.default.copyItem(at: hevc, to: shrunkCopy)
+        do {
+            try await StudioWrap.add(to: shrunkCopy, intro: intro, outro: outro)
+            check(false, "an intro on a shrunk recording is refused")
+        } catch { check(true, "an intro on a shrunk recording is refused (\(error.localizedDescription))") }
+        check(StudioWrap.marks(for: shrunkCopy) == nil, "and nothing is noted about it")
+    } catch {
+        check(false, "the recording is made again as HEVC: \(error)")
+    }
+
+    // The whole thing, in the recording's own file: replaced if it saved enough, else left exactly as it was.
+    let outcome = try await StudioShrink.shrink(source)
+    let after = StudioShrink.size(of: source)
+    print("shrink: \(outcome.before / 1000) KB -> \(outcome.after / 1000) KB, shrunk \(outcome.shrunk), \(outcome.why ?? "")")
+    if outcome.shrunk {
+        check(StudioShrink.isShrunk(source) && after == outcome.after && after < sourceBytes, "the recording is replaced by the smaller one")
+        check(try await frames(in: source) == sourceFrames, "it still plays through, every frame")
+    } else {
+        check(after == sourceBytes && !StudioShrink.isShrunk(source), "not worth it: the recording is left as it was")
+    }
+    let again = try await StudioShrink.shrink(source)
+    check(again.shrunk == false && StudioShrink.size(of: source) == after, "shrinking twice changes nothing the second time")
+}
+
 try? FileManager.default.removeItem(at: work)
 print(failures.isEmpty ? "\nALL GOOD" : "\nFAILED: \(failures.count)")
 exit(failures.isEmpty ? 0 : 1)

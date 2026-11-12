@@ -241,10 +241,12 @@ addEventListener('recordings', e => {
   if (e.detail?.message) notify(e.detail.message); // how something asked of a recording went
 });
 
+addEventListener('shrink', e => notify(`Shrinking the recording: ${e.detail?.percent ?? 0}%. Keep EngiNote open.`)); // how far the app has got (StudioShrink.swift)
 const VIDEO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>';
 const SHARE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
 const STUDIO_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L14 10M13 5l1-2 1 2 2 1-2 1-1 2-1-2-2-1zM18 13l.7-1.4.7 1.4 1.4.7-1.4.7-.7 1.4-.7-1.4-1.4-.7z"/></svg>';
 const WRAP_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="6" width="8" height="12" rx="1.5"/><path d="M5 8v8M2.5 10v4M19 8v8M21.5 10v4"/></svg>';
+const SHRINK_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l5 5M9 4v5H4M20 4l-5 5M15 4v5h5M4 20l5-5M9 20v-5H4M20 20l-5-5M15 20v-5h5"/></svg>';
 const EDIT_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11 9M8.5 16l11-9"/></svg>';
 // Seconds as the recording bar's clock shows them: 0:00:42.
 const hms = s => `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s) % 60).padStart(2, '0')}`;
@@ -391,6 +393,20 @@ function makeVideoCard(video, inBin = false) {
     askVideos({ action: 'wrap', name: video.name });
   };
   edit.before(wrap);
+  // The same video as HEVC: about half the size, the same picture, frame times and sound (ios/App/StudioShrink.swift). Only if you tap it.
+  const shrink = document.createElement('button');
+  shrink.type = 'button';
+  shrink.className = 'icon-btn card-copy';
+  shrink.title = video.shrunk ? 'Already shrunk' : 'Shrink: make this recording about half the size, with the same picture and 60 frames a second';
+  shrink.setAttribute('aria-label', shrink.title);
+  shrink.setAttribute('aria-pressed', Boolean(video.shrunk));
+  shrink.innerHTML = SHRINK_ICON;
+  shrink.onclick = () => {
+    if (video.shrunk) return notify('This recording is already shrunk.');
+    notify('Shrinking the recording: it takes a few minutes. Keep EngiNote open.');
+    askVideos({ action: 'shrink', name: video.name });
+  };
+  wrap.before(shrink);
   if (inBin) { // a deleted recording is only chosen, restored or deleted for good: none of the card's own buttons
     card.querySelector('.card-more')?.remove();
     card.querySelector('.card-actions')?.remove();
@@ -2194,6 +2210,7 @@ if (shellRecorder) {
   const enhanceOn = option(recEnhance, 'recEnhance');
   const countOn = option($('rec-count-btn'), 'recCount', undefined, true); // 3, 2, 1 before a recording starts
   const wrapOn = option($('rec-wrap'), 'recWrap'); // the intro and outro go onto the recording as it stops; asked at the stop, so it can still be changed while recording
+  const shrinkOn = option($('rec-shrink'), 'recShrink'); // the recording is made smaller (HEVC) once it has stopped and has its intro; asked at the stop too
   // Intro here: paused, the intro can be put at that very point of the video (`pausedAt`, seconds into it, as the
   // app counts them). `introMark` is where it is to go (null: nowhere yet); it goes in, with the outro, when the
   // recording stops, whether or not Intro is on.
@@ -2283,7 +2300,7 @@ if (shellRecorder) {
     recBtn.disabled = recPause.disabled = true;
     shellRecorder.postMessage(state === 'idle'
       ? { action: 'start', quality: recQuality.value, microphone: micOn(), enhance: micOn() && enhanceOn(), title: nameInput.value, wide: document.body.classList.contains('wide') }
-      : { action: 'stop', wrap: introMark !== null || wrapOn(), introAt: introMark ?? 0 });
+      : { action: 'stop', wrap: introMark !== null || wrapOn(), introAt: introMark ?? 0, shrink: shrinkOn() });
   };
 
   // The countdown: 3, 2, 1 in the middle of the note, and only then is the app asked to record. So
@@ -2506,7 +2523,7 @@ window.webkit?.messageHandlers?.shared?.postMessage({ ready: true }); // ready f
 async function runProbe(args) {
   document.body.classList.toggle('nowc', args.has('nowc'));
   if (args.has('raw')) setSmoothing(false); // the strokes as drawn, to compare
-  const docs = (await db.all()).filter(d => d.strokes?.length).sort((a, b) => b.strokes.length - a.strokes.length);
+  const docs = (await db.all()).filter(d => args.has('pdf') ? d.pdf : d.strokes?.length).sort((a, b) => (b.strokes?.length ?? 0) - (a.strokes?.length ?? 0));
   if (!docs[0]) return showLibrary();
   if (args.has('dump')) try { localStorage.setItem('probeDump', JSON.stringify(docs[0].strokes)); } catch { /* too big or blocked */ } // for tuning ink on the PC
   await openDoc(docs[0].id);
@@ -2514,9 +2531,15 @@ async function runProbe(args) {
   if (args.has('wide') && !document.body.classList.contains('wide')) wideBtn.click(); // "&wide": the 16:9 window
   if (args.has('full')) setFull(true); // "&full": the full-screen layout
   await new Promise(done => setTimeout(done, 5000)); // the note settles (it fits itself to the window as it loads) before it is zoomed
-  setZoom(Number(args.get('probe')) || 1);
-  const [x0, y0, x1, y1] = boxOf(docs[0].strokes[docs[0].strokes.length >> 1]);
+  const target = Number(args.get('probe')) || 1, pinched = args.has('pinch'); // "&pinch": reach that zoom by a pinch from 100% ("&pinch=end": and let go)
+  setZoom(pinched ? 1 : target);
+  const strokes = docs[0].strokes ?? [], [x0, y0, x1, y1] = strokes.length ? boxOf(strokes[strokes.length >> 1]) : [300, 300, 600, 600];
   place([scroller.clientWidth / 2 - (x0 + x1) / 2 * zoom, scroller.clientHeight / 2 - (y0 + y1) / 2 * zoom]);
+  if (pinched) {
+    const [left, top] = origin(), cx = left + scroller.clientWidth / 2, cy = top + scroller.clientHeight / 2;
+    pinchMove(target, cx, cy, [(cx - left - pos[0]) / zoom, (cy - top - pos[1]) / zoom]);
+    if (args.get('pinch') === 'end') { await new Promise(done => setTimeout(done, 1500)); pinchEnd(); }
+  }
 }
 const probe = new URLSearchParams(location.hash.slice(1));
 // PDF notes saved before the pictures had a store of their own carry them in the note: moved out one note
