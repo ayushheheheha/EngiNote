@@ -12,6 +12,7 @@ import { createCalc } from './calc.js';
 import { createBrowser } from './browser.js';
 import { createTabs, MAX_TABS } from './tabs.js';
 import { inBand } from './fitband.js';
+import { zoomIn, settleIn } from './motion.js';
 import { createItems, cleanItems, readImage, itemHtml, TEXT_SIZES } from './items.js';
 
 const PAGE_WIDTH = 900;  // fixed layout width (CSS px) so imported pages never reflow under the ink
@@ -1758,7 +1759,10 @@ async function swapTo(id) {
   current = doc;
   openTabs.activate(tab);
   pagesStale = true;
+  const fromLibrary = !document.body.classList.contains('editing');
+  const cardBox = fromLibrary ? grid.querySelector(`.card[data-id="${CSS.escape(id)}"]`)?.getBoundingClientRect() : null; // the card the note grows out of
   document.body.classList.add('editing'); // must be visible before fitZoom() measures the scroller
+  if (fromLibrary && !document.body.classList.contains('recording')) zoomIn($('editor'), cardBox); // not into a recording: it would be in the video
   layoutTabs();
   nameInput.value = doc.name;
   space.set(false);
@@ -1797,7 +1801,8 @@ async function closeDoc(keep = true) {
   current = null;
   frame.srcdoc = ''; // drop the document; also guarantees a reload if the same note is reopened
   showPages();
-  showLibrary();
+  showLibrary(); // its first step shows the library at once
+  if (!document.body.classList.contains('recording')) settleIn($('library'));
   keepSession();
 }
 $('back-btn').onclick = () => closeDoc();

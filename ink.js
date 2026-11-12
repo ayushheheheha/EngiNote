@@ -11,6 +11,7 @@ const ERASER_RADIUS = 8;          // page px, on top of half the stroke's width;
 // pixels only, which turns a slow diagonal into stairs. Zoomed in, a line drawn straight through
 // them looks lumpy. So the ink follows a point that trails the tip, pulled along behind it:
 const SMOOTH = 3;                 // screen px the ink trails the tip by, about; bumps shorter than a few times this are ironed out
+const LEAD_MAX = 30;               // screen px: the furthest the ink is drawn ahead of the tip, by the browser's prediction (toGuess)
 const MIN_STEP = 2;               // screen px between the points that are kept
 const MAX_HISTORY = 100;
 // A glow stroke is its line drawn several times over: wide and faint underneath, then narrower and
@@ -434,6 +435,20 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     return true;
   }
 
+  // Where the pen is about to be, for show: the last point the browser predicts (a frame or two ahead; Safari has
+  // it on recent iPadOS, elsewhere there is none and nothing changes). Added to the stroke being drawn as one more
+  // point, and taken off again by the caller once drawn, so a stroke never keeps a guess. Not further than
+  // LEAD_MAX screen px from the tip: a wild guess is worse than none.
+  function toGuess(e, a, box) {
+    const guess = e.getPredictedEvents?.().at(-1);
+    if (!guess || Math.hypot(guess.clientX - a.tip[0], guess.clientY - a.tip[1]) > LEAD_MAX) return false;
+    const pt = toPoint(guess, box), pts = a.stroke.points, last = pts[pts.length - 1];
+    if (!pt || (pt[0] === last[0] && pt[1] === last[1])) return false;
+    if (last.length > 2) pt.push(last[2]);
+    pts.push(pt);
+    return true;
+  }
+
   // Start waiting for the tip to be held still: when it lands, and again each time it leaves the
   // spot it was resting on. (A wait left over from a stroke that has ended does nothing: see snap.)
   function rest(a) {
@@ -785,10 +800,11 @@ export function createInk(svg, { scroller, surface = svg, onChange, onZoom, onZo
     if (a.path) {
       // Drawn right up to the tip, so no gap shows between it and the trailing ink. That last
       // stretch is only for show until the smoothed point has passed over it.
-      const reached = toTip(a, box);
+      const reached = toTip(a, box), ahead = toGuess(e, a, box);
       // ponytail: rebuilds the stroke's whole path string per move, which grows with its length;
       // build it incrementally if strokes of several thousand points ever lag.
       setData(a.path, strokeData(a.stroke, false));
+      if (ahead) pts.pop();
       if (reached) pts.pop();
     }
   }
