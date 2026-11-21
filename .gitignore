@@ -20,3 +20,12 @@ android/build/
 android/app/build/
 *.apk
 *.jks
+
+# Recorder app: made on the build machine, never committed
+recorder/EngiNoteRecorder.xcodeproj/
+recorder/App/Info.plist
+recorder/App/Recorder.entitlements
+recorder/Broadcast/Info.plist
+recorder/Broadcast/Broadcast.entitlements
+recorder/build/
+recorder/Payload/

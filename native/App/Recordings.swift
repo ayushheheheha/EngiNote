@@ -137,6 +137,7 @@ struct RecordingsView: View {
     @State private var selecting = false
     @State private var picked: Set<String> = []
     @State private var confirmPurge: [Take]?
+    @State private var shrinking: Set<String> = []   // being made smaller just now
 
     private var shown: [Take] { inBin ? clips.bin : clips.files }
     private var chosen: [Take] { shown.filter { picked.contains($0.id) } }
@@ -145,7 +146,7 @@ struct RecordingsView: View {
         Group {
             if shown.isEmpty {
                 ContentUnavailableView(inBin ? "Nothing deleted" : "No recordings yet", systemImage: inBin ? "trash" : "video",
-                                       description: Text(inBin ? "Deleted recordings wait here for \(Int(Clips.keepDays)) days." : "Open a note and tap Record in the bar at the foot of the screen."))
+                                       description: Text(inBin ? "Deleted recordings wait here for \(Int(Clips.keepDays)) days." : "Recordings you make show up here."))
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 230, maximum: 320), spacing: 24, alignment: .top)], spacing: 28) {
@@ -226,9 +227,33 @@ struct RecordingsView: View {
                         clips.reload()
                     }
                 } label: { Label(c.wrapped ? "Remove the intro and outro" : "Add the intro and outro", systemImage: "film") }
+                if !shrinking.contains(c.id) {
+                    Button { shrink(c) } label: { Label("Shrink (HEVC, about half the size)", systemImage: "arrow.down.right.and.arrow.up.left") }
+                }
                 Button { UIApplication.share([c.url]) } label: { Label("Share", systemImage: "square.and.arrow.up") }
                 Button(role: .destructive) { clips.delete([c]) } label: { Label("Delete", systemImage: "trash") }
             }
+        }
+    }
+
+    /// Make it again as HEVC (StudioShrink): replaced only when the new file is clearly smaller and whole.
+    private func shrink(_ c: Take) {
+        shrinking.insert(c.id)
+        Notice.shared.say("Shrinking \(c.name): keep the app open. It takes a few minutes for an hour.")
+        UIApplication.shared.isIdleTimerDisabled = true   // the screen locking would stop the work
+        Task {
+            let said = await Task.detached(priority: .userInitiated) { () -> String in
+                do {
+                    let o = try await StudioShrink.shrink(c.url)
+                    return o.shrunk ? "Shrunk to \(ByteCountFormatter.string(fromByteCount: Int64(o.after), countStyle: .file)), \(100 - o.after * 100 / max(1, o.before))% smaller." : "Not shrunk: \(o.why ?? "nothing to gain")."
+                } catch {
+                    return "Could not shrink it: \(error.localizedDescription). It is as it was."
+                }
+            }.value
+            shrinking.remove(c.id)
+            if shrinking.isEmpty { UIApplication.shared.isIdleTimerDisabled = false }
+            Notice.shared.say(said)
+            clips.reload()
         }
     }
 

@@ -1,0 +1,78 @@
+# Builds EngiNote Recorder (recorder/) on a cloud Mac and publishes it as a release named
+# recorder-build-N. It is NOT marked "latest", so the web-based app's download link (ios.yml) is untouched.
+# The .ipa is unsigned: the sideloading tool signs it when it installs it.
+name: iPad recorder app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'recorder/**'
+      - 'native/App/Recordings.swift'
+      - 'native/App/Look.swift'
+      - 'ios/App/VideoEditor.swift'
+      - 'ios/App/Studio*'
+      - '.github/workflows/recorder.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+
+      - name: Check the pause arithmetic
+        working-directory: recorder
+        run: |
+          cat Shared/Shared.swift Tests/check.swift > "$RUNNER_TEMP/check.swift"
+          swiftc -o "$RUNNER_TEMP/check" "$RUNNER_TEMP/check.swift"
+          "$RUNNER_TEMP/check"
+
+      - name: Generate the Xcode project
+        working-directory: recorder
+        run: xcodegen generate
+
+      - name: Build
+        working-directory: recorder
+        run: |
+          xcodebuild \
+            -project EngiNoteRecorder.xcodeproj -scheme EngiNoteRecorder -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "error:|BUILD" | sort -u | head -150
+          test ${PIPESTATUS[0]} -eq 0
+
+      - name: Package the .ipa
+        working-directory: recorder
+        run: |
+          app=build/Build/Products/Release-iphoneos/EngiNoteRecorder.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleVersion' -c 'Print :MinimumOSVersion' "$app/Info.plist"
+          ls "$app/PlugIns" # the broadcast extension must be inside
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/PlugIns/Broadcast.appex/Info.plist"
+          mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry EngiNoteRecorder.ipa Payload
+          ls -l EngiNoteRecorder.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EngiNoteRecorder-ipa
+          path: recorder/EngiNoteRecorder.ipa
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "recorder-build-${{ github.run_number }}" recorder/EngiNoteRecorder.ipa \
+            --title "EngiNote Recorder for iPad, build ${{ github.run_number }}" \
+            --notes "Unsigned build of commit ${{ github.sha }}. Sideload this .ipa. Installs beside the two EngiNote apps." \
+            --latest=false

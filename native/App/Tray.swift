@@ -1,32 +1,7 @@
 import PhotosUI
 import SwiftUI
 
-// MARK: the look: glass capsules, chips, round icon buttons
-
-extension View {
-    /// iPadOS 26's Liquid Glass where there is one, a blurred pane before that.
-    func glass() -> some View { glass(Capsule()) }
-
-    @ViewBuilder func glass<S: Shape>(_ shape: S) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape)
-        } else {
-            self.background(.ultraThinMaterial, in: shape).overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-        }
-    }
-}
-
-/// A word in a capsule that is on or off (16:9, F, Mic, Auto…).
-struct Chip: ButtonStyle {
-    var on = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.callout.weight(.semibold))
-            .lineLimit(1).padding(.horizontal, 10).frame(minWidth: 36, minHeight: 34)
-            .foregroundStyle(on ? Color.white : .primary)
-            .background(on ? Color.accentColor : Color.primary.opacity(configuration.isPressed ? 0.18 : 0.08), in: Capsule())
-    }
-}
+// MARK: round icon buttons (the glass capsules and chips are in Look.swift)
 
 struct IconButton: View {
     let symbol: String

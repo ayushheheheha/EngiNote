@@ -1,0 +1,102 @@
+# EngiNote Recorder: records the whole iPad (any app) with the EngiNote recorder's features. Two parts:
+# the app (record panel, recordings, Studio, editor) and a ReplayKit broadcast extension, which iPadOS runs
+# while the screen is recorded. Built on a cloud Mac by .github/workflows/recorder.yml.
+# Shares code with the other two apps instead of copying it: the Studio engine, the video editor, the intro and
+# outro clips (ios/App), the recordings list and the look (native/App).
+
+name: EngiNoteRecorder
+
+options:
+  deploymentTarget:
+    iOS: "17.5"
+
+targets:
+  EngiNoteRecorder:
+    type: application
+    platform: iOS
+    scheme: {}
+    sources:
+      - path: App
+      - path: Shared
+      - path: ../ios/App
+        includes:
+          - VideoEditor.swift
+          - "Studio*.swift"
+          - "studio-*.mp4"
+      - path: ../native/App
+        includes:
+          - Recordings.swift
+          - Look.swift
+    dependencies:
+      - target: Broadcast
+    entitlements:
+      path: App/Recorder.entitlements
+      properties:
+        # The sideloading tool gives both parts the group "group.<installed bundle id>" (Shared.swift finds it).
+        com.apple.security.application-groups: [group.com.engikode.enginote.recorder]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.engikode.enginote.recorder
+        PRODUCT_NAME: EngiNoteRecorder
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "2,1"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: EngiNote Recorder
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Keeps the app running while other apps are in front: the voice, the bubble, the pause, the join.
+        UIBackgroundModes: [audio]
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: EngiNote Recorder records your voice with the screen.
+        NSCameraUsageDescription: EngiNote Recorder shows you in the camera bubble while you record.
+        NSPhotoLibraryAddUsageDescription: EngiNote Recorder saves a recording to Photos when you choose to.
+        UIFileSharingEnabled: true # recordings are in Files: On My iPad > EngiNote Recorder
+        LSSupportsOpeningDocumentsInPlace: true
+
+  Broadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Broadcast
+      - path: Shared
+    entitlements:
+      path: Broadcast/Broadcast.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.engikode.enginote.recorder]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.engikode.enginote.recorder.broadcast
+        PRODUCT_NAME: Broadcast
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "2,1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: Broadcast/Info.plist
+      properties:
+        CFBundleDisplayName: EngiNote Recorder # the name in the broadcast sheet and Control Center
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
